@@ -238,16 +238,4 @@ MIDI In → Parser → Normalizer → Latency Engine → Scheduler → Actuator 
 10. 
 
 
----
 
-✅ **Bénéfices du design proposé**
-
-* Modularité maximale
-* Adaptabilité à tous types d’instruments simples
-* Interface épurée et no-code friendly
-* Prête pour extension multi-instrument et multi-bus
-* Temps réel stable et latence compensée
-* Sécurité électrique et mécanique assurée
-
-
-Veux‑tu que je fasse ce schéma ?
