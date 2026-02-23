@@ -1,0 +1,181 @@
+
+# 1️⃣ Objectifs principaux de l’UI
+
+* **Clarté immédiate** → l’utilisateur comprend ce qu’il peut faire dès la page principale
+* **No-code / adaptable** → ajouter/modifier actionneurs, instruments, CC facilement
+* **Monitoring temps réel** → notes actives, latences, bus, PCA, état sécurité
+* **Guidage à la première utilisation** → configuration initiale obligatoire pour éviter erreurs matérielles
+
+---
+
+# 2️⃣ Points à suivre / contrôler dans l’UI
+
+### 2.1 Configuration initiale (setup wizard)
+
+* Forcer à configurer au premier accès après upload
+* Vérifier :
+
+  * Réseau WiFi
+  * Bus I²C disponibles
+  * Actionneurs connectés
+  * Instruments actifs
+  * Assignation des canaux MIDI
+* Boutons “Tester chaque actionneur” avec retour visuel
+* Validation obligatoire avant accès interface complète
+
+---
+
+### 2.2 Gestion des instruments
+
+* Ajouter / supprimer instruments
+* Configurer canal MIDI et type d’instrument
+* Lier les actionneurs à l’instrument
+* Profils d’actionneurs : frappe / alterné / gratter / touche / hit-and-hold
+* Activation / désactivation instrument
+
+---
+
+### 2.3 Gestion des actionneurs
+
+* Liste des actionneurs PCA avec :
+
+  * Nom / ID
+  * Type (servo / solénoïde)
+  * Bus I²C et OE associé
+  * Mode de fonctionnement
+  * Angle min/max / vitesse / latence
+* Test individuel (note On / note Off / CC)
+* Visualisation “en temps réel” de l’état des actionneurs
+
+---
+
+### 2.4 Mapping MIDI
+
+* Notes MIDI → actionneurs
+* CC → servos
+* Gestion multi-instruments / multi-canaux
+* Drag & drop ou sélection rapide d’actionneur depuis piano virtuel
+
+---
+
+### 2.5 Monitoring et sécurité
+
+* Afficher :
+
+  * Bus I²C actifs
+  * État OE des PCA
+  * Latence réelle des actionneurs
+  * Consommation estimée
+  * Alertes safety (surintensité, timeout, solénoïde bloqué)
+* Visualisation piano(s) avec notes actives en temps réel
+
+---
+
+### 2.6 Paramètres avancés
+
+* Calibration audio (si micro INMP441 actif)
+* Ajustement latence par actionneur
+* Fréquences PWM des PCA pour servos / solénoïdes
+* Activation/désactivation bus I²C
+* Sauvegarde / restauration config JSON
+
+---
+
+# 3️⃣ Structuration de l’interface
+
+Pour rester **modulaire et scalable**, l’UI peut être organisée en **pages ou sections dynamiques** :
+
+1. **Accueil / Dashboard**
+
+   * Aperçu rapide de tous les instruments
+   * Notes actives, consommation, alertes
+
+2. **Configuration initiale (setup wizard)**
+
+   * Obligatoire première connexion
+   * Séquence guidée : WiFi → Bus I²C → PCA → Actionneurs → Instruments → Test
+
+3. **Instruments**
+
+   * Liste instruments
+   * Ajout / édition / suppression
+   * Mapping notes et CC
+
+4. **Actionneurs**
+
+   * Liste complète PCA
+   * Visualisation état temps réel
+   * Test actionneur individuel
+
+5. **MIDI / Mapping**
+
+   * Assignation canal MIDI / actionneur
+   * Piano virtuel pour test visuel
+
+6. **Calibration**
+
+   * Auto-calibration audio
+   * Ajustement latence / profil servo
+
+7. **Monitoring / Logs**
+
+   * Temps réel, alertes, queue scheduler, consommation
+
+8. **Paramètres avancés**
+
+   * PWM bus
+   * Limites sécurité
+   * OE bus
+   * Sauvegarde / restauration
+
+---
+
+# 4️⃣ UX / ergonomie
+
+* **Épurée** : éviter les menus imbriqués
+* **Feedback temps réel** : piano virtuel + indicateur actionneur
+* **Guidage** : première page obligatoire
+* **Modularité** : ajout d’instruments / actionneurs via UI, sans recompiler
+* **Responsiveness** : interface adaptative tablettes / PC
+* **Couleurs et codes visuels** : bus actifs, actionneurs en marche, alertes
+
+---
+
+# 5️⃣ Première connexion (setup wizard)
+
+### Étapes recommandées :
+
+1. Connexion WiFi / IP ESP32
+2. Scan bus I²C → afficher PCA détectés
+3. Affecter OE pins et bus activé/désactivé
+4. Affecter actionneurs aux PCA et tester
+5. Créer premier instrument / canal MIDI
+6. Tester notes et CC sur piano virtuel
+7. Sauvegarder configuration → débloquer interface complète
+
+> La première configuration doit être **verrouillée jusqu’à validation**, pour éviter d’envoyer des signaux PWM non préparés aux actionneurs.
+
+---
+
+# 6️⃣ Modularité
+
+* Chaque section de l’UI correspond à un **module de configuration / monitoring**.
+* Backend ESP32 expose une API REST ou WebSocket pour :
+
+  * Lire l’état actionneur / bus / PCA
+  * Envoyer commandes / test actionneur
+  * Mettre à jour configuration JSON
+* Chaque module est **plug-and-play** → tu peux ajouter instruments ou actionneurs sans changer le code web.
+
+---
+
+# 7️⃣ Synthèse des bonnes pratiques UI
+
+* Première page obligatoire pour setup initial
+* Dashboard clair pour monitoring temps réel
+* Piano(s) visuels + mapping MIDI pour chaque instrument
+* Sections modulaires pour instruments, actionneurs, MIDI, calibration
+* Feedback immédiat pour chaque interaction
+* Sauvegarde automatique et restauration facile
+
+
