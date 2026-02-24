@@ -9,6 +9,8 @@ ConfigManager::ConfigManager()
       _instrument_count(0),
       _routing_count(0),
       _version(CONFIG_VERSION) {
+    memset(&_wifi_config, 0, sizeof(_wifi_config));
+    memset(&_midi_input_config, 0, sizeof(_midi_input_config));
     memset(_actuators, 0, sizeof(_actuators));
     memset(_instruments, 0, sizeof(_instruments));
     memset(&_wifi_config, 0, sizeof(_wifi_config));
@@ -56,6 +58,28 @@ bool ConfigManager::load() {
 
     // Version
     _version = doc["version"] | CONFIG_VERSION;
+
+    // WiFi
+    JsonObject wifiObj = doc["wifi"].as<JsonObject>();
+    if (!wifiObj.isNull()) {
+        strlcpy(_wifi_config.ssid, wifiObj["ssid"] | "", sizeof(_wifi_config.ssid));
+        strlcpy(_wifi_config.password, wifiObj["password"] | "", sizeof(_wifi_config.password));
+        strlcpy(_wifi_config.hostname, wifiObj["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
+        _wifi_config.enabled = wifiObj["enabled"] | true;
+        _wifi_config.ap_fallback = wifiObj["ap_fallback"] | WIFI_AP_FALLBACK;
+    }
+
+    // MIDI Input
+    JsonObject midiObj = doc["midi_input"].as<JsonObject>();
+    if (!midiObj.isNull()) {
+        _midi_input_config.serial_enabled = midiObj["serial_enabled"] | true;
+        _midi_input_config.udp_enabled = midiObj["udp_enabled"] | true;
+        _midi_input_config.rtp_enabled = midiObj["rtp_enabled"] | true;
+        _midi_input_config.udp_port = midiObj["udp_port"] | MIDI_UDP_PORT;
+        _midi_input_config.rtp_port = midiObj["rtp_port"] | MIDI_RTP_PORT;
+        _midi_input_config.jitter_buffer_ms = midiObj["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
+        _midi_input_config.serial_rx_pin = midiObj["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+    }
 
     // Bus
     JsonArray busArray = doc["buses"].as<JsonArray>();
@@ -110,6 +134,24 @@ bool ConfigManager::save() {
     JsonDocument doc;
 
     doc["version"] = _version;
+
+    // WiFi
+    JsonObject wifiObj = doc["wifi"].to<JsonObject>();
+    wifiObj["ssid"] = _wifi_config.ssid;
+    wifiObj["password"] = _wifi_config.password;
+    wifiObj["hostname"] = _wifi_config.hostname;
+    wifiObj["enabled"] = _wifi_config.enabled;
+    wifiObj["ap_fallback"] = _wifi_config.ap_fallback;
+
+    // MIDI Input
+    JsonObject midiObj = doc["midi_input"].to<JsonObject>();
+    midiObj["serial_enabled"] = _midi_input_config.serial_enabled;
+    midiObj["udp_enabled"] = _midi_input_config.udp_enabled;
+    midiObj["rtp_enabled"] = _midi_input_config.rtp_enabled;
+    midiObj["udp_port"] = _midi_input_config.udp_port;
+    midiObj["rtp_port"] = _midi_input_config.rtp_port;
+    midiObj["jitter_buffer_ms"] = _midi_input_config.jitter_buffer_ms;
+    midiObj["serial_rx_pin"] = _midi_input_config.serial_rx_pin;
 
     // Bus
     JsonArray busArray = doc["buses"].to<JsonArray>();
@@ -360,6 +402,11 @@ void ConfigManager::serializeInstrument(const InstrumentConfig& inst, JsonObject
     for (uint8_t i = 0; i < inst.actuator_count; i++) {
         actIds.add(inst.actuator_ids[i]);
     }
+
+    JsonArray noteIds = obj["midi_notes"].to<JsonArray>();
+    for (uint8_t i = 0; i < inst.actuator_count; i++) {
+        noteIds.add(inst.midi_notes[i]);
+    }
 }
 
 void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObject& obj) {
@@ -376,6 +423,17 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
         if (inst.actuator_count < PCA_CHANNELS) {
             inst.actuator_ids[inst.actuator_count] = v.as<uint8_t>();
             inst.actuator_count++;
+        }
+    }
+
+    // Charger les notes MIDI mappées
+    memset(inst.midi_notes, MIDI_NOTE_UNMAPPED, sizeof(inst.midi_notes));
+    JsonArray noteIds = obj["midi_notes"].as<JsonArray>();
+    uint8_t noteIdx = 0;
+    for (JsonVariant v : noteIds) {
+        if (noteIdx < PCA_CHANNELS) {
+            inst.midi_notes[noteIdx] = v.as<uint8_t>();
+            noteIdx++;
         }
     }
 }

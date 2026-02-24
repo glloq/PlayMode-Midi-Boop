@@ -4,7 +4,7 @@
 // ============================================================================
 //
 // Architecture dual-core ESP32 :
-//   Core 0 : WiFi, Web UI, MIDI parsing (loop)
+//   Core 0 : WiFi, MIDI parsing, Web UI (loop)
 //   Core 1 : Scheduler temps réel, PCA/I²C, sécurité
 //
 // Bibliothèques requises :
@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "types.h"
+#include "midi_types.h"
 #include "pca_driver.h"
 #include "actuator_engine.h"
 #include "scheduler.h"

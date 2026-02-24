@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include "config.h"
 #include "types.h"
+#include "midi_types.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — Config Manager (JSON / LittleFS)
@@ -61,7 +62,14 @@ public:
     // Version de la config
     uint8_t getVersion() const;
 
+    // --- Accesseurs Phase 3 (WiFi + MIDI) ---
+
+    WiFiConfig* getWiFiConfig();
+    MidiInputConfig* getMidiInputConfig();
+
 private:
+    WiFiConfig _wifi_config;
+    MidiInputConfig _midi_input_config;
     BusConfig _buses[2];
     ActuatorConfig _actuators[MAX_ACTUATORS];
     uint8_t _actuator_count;
