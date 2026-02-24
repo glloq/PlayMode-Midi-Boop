@@ -25,8 +25,10 @@
 #include "scheduler.h"
 #include "config_manager.h"
 #include "safety_manager.h"
-#include "midi_input.h"
-#include "event_normalizer.h"
+#include "wifi_manager.h"
+#include "jitter_buffer.h"
+#include "midi_transport.h"
+#include "midi_dispatcher.h"
 
 // --- Objets globaux (Phase 1) ---
 PCADriver pcaDriver;
@@ -36,8 +38,12 @@ ConfigManager configManager;
 
 // --- Objets globaux (Phase 2) ---
 SafetyManager safetyManager(pcaDriver);
-MidiInput midiInput;
-EventNormalizer eventNormalizer(scheduler, configManager);
+
+// --- Objets globaux (Phase 3+4 — Pipeline MIDI) ---
+WiFiManager wifiManager;
+JitterBuffer jitterBuffer;
+MidiTransport midiTransport(jitterBuffer);
+MidiDispatcher midiDispatcher(scheduler, configManager);
 
 // --- Mode test (décommenter pour activer le test harness sans MIDI) ---
 // #define ENABLE_TEST_HARNESS
@@ -55,7 +61,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B∞p v0.2");
+    Serial.println("  PlayMode Midi B∞p v0.4");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -110,16 +116,33 @@ void setup() {
         Serial.println("[INIT] ERREUR : Scheduler");
     }
 
-    // 7. Initialiser MIDI Input (Serial + WiFi/UDP + RTP-MIDI)
-    Serial.println("\n[INIT] MIDI Input...");
-    midiInput.begin(configManager.getWiFiConfig());
+    // 7. Initialiser le WiFi Manager
+    Serial.println("\n[INIT] WiFi Manager...");
+    WiFiConfig* wifiCfg = configManager.getWiFiConfig();
+    if (wifiCfg->enabled) {
+        if (wifiManager.begin(*wifiCfg)) {
+            Serial.printf("[INIT] WiFi connecté : %s\n", wifiManager.getIP().toString().c_str());
+        } else {
+            Serial.println("[INIT] ATTENTION : WiFi non disponible");
+        }
+    } else {
+        Serial.println("[INIT] WiFi désactivé");
+    }
 
-    // 8. Initialiser l'Event Normalizer (mapping notes/CC)
-    Serial.println("\n[INIT] Event Normalizer...");
-    eventNormalizer.begin();
+    // 8. Configurer le jitter buffer et démarrer les transports MIDI
+    Serial.println("\n[INIT] MIDI Transport...");
+    MidiInputConfig* midiCfg = configManager.getMidiInputConfig();
+    jitterBuffer.setDepth(midiCfg->jitter_buffer_ms);
+    if (!midiTransport.begin(*midiCfg)) {
+        Serial.println("[INIT] ATTENTION : Aucun transport MIDI actif");
+    }
+
+    // 9. Initialiser le MIDI Dispatcher (mapping notes/CC)
+    Serial.println("\n[INIT] MIDI Dispatcher...");
+    midiDispatcher.refreshConfig();
 
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée — Phase 2");
+    Serial.println("  Initialisation terminée — Phase 4");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
@@ -134,29 +157,34 @@ void setup() {
 // LOOP — Core 0 : Pipeline MIDI complet
 // ============================================================================
 void loop() {
-    // 1. Lire les entrées MIDI et remplir le jitter buffer
-    midiInput.update();
+    // 1. Maintenance WiFi (reconnexion si nécessaire)
+    wifiManager.maintain();
 
-    // 2. Retirer les événements prêts du jitter buffer et les normaliser
-    MidiEvent midi_event;
-    while (midiInput.readEvent(midi_event)) {
-        eventNormalizer.processMidiEvent(midi_event);
+    // 2. Lire les entrées MIDI (remplit le jitter buffer)
+    midiTransport.poll();
+
+    // 3. Retirer les messages prêts du jitter buffer et les dispatcher
+    MidiMessage msg;
+    while (jitterBuffer.pop(msg)) {
+        midiDispatcher.dispatch(msg);
     }
 
-    // 3. Affichage périodique de l'état
+    // 4. Affichage périodique de l'état
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
     if (now - last_status > 5000) {
         last_status = now;
         Serial.printf("[STATUS] Sched: %d queue, %d traités | "
-                      "MIDI: %d reçus, %d routés, %d unmapped | "
+                      "MIDI: S:%d U:%d R:%d | Disp: %d routés, %d dropped | "
                       "Safety: %dmA, %d actifs%s | Heap: %d\n",
                       scheduler.getQueuedEventCount(),
                       scheduler.getProcessedCount(),
-                      midiInput.getReceivedCount(),
-                      eventNormalizer.getRoutedCount(),
-                      eventNormalizer.getUnmappedCount(),
+                      midiTransport.getSerialByteCount(),
+                      midiTransport.getUdpPacketCount(),
+                      midiTransport.getRtpPacketCount(),
+                      midiDispatcher.getDispatchedCount(),
+                      midiDispatcher.getDroppedCount(),
                       safetyManager.getEstimatedCurrentMA(),
                       safetyManager.getActiveActuatorCount(),
                       safetyManager.isKillSwitchActive() ? " [KILL]" :
