@@ -50,16 +50,16 @@
 #define MAX_INSTRUMENTS         8       // Max instruments simultanés
 
 // --- Sécurité ---
-#define SAFETY_MAX_DUTY_CYCLE           80      // % max duty cycle par actionneur
-#define SAFETY_MAX_FREQ_HZ              50      // Fréquence max de déclenchement
-#define SAFETY_WATCHDOG_MS              5000    // Timeout watchdog actionneur
-#define SAFETY_CHECK_INTERVAL_MS        10      // Fréquence vérification sécurité (ms)
-#define SAFETY_MAX_TOTAL_CURRENT_MA     5000    // Courant max total estimé (mA)
-#define SAFETY_SERVO_CURRENT_MA         250     // Courant estimé par servo actif (mA)
-#define SAFETY_SOLENOID_CURRENT_MA      500     // Courant estimé par solénoïde actif (mA)
-#define SAFETY_SOLENOID_HOLD_MA         150     // Courant estimé solénoïde en maintien (mA)
-#define SAFETY_MAX_POLYPHONY            12      // Max actionneurs actifs simultanément
-#define SAFETY_DEGRADATION_THRESHOLD_MA 4000    // Seuil dégradation gracieuse (mA)
+#define SAFETY_MAX_DUTY_CYCLE   80      // % max duty cycle par actionneur
+#define SAFETY_MAX_FREQ_HZ      50      // Fréquence max de déclenchement
+#define SAFETY_WATCHDOG_MS      5000    // Timeout watchdog actionneur
+#define SAFETY_CHECK_INTERVAL_MS    10      // Fréquence vérification sécurité (ms)
+#define SAFETY_MAX_TOTAL_CURRENT_MA 5000    // Courant max total estimé (mA)
+#define SAFETY_SERVO_CURRENT_MA     250     // Courant estimé par servo actif (mA)
+#define SAFETY_SOLENOID_CURRENT_MA  500     // Courant estimé par solénoïde actif (mA)
+#define SAFETY_SOLENOID_HOLD_MA     150     // Courant estimé solénoïde en maintien (mA)
+#define SAFETY_MAX_POLYPHONY        12      // Max actionneurs actifs simultanément
+#define SAFETY_DEGRADATION_THRESHOLD_MA 4000 // Seuil dégradation gracieuse (mA)
 
 // --- Power Manager (Phase 5) ---
 #define POWER_SERVO_BUS_MAX_MA          3000    // Budget max bus servos (mA)
@@ -72,6 +72,12 @@
 #define POWER_UPDATE_INTERVAL_MS        50      // Intervalle mise à jour stats power (ms)
 #define POWER_MAX_POLYPHONY             12      // Polyphonie max globale (par défaut)
 #define POWER_DEGRADATION_THRESHOLD_PCT 80      // Seuil % budget pour dégradation gracieuse
+
+// --- WiFi ---
+#define WIFI_DEFAULT_HOSTNAME    "midi-boop"
+#define WIFI_CONNECT_TIMEOUT_MS  10000   // Timeout connexion STA (ms)
+#define WIFI_RECONNECT_INTERVAL  5000    // Intervalle entre tentatives reconnexion (ms)
+#define WIFI_AP_FALLBACK         true    // Démarrer en AP si STA échoue
 
 // --- MIDI Input ---
 #define MIDI_SERIAL_BAUD         31250   // Baud rate MIDI standard
@@ -87,24 +93,16 @@
 #define JITTER_BUFFER_MIN_MS     10      // Délai minimum configurable
 #define JITTER_BUFFER_MAX_MS     80      // Délai maximum configurable
 
-// --- Event Normalizer ---
-#define MAX_NOTE_MAPPINGS        16      // Max mappings note par instrument
-#define MAX_CC_MAPPINGS          32      // Max mappings CC par instrument
-#define VELOCITY_CURVE_POINTS    5       // Points de la courbe de vélocité
-
-// --- WiFi ---
-#define WIFI_SSID_MAX_LEN        32
-#define WIFI_PASS_MAX_LEN        64
-#define WIFI_DEFAULT_HOSTNAME    "midi-boop"
-#define WIFI_CONNECT_TIMEOUT_MS  10000   // Timeout connexion STA (ms)
-#define WIFI_RECONNECT_INTERVAL  5000    // Intervalle entre tentatives reconnexion (ms)
-#define WIFI_AP_FALLBACK         true    // Démarrer en AP si STA échoue
+// --- Event Normalizer / Mapping ---
+#define MAX_NOTE_MAPPINGS       16      // Max mappings note par instrument (sparse, 1 par actuateur)
+#define MAX_CC_MAPPINGS         32      // Max mappings CC par instrument
+#define VELOCITY_CURVE_POINTS   5       // Points de la courbe de vélocité
 
 // --- MIDI Note Mapping ---
 #define MIDI_NOTE_UNMAPPED       0xFF    // Valeur sentinelle pour note non mappée
 
 // --- Série ---
-#define SERIAL_BAUD_RATE         115200
+#define SERIAL_BAUD_RATE        115200
 
 // --- Web Server (Phase 6) ---
 #define WEB_SERVER_PORT          80      // Port HTTP du serveur web
@@ -112,7 +110,7 @@
 #define WEB_MAX_WS_CLIENTS       4       // Max clients WebSocket simultanés
 
 // --- Config fichier ---
-#define CONFIG_FILE_PATH         "/config.json"
-#define CONFIG_VERSION           4       // v4 : ajout web server
+#define CONFIG_FILE_PATH        "/config.json"
+#define CONFIG_VERSION          4       // v4 : phase 4 pipeline + phase 5 power + phase 6 web
 
 #endif // CONFIG_H

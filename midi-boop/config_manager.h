@@ -6,7 +6,6 @@
 #include <LittleFS.h>
 #include "config.h"
 #include "types.h"
-#include "midi_types.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — Config Manager (JSON / LittleFS)
@@ -65,6 +64,9 @@ public:
     MidiRoutingConfig* getRoutingConfigs();
     uint8_t getRoutingCount() const;
     bool addRoutingConfig(const MidiRoutingConfig& routing);
+
+    // Cherche le routage pour un instrument donné (par index)
+    MidiRoutingConfig* getRoutingForInstrument(uint8_t instrument_index);
 
     // Version de la config
     uint8_t getVersion() const;

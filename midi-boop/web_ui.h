@@ -588,14 +588,14 @@ function updateDashboard(d) {
   el('heap', formatBytes(d.heap || 0));
   el('uptime', formatUptime(d.uptime_s || 0));
 
-  // MIDI
+  // MIDI Transport
   if (d.midi) {
-    el('d-midi-recv', d.midi.received || 0);
-    el('d-midi-routed', d.normalizer ? d.normalizer.routed : 0);
-    el('d-midi-unmapped', d.normalizer ? d.normalizer.unmapped : 0);
+    el('d-midi-recv', (d.midi.serial_bytes || 0) + (d.midi.udp_packets || 0) + (d.midi.rtp_packets || 0));
+    el('d-midi-routed', d.dispatcher ? d.dispatcher.dispatched : 0);
+    el('d-midi-unmapped', d.dispatcher ? d.dispatcher.dropped : 0);
   }
-  if (d.normalizer) {
-    el('d-pwr-rejected', d.normalizer.pwr_rejected || 0);
+  if (d.dispatcher) {
+    el('d-pwr-rejected', d.dispatcher.pwr_rejected || 0);
   }
 
   // Scheduler

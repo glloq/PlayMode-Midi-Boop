@@ -4,8 +4,8 @@
 #include "scheduler.h"
 #include "safety_manager.h"
 #include "power_manager.h"
-#include "event_normalizer.h"
-#include "midi_input.h"
+#include "midi_dispatcher.h"
+#include "midi_transport.h"
 #include "pca_driver.h"
 #include "actuator_engine.h"
 #include <ArduinoJson.h>
@@ -23,8 +23,8 @@ WebServer::WebServer(uint16_t port)
     , _scheduler(nullptr)
     , _safety(nullptr)
     , _power(nullptr)
-    , _normalizer(nullptr)
-    , _midi(nullptr)
+    , _dispatcher(nullptr)
+    , _transport(nullptr)
     , _pca(nullptr)
     , _engine(nullptr)
     , _last_ws_broadcast_ms(0)
@@ -33,15 +33,15 @@ WebServer::WebServer(uint16_t port)
 
 void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
                            SafetyManager* safety, PowerManager* power,
-                           EventNormalizer* normalizer, MidiInput* midi,
+                           MidiDispatcher* dispatcher, MidiTransport* transport,
                            PCADriver* pca, ActuatorEngine* engine)
 {
     _config     = config;
     _scheduler  = scheduler;
     _safety     = safety;
     _power      = power;
-    _normalizer = normalizer;
-    _midi       = midi;
+    _dispatcher = dispatcher;
+    _transport  = transport;
     _pca        = pca;
     _engine     = engine;
 }
@@ -561,7 +561,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     }
 
     if (_config->addInstrument(inst)) {
-        _normalizer->reloadConfig();
+        if (_dispatcher) _dispatcher->refreshConfig();
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -669,20 +669,14 @@ void WebServer::handlePostMidi(AsyncWebServerRequest* request,
 
     _config->setMidiInputConfig(midi);
 
-    // Appliquer le jitter buffer immédiatement
-    if (_midi) {
-        _midi->setJitterDelay(midi.jitter_buffer_ms);
-        _midi->enableSerial(midi.serial_enabled);
-        _midi->enableUDP(midi.udp_enabled);
-        _midi->enableRTP(midi.rtp_enabled);
-    }
-
-    request->send(200, "application/json", "{\"ok\":true}");
+    // Note : les transports MIDI nécessitent un redémarrage pour appliquer
+    request->send(200, "application/json",
+                  "{\"ok\":true,\"note\":\"redémarrer pour appliquer MIDI\"}");
 }
 
 void WebServer::handlePostRouting(AsyncWebServerRequest* request,
                                   uint8_t* data, size_t len) {
-    if (!_config || !_normalizer) { request->send(500); return; }
+    if (!_config || !_dispatcher) { request->send(500); return; }
 
     StaticJsonDocument<2048> doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -693,57 +687,63 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
     }
 
     uint8_t inst_idx = doc["instrument"] | 0;
+    MidiRoutingConfig* routings = _config->getRoutingConfigs();
+    uint8_t routing_count = _config->getRoutingCount();
+
+    if (inst_idx >= routing_count) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid instrument index\"}");
+        return;
+    }
+
+    MidiRoutingConfig& routing = routings[inst_idx];
 
     // Notes
     JsonArray notes = doc["notes"];
     if (!notes.isNull()) {
-        // Supprimer les anciens mappings
-        MidiRoutingConfig* routing = _config->getRoutingConfigs();
-        if (inst_idx < _config->getRoutingCount()) {
-            routing[inst_idx].note_map_count = 0;
-        }
+        routing.note_map_count = 0;
         for (JsonObject nm : notes) {
-            NoteMapping mapping = {};
-            mapping.midi_note         = nm["note"] | 0;
-            mapping.actuator_id       = nm["actuator"] | 0;
-            mapping.behavior_override = nm["behavior"] | 0xFF;
-            mapping.enabled           = nm["enabled"] | true;
-            _normalizer->addNoteMapping(inst_idx, mapping);
+            if (routing.note_map_count >= MAX_NOTE_MAPPINGS) break;
+            NoteMapping& m = routing.note_map[routing.note_map_count];
+            m.midi_note         = nm["note"] | 0;
+            m.actuator_id       = nm["actuator"] | 0;
+            m.behavior_override = nm["behavior"] | 0xFF;
+            m.enabled           = nm["enabled"] | true;
+            routing.note_map_count++;
         }
     }
 
     // CCs
     JsonArray ccs = doc["ccs"];
     if (!ccs.isNull()) {
-        MidiRoutingConfig* routing = _config->getRoutingConfigs();
-        if (inst_idx < _config->getRoutingCount()) {
-            routing[inst_idx].cc_map_count = 0;
-        }
+        routing.cc_map_count = 0;
         for (JsonObject cm : ccs) {
-            CCMapping mapping = {};
-            mapping.cc_number   = cm["cc"] | 0;
-            mapping.actuator_id = cm["actuator"] | 0;
-            mapping.target      = (CCTarget)(uint8_t)(cm["target"] | 0);
-            mapping.range_min   = cm["min"] | 0;
-            mapping.range_max   = cm["max"] | 127;
-            mapping.enabled     = cm["enabled"] | true;
-            _normalizer->addCCMapping(inst_idx, mapping);
+            if (routing.cc_map_count >= MAX_CC_MAPPINGS) break;
+            CCMapping& c = routing.cc_map[routing.cc_map_count];
+            c.cc_number   = cm["cc"] | 0;
+            c.actuator_id = cm["actuator"] | 0;
+            c.target      = (CCTarget)(uint8_t)(cm["target"] | 0);
+            c.range_min   = cm["min"] | 0;
+            c.range_max   = cm["max"] | 127;
+            c.enabled     = cm["enabled"] | true;
+            routing.cc_map_count++;
         }
     }
 
     // Velocity curve
     JsonArray vel = doc["velocity_curve"];
     if (!vel.isNull()) {
-        VelocityCurvePoint points[VELOCITY_CURVE_POINTS];
-        uint8_t count = 0;
+        routing.velocity_curve_count = 0;
         for (JsonObject vp : vel) {
-            if (count >= VELOCITY_CURVE_POINTS) break;
-            points[count].input  = vp["in"] | 0;
-            points[count].output = vp["out"] | 0;
-            count++;
+            if (routing.velocity_curve_count >= VELOCITY_CURVE_POINTS) break;
+            routing.velocity_curve[routing.velocity_curve_count].input  = vp["in"] | 0;
+            routing.velocity_curve[routing.velocity_curve_count].output = vp["out"] | 0;
+            routing.velocity_curve_count++;
         }
-        _normalizer->setVelocityCurve(inst_idx, points, count);
     }
+
+    // Recharger les tables de lookup du dispatcher
+    _dispatcher->refreshConfig();
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -817,7 +817,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
     _config->loadDefaults();
-    if (_normalizer) _normalizer->reloadConfig();
+    if (_dispatcher) _dispatcher->refreshConfig();
     request->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -932,7 +932,7 @@ void WebServer::handleDeleteInstrument(AsyncWebServerRequest* request) {
     // Pour le moment, désactiver le dernier
     instruments[count - 1] = {};
 
-    if (_normalizer) _normalizer->reloadConfig();
+    if (_dispatcher) _dispatcher->refreshConfig();
     request->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -1051,20 +1051,20 @@ void WebServer::buildStatusJSON(String& output) {
         sched["running"]   = _scheduler->isRunning();
     }
 
-    // MIDI
-    if (_midi) {
+    // MIDI Transport
+    if (_transport) {
         JsonObject midi = doc.createNestedObject("midi");
-        midi["received"]  = _midi->getReceivedCount();
-        midi["buffered"]  = _midi->getBufferedCount();
-        midi["dropped"]   = _midi->getDroppedCount();
+        midi["serial_bytes"] = _transport->getSerialByteCount();
+        midi["udp_packets"]  = _transport->getUdpPacketCount();
+        midi["rtp_packets"]  = _transport->getRtpPacketCount();
     }
 
-    // Normalizer
-    if (_normalizer) {
-        JsonObject norm = doc.createNestedObject("normalizer");
-        norm["routed"]    = _normalizer->getRoutedCount();
-        norm["unmapped"]  = _normalizer->getUnmappedCount();
-        norm["pwr_rejected"] = _normalizer->getPowerRejectedCount();
+    // Dispatcher
+    if (_dispatcher) {
+        JsonObject disp = doc.createNestedObject("dispatcher");
+        disp["dispatched"]    = _dispatcher->getDispatchedCount();
+        disp["dropped"]       = _dispatcher->getDroppedCount();
+        disp["pwr_rejected"]  = _dispatcher->getPowerRejectedCount();
     }
 
     // Safety

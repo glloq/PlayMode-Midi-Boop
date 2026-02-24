@@ -11,8 +11,8 @@ class ConfigManager;
 class Scheduler;
 class SafetyManager;
 class PowerManager;
-class EventNormalizer;
-class MidiInput;
+class MidiDispatcher;
+class MidiTransport;
 class PCADriver;
 class ActuatorEngine;
 
@@ -36,7 +36,7 @@ public:
     // Enregistre les références aux modules du système
     void setModules(ConfigManager* config, Scheduler* scheduler,
                     SafetyManager* safety, PowerManager* power,
-                    EventNormalizer* normalizer, MidiInput* midi,
+                    MidiDispatcher* dispatcher, MidiTransport* transport,
                     PCADriver* pca, ActuatorEngine* engine);
 
     // Démarre le serveur HTTP + WebSocket
@@ -66,8 +66,8 @@ private:
     Scheduler*       _scheduler;
     SafetyManager*   _safety;
     PowerManager*    _power;
-    EventNormalizer* _normalizer;
-    MidiInput*       _midi;
+    MidiDispatcher*  _dispatcher;
+    MidiTransport*   _transport;
     PCADriver*       _pca;
     ActuatorEngine*  _engine;
 

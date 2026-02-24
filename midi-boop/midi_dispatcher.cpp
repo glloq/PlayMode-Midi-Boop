@@ -1,4 +1,5 @@
 #include "midi_dispatcher.h"
+#include "power_manager.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — MIDI Dispatcher (implémentation)
@@ -7,10 +8,13 @@
 MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
     : _scheduler(scheduler),
       _config(config),
+      _powerManager(nullptr),
       _dispatched_count(0),
-      _dropped_count(0) {
+      _dropped_count(0),
+      _power_rejected_count(0) {
     memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
+    memset(_routing_cache, 0, sizeof(_routing_cache));
 }
 
 void MidiDispatcher::dispatch(const MidiMessage& msg) {
@@ -33,7 +37,6 @@ void MidiDispatcher::dispatch(const MidiMessage& msg) {
             break;
 
         default:
-            // Ignorer les autres types de messages pour l'instant
             break;
     }
 }
@@ -42,6 +45,7 @@ void MidiDispatcher::refreshConfig() {
     // Réinitialiser les tables de lookup
     memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
+    memset(_routing_cache, 0, sizeof(_routing_cache));
 
     InstrumentConfig* instruments = _config.getInstruments();
     uint8_t count = _config.getInstrumentCount();
@@ -56,6 +60,9 @@ void MidiDispatcher::refreshConfig() {
 
         // Calculer la latence max pour cet instrument
         _max_latency_ms[i] = computeMaxLatency(instruments[i]);
+
+        // Mettre en cache le pointeur vers la config de routage
+        _routing_cache[i] = _config.getRoutingForInstrument(i);
     }
 
     Serial.printf("[MIDI-DISP] Config rechargée : %d instruments mappés\n", count);
@@ -69,11 +76,18 @@ uint32_t MidiDispatcher::getDroppedCount() const {
     return _dropped_count;
 }
 
+uint32_t MidiDispatcher::getPowerRejectedCount() const {
+    return _power_rejected_count;
+}
+
+void MidiDispatcher::setPowerManager(PowerManager* pm) {
+    _powerManager = pm;
+}
+
 // ============================================================================
 // Gestion Note On
 // ============================================================================
 void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
-    // Trouver l'instrument pour ce canal
     int8_t inst_idx = _channel_to_instrument[msg.channel];
     if (inst_idx < 0) {
         _dropped_count++;
@@ -82,7 +96,6 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 
     InstrumentConfig& inst = _config.getInstruments()[inst_idx];
 
-    // Trouver l'actionneur pour cette note
     int8_t act_slot = findActuatorForNote(inst, msg.data1);
     if (act_slot < 0) {
         _dropped_count++;
@@ -91,33 +104,35 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 
     uint8_t actuator_id = inst.actuator_ids[act_slot];
 
-    // Trouver la config de l'actionneur pour la compensation de latence
-    ActuatorConfig* actuators = _config.getActuators();
-    uint8_t act_count = _config.getActuatorCount();
-    uint16_t actuator_latency = inst.default_latency_ms;
+    // Compensation de latence
+    ActuatorConfig* act_config = findActuatorConfig(actuator_id);
+    uint16_t actuator_latency = act_config ? act_config->latency_ms : inst.default_latency_ms;
+    uint16_t compensation_us = (_max_latency_ms[inst_idx] - actuator_latency) * 1000;
 
-    for (uint8_t i = 0; i < act_count; i++) {
-        if (actuators[i].id == actuator_id) {
-            actuator_latency = actuators[i].latency_ms;
-            break;
+    // Appliquer la courbe de vélocité
+    uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);
+
+    // Phase 5 : vérifier le budget énergétique avant activation
+    if (_powerManager && act_config) {
+        if (!_powerManager->canActivate(*act_config, inst_idx, velocity)) {
+            _power_rejected_count++;
+            return;
         }
     }
 
-    // Compensation de latence :
-    // L'actionneur le plus lent définit le timing de base.
-    // Les actionneurs plus rapides sont retardés pour synchroniser.
-    uint16_t compensation_us = (_max_latency_ms[inst_idx] - actuator_latency) * 1000;
-
-    // Créer l'événement scheduler
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;
     evt.actuator_id = actuator_id;
     evt.action = ACTION_NOTE_ON;
-    evt.velocity = msg.data2;
+    evt.velocity = velocity;
     evt.priority = 0;
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
+        // Notifier le PowerManager de l'activation
+        if (_powerManager && act_config) {
+            _powerManager->notifyActivation(*act_config, inst_idx, velocity);
+        }
     } else {
         _dropped_count++;
     }
@@ -141,27 +156,141 @@ void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
         return;
     }
 
+    uint8_t actuator_id = inst.actuator_ids[act_slot];
+
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time();
-    evt.actuator_id = inst.actuator_ids[act_slot];
+    evt.actuator_id = actuator_id;
     evt.action = ACTION_NOTE_OFF;
     evt.velocity = 0;
     evt.priority = 0;
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
+        // Notifier le PowerManager de la désactivation
+        if (_powerManager) {
+            ActuatorConfig* act_config = findActuatorConfig(actuator_id);
+            if (act_config) {
+                _powerManager->notifyDeactivation(*act_config, inst_idx);
+            }
+        }
     } else {
         _dropped_count++;
     }
 }
 
 // ============================================================================
-// Gestion Control Change (futur : mapping CC → position servo)
+// Gestion Control Change — Phase 4
 // ============================================================================
 void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
-    // Pour l'instant, CC non traité — sera implémenté en Phase 4
-    // (mapping CC → position servo via event normalizer)
-    (void)msg;
+    int8_t inst_idx = _channel_to_instrument[msg.channel];
+    if (inst_idx < 0) {
+        _dropped_count++;
+        return;
+    }
+
+    MidiRoutingConfig* routing = _routing_cache[inst_idx];
+    if (routing == nullptr) {
+        _dropped_count++;
+        return;
+    }
+
+    bool dispatched_any = false;
+    for (uint8_t i = 0; i < routing->cc_map_count; i++) {
+        CCMapping& cc = routing->cc_map[i];
+        if (!cc.enabled) continue;
+        if (cc.cc_number != msg.data1) continue;
+
+        ActuatorConfig* act = findActuatorConfig(cc.actuator_id);
+        if (act == nullptr || !act->enabled) continue;
+
+        uint16_t mapped_value = mapCCValue(msg.data2, cc.range_min, cc.range_max);
+
+        switch (cc.target) {
+            case CC_TARGET_POSITION: {
+                // Positionnement direct du servo via scheduler
+                SchedulerEvent evt = {};
+                evt.trigger_time_us = (uint32_t)esp_timer_get_time();
+                evt.actuator_id = cc.actuator_id;
+                evt.action = ACTION_POSITION_SET;
+                evt.velocity = msg.data2;
+                evt.value = mapped_value;
+                evt.priority = 1;
+
+                if (_scheduler.pushEvent(evt)) {
+                    _dispatched_count++;
+                    dispatched_any = true;
+                }
+                break;
+            }
+
+            case CC_TARGET_AMPLITUDE:
+                act->amplitude = mapped_value;
+                dispatched_any = true;
+                break;
+
+            case CC_TARGET_SPEED:
+                act->speed_ms = mapped_value;
+                dispatched_any = true;
+                break;
+
+            case CC_TARGET_PWM_HOLD:
+                act->pwm_hold = mapped_value;
+                dispatched_any = true;
+                break;
+        }
+    }
+
+    if (!dispatched_any) {
+        _dropped_count++;
+    }
+}
+
+// ============================================================================
+// Courbe de vélocité — Phase 4
+// ============================================================================
+uint8_t MidiDispatcher::applyVelocityCurve(uint8_t instrument_index, uint8_t velocity) {
+    if (instrument_index >= MAX_INSTRUMENTS) return velocity;
+
+    MidiRoutingConfig* routing = _routing_cache[instrument_index];
+    if (routing == nullptr || routing->velocity_curve_count == 0) {
+        return velocity;
+    }
+
+    VelocityCurvePoint* curve = routing->velocity_curve;
+    uint8_t count = routing->velocity_curve_count;
+
+    // En dessous du premier point
+    if (velocity <= curve[0].input) {
+        return curve[0].output;
+    }
+
+    // Au dessus du dernier point
+    if (velocity >= curve[count - 1].input) {
+        return curve[count - 1].output;
+    }
+
+    // Interpolation linéaire entre les segments
+    for (uint8_t i = 0; i < count - 1; i++) {
+        if (velocity >= curve[i].input && velocity <= curve[i + 1].input) {
+            uint8_t in_range = curve[i + 1].input - curve[i].input;
+            if (in_range == 0) return curve[i].output;
+
+            uint8_t out_range = (curve[i + 1].output > curve[i].output)
+                ? curve[i + 1].output - curve[i].output
+                : curve[i].output - curve[i + 1].output;
+            bool ascending = curve[i + 1].output >= curve[i].output;
+
+            uint16_t offset = (uint16_t)(velocity - curve[i].input) * out_range / in_range;
+            if (ascending) {
+                return curve[i].output + (uint8_t)offset;
+            } else {
+                return curve[i].output - (uint8_t)offset;
+            }
+        }
+    }
+
+    return velocity;
 }
 
 // ============================================================================
@@ -174,6 +303,33 @@ int8_t MidiDispatcher::findActuatorForNote(const InstrumentConfig& inst, uint8_t
         }
     }
     return -1;
+}
+
+// ============================================================================
+// Recherche de config actionneur par ID
+// ============================================================================
+ActuatorConfig* MidiDispatcher::findActuatorConfig(uint8_t actuator_id) {
+    ActuatorConfig* actuators = _config.getActuators();
+    uint8_t count = _config.getActuatorCount();
+
+    for (uint8_t i = 0; i < count; i++) {
+        if (actuators[i].id == actuator_id) {
+            return &actuators[i];
+        }
+    }
+    return nullptr;
+}
+
+// ============================================================================
+// Mapping valeur CC (0-127) vers range min/max
+// ============================================================================
+uint16_t MidiDispatcher::mapCCValue(uint8_t cc_value, uint16_t range_min, uint16_t range_max) {
+    if (range_min == range_max) return range_min;
+
+    uint16_t lo = (range_min < range_max) ? range_min : range_max;
+    uint16_t hi = (range_min < range_max) ? range_max : range_min;
+
+    return lo + (uint16_t)((uint32_t)cc_value * (hi - lo) / 127);
 }
 
 // ============================================================================
