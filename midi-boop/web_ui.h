@@ -168,6 +168,8 @@ tr:hover td{background:var(--bg2)}
   <button onclick="showPage('piano')">Piano</button>
   <button onclick="showPage('power')">Power</button>
   <button onclick="showPage('safety')">Safety</button>
+  <button onclick="showPage('calibration')">Calibration</button>
+  <button onclick="showPage('test')">Test</button>
   <button onclick="showPage('settings')">Paramètres</button>
 </nav>
 
@@ -534,6 +536,194 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
+<!-- ============ CALIBRATION ============ -->
+<div class="page" id="page-calibration">
+  <div class="section-title">Calibration Acoustique</div>
+  <p style="color:var(--fg2);margin-bottom:16px;font-size:13px">
+    Mesure automatique de la latence mécanique de chaque actionneur via microphone I²S (INMP441).
+    Connectez un micro sur WS=GPIO15, SCK=GPIO14, SD=GPIO32 et placez-le près des actionneurs.
+  </p>
+
+  <!-- État courant -->
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+    <div class="card">
+      <h3>État</h3>
+      <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
+    </div>
+    <div class="card">
+      <h3>Progression</h3>
+      <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+    <div class="card">
+      <h3>Actionneur en cours</h3>
+      <div class="val" id="cal-cur-act">—</div>
+    </div>
+    <div class="card">
+      <h3>Résultats</h3>
+      <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
+    </div>
+  </div>
+
+  <!-- Boutons de contrôle -->
+  <div class="btn-row" style="margin-bottom:20px">
+    <button class="btn primary" onclick="startCalibrateAll()">▶ Calibrer tous</button>
+    <button class="btn" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
+    <button class="btn danger" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">⬛ Arrêter</button>
+    <button class="btn" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">✓ Appliquer résultats</button>
+    <button class="btn" onclick="loadCalibrateResults()" style="margin-left:auto">↻ Rafraîchir</button>
+  </div>
+
+  <!-- Sélecteur actionneur unique -->
+  <div id="cal-single-sel" style="display:none;margin-bottom:16px">
+    <label style="font-size:13px;margin-right:8px">Actionneur :</label>
+    <select id="cal-act-select" style="background:var(--bg3);border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:var(--radius)"></select>
+    <button class="btn primary" style="margin-left:8px" onclick="confirmCalibrateOne()">Démarrer</button>
+    <button class="btn" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">✕</button>
+  </div>
+
+  <!-- Tableau des résultats -->
+  <div class="section-title">Résultats de calibration</div>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Type</th>
+        <th>Latence actuelle (ms)</th>
+        <th>Latence mesurée (ms)</th>
+        <th>Mesures</th>
+        <th>État</th>
+      </tr>
+    </thead>
+    <tbody id="cal-results-table">
+      <tr><td colspan="6" style="color:var(--fg2);text-align:center">Aucun résultat — lancez une calibration</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Note config I²S -->
+  <div class="section-title" style="margin-top:24px">Configuration microphone</div>
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+    <div class="card"><h3>Pins</h3><div class="val" style="font-size:14px">WS:15 SCK:14 SD:32</div></div>
+    <div class="card"><h3>Sample Rate</h3><div class="val" style="font-size:18px">16 kHz</div></div>
+    <div class="card"><h3>Retries / actionneur</h3><div class="val" style="font-size:18px">3</div></div>
+    <div class="card"><h3>Fenêtre détection</h3><div class="val" style="font-size:18px">350 ms</div></div>
+  </div>
+</div>
+
+<!-- ============ TEST & MAINTENANCE ============ -->
+<div class="page" id="page-test">
+  <div class="section-title">Test Industriel &amp; Maintenance</div>
+
+  <!-- État courant -->
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:20px">
+    <div class="card">
+      <h3>Mode</h3>
+      <div class="val" id="test-mode" style="font-size:18px">Inactif</div>
+    </div>
+    <div class="card">
+      <h3>Progression</h3>
+      <div class="val"><span id="test-progress">0</span><span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill" id="test-bar" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+    <div class="card">
+      <h3>Actionneur</h3>
+      <div class="val" id="test-cur-act" style="font-size:18px">—</div>
+    </div>
+    <div class="card">
+      <h3>Événements envoyés</h3>
+      <div class="val" id="test-events-sent">0</div>
+    </div>
+    <div class="card">
+      <h3>Tests complétés</h3>
+      <div class="val" id="test-tests-run">0</div>
+    </div>
+  </div>
+
+  <!-- Contrôles globaux -->
+  <div class="btn-row" style="margin-bottom:20px">
+    <button class="btn danger" id="test-stop-btn" style="display:none" onclick="stopTest()">⬛ Arrêter</button>
+    <button class="btn" onclick="api('/api/test/log/clear','POST',{}).then(loadTestLog)" style="margin-left:auto">🗑 Effacer journal</button>
+    <button class="btn" onclick="loadTestStatus();loadTestLog()">↻</button>
+  </div>
+
+  <!-- === Sweep === -->
+  <div class="section-title">Sweep — Test séquentiel</div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Vélocité</label>
+        <input type="number" id="sw-vel" min="1" max="127" value="100">
+      </div>
+      <div class="form-group">
+        <label>Intervalle (ms)</label>
+        <input type="number" id="sw-interval" min="50" max="5000" value="400">
+      </div>
+      <div class="form-group">
+        <label>Durée frappe (ms)</label>
+        <input type="number" id="sw-hold" min="20" max="2000" value="120">
+      </div>
+      <div class="form-group" style="justify-content:flex-end;align-items:flex-end">
+        <label><input type="checkbox" id="sw-loop"> Boucle infinie</label>
+      </div>
+    </div>
+    <button class="btn primary" onclick="startSweep()">▶ Lancer sweep</button>
+  </div>
+
+  <!-- === Burst === -->
+  <div class="section-title">Burst — Rafale sur un actionneur</div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Actionneur</label>
+        <select id="burst-act" style="background:var(--bg3);border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:var(--radius)"></select>
+      </div>
+      <div class="form-group">
+        <label>Frappes</label>
+        <input type="number" id="burst-count" min="1" max="50" value="5">
+      </div>
+      <div class="form-group">
+        <label>Vélocité</label>
+        <input type="number" id="burst-vel" min="1" max="127" value="100">
+      </div>
+      <div class="form-group">
+        <label>Intervalle (ms)</label>
+        <input type="number" id="burst-interval" min="30" max="2000" value="150">
+      </div>
+    </div>
+    <button class="btn primary" onclick="startBurst()">▶ Lancer burst</button>
+  </div>
+
+  <!-- === Stress === -->
+  <div class="section-title">Stress — Tous actionneurs simultanés</div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px">
+    <p style="color:var(--fg2);font-size:13px;margin-bottom:12px">Déclenche tous les actionneurs actifs en même temps. Le Power Manager et le Safety Manager filtrent selon les budgets.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Vélocité</label>
+        <input type="number" id="stress-vel" min="1" max="127" value="80">
+      </div>
+      <div class="form-group">
+        <label>Durée frappe (ms)</label>
+        <input type="number" id="stress-hold" min="20" max="2000" value="120">
+      </div>
+    </div>
+    <button class="btn danger" onclick="startStress()">⚡ Stress test</button>
+  </div>
+
+  <!-- Journal -->
+  <div class="section-title">Journal des événements
+    <span style="font-size:12px;font-weight:400;color:var(--fg2);margin-left:8px">(32 derniers)</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Temps</th><th>Actionneur</th><th>Vélocité</th><th>Mode</th><th>État</th></tr>
+    </thead>
+    <tbody id="test-log-table">
+      <tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun événement</td></tr>
+    </tbody>
+  </table>
+</div>
+
 <script>
 // ============================================================================
 // State
@@ -724,6 +914,8 @@ function showPage(page) {
   if (page === 'piano') { loadInstrumentSelects(); buildPiano(); }
   if (page === 'power') loadPower();
   if (page === 'safety') loadSafety();
+  if (page === 'calibration') { loadCalibrateStatus(); loadCalibrateResults(); }
+  if (page === 'test') { loadTestStatus(); loadTestLog(); populateBurstSelect(); }
   if (page === 'settings') { loadWiFiConfig(); loadBuses(); }
 }
 
@@ -1270,12 +1462,290 @@ function esc(s) {
 }
 
 // ============================================================================
+// Calibration Acoustique (Phase 7)
+// ============================================================================
+let calPollInterval = null;
+
+async function loadCalibrateStatus() {
+  const d = await api('/api/calibrate/status');
+  if (!d) return;
+
+  const stateNames = {
+    idle:'Inactif', ambient:'Mesure ambiant…', triggering:'Déclenchement…',
+    recording:'Enregistrement…', pausing:'Pause…',
+    complete:'Terminé ✓', error:'Erreur ✗'
+  };
+  el('cal-state', stateNames[d.state] || d.state);
+  el('cal-progress', d.progress || 0);
+  el('cal-result-count', d.result_count || 0);
+
+  const bar = document.getElementById('cal-bar');
+  if (bar) bar.style.width = (d.progress || 0) + '%';
+
+  const stopBtn  = document.getElementById('cal-btn-stop');
+  const applyBtn = document.getElementById('cal-btn-apply');
+  if (stopBtn)  stopBtn.style.display  = d.running ? 'inline-block' : 'none';
+  if (applyBtn) applyBtn.style.display = (d.state === 'complete' && d.result_count > 0) ? 'inline-block' : 'none';
+
+  if (d.running) {
+    el('cal-cur-act', 'Act ' + d.current_act);
+  } else {
+    el('cal-cur-act', d.state === 'complete' ? 'Terminé' : '—');
+  }
+
+  // Arrêt du polling quand terminé
+  if (!d.running && calPollInterval) {
+    clearInterval(calPollInterval);
+    calPollInterval = null;
+    loadCalibrateResults();
+  }
+}
+
+async function loadCalibrateResults() {
+  const data = await api('/api/calibrate/results');
+  const tbody = document.getElementById('cal-results-table');
+  if (!tbody || !data || !data.length) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2);text-align:center">Aucun résultat</td></tr>';
+    return;
+  }
+
+  const typeNames = ['Servo', 'Solénoïde'];
+  let html = '';
+  for (const r of data) {
+    const hasMeasure = r.measured_ms !== null && r.measured_ms !== undefined;
+    const badge = hasMeasure
+      ? (r.success ? '<span class="badge on">OK</span>' : '<span class="badge off">Échec</span>')
+      : '<span class="badge" style="background:var(--bg3)">—</span>';
+
+    html += '<tr>';
+    html += '<td>' + r.actuator_id + '</td>';
+    html += '<td>—</td>';  // type not included in results API
+    html += '<td>' + r.current_latency + ' ms</td>';
+    html += '<td>' + (hasMeasure && r.success ? '<strong>' + r.measured_ms + ' ms</strong>' : '—') + '</td>';
+    html += '<td>' + (hasMeasure ? (r.samples_taken || 0) + '/3' : '—') + '</td>';
+    html += '<td>' + badge + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function startCalibrateAll() {
+  if (!confirm('Démarrer la calibration de tous les actionneurs ?\nAssurez-vous que le microphone est positionné et que l\'environnement est silencieux.')) return;
+  api('/api/calibrate', 'POST', { all: true }).then(r => {
+    if (r && r.ok) {
+      toast('Calibration démarrée', 'ok');
+      startCalPoll();
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function startCalibrateOne() {
+  const sel = document.getElementById('cal-single-sel');
+  const select = document.getElementById('cal-act-select');
+  if (!sel || !select) return;
+  // Peupler le select avec les actionneurs connus
+  select.innerHTML = '';
+  for (const a of actuators) {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = 'Act ' + a.id + ' (' + (a.type === 0 ? 'Servo' : 'Sol') + ' ch' + a.pca_ch + ')';
+    select.appendChild(opt);
+  }
+  sel.style.display = 'flex';
+  sel.style.alignItems = 'center';
+}
+
+function confirmCalibrateOne() {
+  const id = parseInt(document.getElementById('cal-act-select').value);
+  document.getElementById('cal-single-sel').style.display = 'none';
+  api('/api/calibrate', 'POST', { id }).then(r => {
+    if (r && r.ok) {
+      toast('Calibration démarrée pour act ' + id, 'ok');
+      startCalPoll();
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function stopCalibration() {
+  api('/api/calibrate/stop', 'POST', {}).then(() => {
+    toast('Calibration arrêtée', 'warn');
+    loadCalibrateStatus();
+  });
+}
+
+async function applyCalibrateResults() {
+  const r = await api('/api/calibrate/apply', 'POST', {});
+  if (r && r.ok) {
+    toast(r.applied + ' latences appliquées aux actionneurs', 'ok');
+    loadActuators();
+    loadCalibrateResults();
+  } else {
+    toast('Erreur lors de l\'application', 'error');
+  }
+}
+
+function startCalPoll() {
+  if (calPollInterval) clearInterval(calPollInterval);
+  loadCalibrateStatus();
+  calPollInterval = setInterval(loadCalibrateStatus, 1000);
+}
+
+function toast(msg, type) {
+  const z = document.getElementById('alert-zone');
+  if (!z) return;
+  const div = document.createElement('div');
+  div.className = 'alert ' + (type === 'ok' ? 'ok' : type === 'error' ? 'danger' : 'warn');
+  div.textContent = msg;
+  z.appendChild(div);
+  setTimeout(() => div.remove(), 4000);
+}
+
+// ============================================================================
+// Test Manager (Phase 8)
+// ============================================================================
+let testPollInterval = null;
+
+const TEST_MODE_NAMES = {
+  idle:'Inactif', sweep:'Sweep ▶', burst:'Burst ▶', stress:'Stress ▶'
+};
+
+async function loadTestStatus() {
+  const d = await api('/api/test/status');
+  if (!d) return;
+
+  el('test-mode', TEST_MODE_NAMES[d.mode] || d.mode);
+  el('test-progress', d.progress || 0);
+  el('test-events-sent', d.events_sent || 0);
+  el('test-tests-run', d.tests_run || 0);
+
+  const bar = document.getElementById('test-bar');
+  if (bar) bar.style.width = (d.progress || 0) + '%';
+
+  const stopBtn = document.getElementById('test-stop-btn');
+  if (stopBtn) stopBtn.style.display = d.running ? 'inline-block' : 'none';
+
+  if (d.running) {
+    el('test-cur-act', 'Act ' + d.current_act);
+    if (!testPollInterval) testPollInterval = setInterval(loadTestStatus, 800);
+  } else {
+    el('test-cur-act', '—');
+    if (testPollInterval) { clearInterval(testPollInterval); testPollInterval = null; }
+    loadTestLog();
+  }
+}
+
+async function loadTestLog() {
+  const data = await api('/api/test/log');
+  const tbody = document.getElementById('test-log-table');
+  if (!tbody || !data || !data.length) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun événement</td></tr>';
+    return;
+  }
+  let html = '';
+  for (const e of data) {
+    const badge = e.ok
+      ? '<span class="badge on">OK</span>'
+      : '<span class="badge off">Queue pleine</span>';
+    html += '<tr>';
+    html += '<td>' + e.t + ' ms</td>';
+    html += '<td>Act ' + e.act + '</td>';
+    html += '<td>' + e.vel + '</td>';
+    html += '<td>' + (TEST_MODE_NAMES[e.mode] || e.mode) + '</td>';
+    html += '<td>' + badge + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function startSweep() {
+  if (document.getElementById('test-stop-btn').style.display !== 'none') {
+    toast('Un test est déjà en cours', 'warn'); return;
+  }
+  const body = {
+    velocity:    parseInt(document.getElementById('sw-vel').value),
+    interval_ms: parseInt(document.getElementById('sw-interval').value),
+    hold_ms:     parseInt(document.getElementById('sw-hold').value),
+    loop:        document.getElementById('sw-loop').checked
+  };
+  api('/api/test/sweep', 'POST', body).then(r => {
+    if (r && r.ok) {
+      toast('Sweep démarré', 'ok');
+      loadTestStatus();
+      testPollInterval = testPollInterval || setInterval(loadTestStatus, 800);
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function startBurst() {
+  if (document.getElementById('test-stop-btn').style.display !== 'none') {
+    toast('Un test est déjà en cours', 'warn'); return;
+  }
+  const sel = document.getElementById('burst-act');
+  const body = {
+    id:          parseInt(sel ? sel.value : 0),
+    count:       parseInt(document.getElementById('burst-count').value),
+    velocity:    parseInt(document.getElementById('burst-vel').value),
+    interval_ms: parseInt(document.getElementById('burst-interval').value)
+  };
+  api('/api/test/burst', 'POST', body).then(r => {
+    if (r && r.ok) {
+      toast('Burst démarré (act ' + body.id + ')', 'ok');
+      loadTestStatus();
+      testPollInterval = testPollInterval || setInterval(loadTestStatus, 800);
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function startStress() {
+  if (!confirm('Lancer le stress test ?\nTous les actionneurs vont se déclencher simultanément.')) return;
+  const body = {
+    velocity: parseInt(document.getElementById('stress-vel').value),
+    hold_ms:  parseInt(document.getElementById('stress-hold').value)
+  };
+  api('/api/test/stress', 'POST', body).then(r => {
+    if (r && r.ok) {
+      toast('Stress test exécuté', 'ok');
+      setTimeout(loadTestLog, 500);
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function stopTest() {
+  api('/api/test/stop', 'POST', {}).then(r => {
+    if (r && r.ok) toast('Test arrêté', 'warn');
+    loadTestStatus();
+  });
+}
+
+function populateBurstSelect() {
+  const sel = document.getElementById('burst-act');
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (const a of actuators) {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = 'Act ' + a.id + ' (' + (a.type === 0 ? 'Servo' : 'Sol') + ' ch' + a.pca_ch + ')';
+    sel.appendChild(opt);
+  }
+}
+
+// ============================================================================
 // Init
 // ============================================================================
 window.addEventListener('load', () => {
   connectWS();
   // Preload data
-  loadActuators().then(() => loadInstrumentSelects());
+  loadActuators().then(() => { loadInstrumentSelects(); populateBurstSelect(); });
   api('/api/routing').then(r => { routing = r || []; });
 });
 </script>

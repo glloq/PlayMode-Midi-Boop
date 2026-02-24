@@ -15,6 +15,8 @@ class MidiDispatcher;
 class MidiTransport;
 class PCADriver;
 class ActuatorEngine;
+class Calibrator;
+class TestManager;
 
 // ============================================================================
 // PlayMode Midi B∞p — Web Server (Phase 6)
@@ -38,6 +40,12 @@ public:
                     SafetyManager* safety, PowerManager* power,
                     MidiDispatcher* dispatcher, MidiTransport* transport,
                     PCADriver* pca, ActuatorEngine* engine);
+
+    // Enregistre le calibrateur (Phase 7, optionnel)
+    void setCalibrator(Calibrator* calibrator);
+
+    // Enregistre le test manager (Phase 8, optionnel)
+    void setTestManager(TestManager* testManager);
 
     // Démarre le serveur HTTP + WebSocket
     bool begin();
@@ -70,6 +78,8 @@ private:
     MidiTransport*   _transport;
     PCADriver*       _pca;
     ActuatorEngine*  _engine;
+    Calibrator*      _calibrator;
+    TestManager*     _testManager;
 
     // Timing WebSocket broadcast
     uint32_t _last_ws_broadcast_ms;
@@ -120,6 +130,26 @@ private:
     void handlePostKillSwitch(AsyncWebServerRequest* request,
                               uint8_t* data, size_t len);
     void handlePostScanI2C(AsyncWebServerRequest* request);
+
+    // --- Calibration acoustique (Phase 7) ---
+    void handleGetCalibrateStatus(AsyncWebServerRequest* request);
+    void handleGetCalibrateResults(AsyncWebServerRequest* request);
+    void handlePostCalibrate(AsyncWebServerRequest* request,
+                             uint8_t* data, size_t len);
+    void handlePostCalibrateApply(AsyncWebServerRequest* request);
+    void handlePostCalibrateStop(AsyncWebServerRequest* request);
+
+    // --- Test Manager industriel (Phase 8) ---
+    void handleGetTestStatus(AsyncWebServerRequest* request);
+    void handleGetTestLog(AsyncWebServerRequest* request);
+    void handlePostTestSweep(AsyncWebServerRequest* request,
+                             uint8_t* data, size_t len);
+    void handlePostTestBurst(AsyncWebServerRequest* request,
+                             uint8_t* data, size_t len);
+    void handlePostTestStress(AsyncWebServerRequest* request,
+                              uint8_t* data, size_t len);
+    void handlePostTestStop(AsyncWebServerRequest* request);
+    void handlePostTestClearLog(AsyncWebServerRequest* request);
 
     // DELETE — suppression
     void handleDeleteInstrument(AsyncWebServerRequest* request);

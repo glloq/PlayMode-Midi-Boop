@@ -14,6 +14,7 @@
 //   - AppleMIDI (lathoub) — pour RTP-MIDI
 //   - ESPAsyncWebServer (phase 6)
 //   - AsyncTCP (phase 6)
+//   - driver/i2s.h (ESP-IDF, intégré) — pour le calibrateur (phase 7)
 //
 // ============================================================================
 
@@ -30,6 +31,8 @@
 #include "jitter_buffer.h"
 #include "midi_transport.h"
 #include "midi_dispatcher.h"
+#include "calibrator.h"
+#include "test_manager.h"
 #include "web_server.h"
 
 // --- Objets globaux (Phase 1) ---
@@ -53,6 +56,12 @@ PowerManager powerManager;
 // --- Objets globaux (Phase 6) ---
 WebServer webServer;
 
+// --- Objets globaux (Phase 7) ---
+Calibrator calibrator(scheduler, configManager);
+
+// --- Objets globaux (Phase 8) ---
+TestManager testManager(scheduler, configManager);
+
 // --- Mode test (décommenter pour activer le test harness sans MIDI) ---
 // #define ENABLE_TEST_HARNESS
 
@@ -69,7 +78,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B\u221ep v0.6");
+    Serial.println("  PlayMode Midi B\u221ep v0.8");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -168,6 +177,8 @@ void setup() {
     webServer.setModules(&configManager, &scheduler, &safetyManager,
                          &powerManager, &midiDispatcher, &midiTransport,
                          &pcaDriver, &actuatorEngine);
+    webServer.setCalibrator(&calibrator);
+    webServer.setTestManager(&testManager);
     if (!webServer.begin()) {
         Serial.println("[INIT] ERREUR : Web Server");
     } else {
@@ -175,8 +186,14 @@ void setup() {
                       WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
     }
 
+    // 12. Initialiser le Calibrateur Acoustique (Phase 7)
+    Serial.println("\n[INIT] Calibrateur Acoustique...");
+    if (!calibrator.begin()) {
+        Serial.println("[INIT] ATTENTION : Microphone I²S non disponible (calibration désactivée)");
+    }
+
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée — Phase 6");
+    Serial.println("  Initialisation terminée — Phase 8");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
@@ -211,10 +228,16 @@ void loop() {
         powerManager.update(act_ptrs, count);
     }
 
-    // 5. Mise à jour du serveur Web (WebSocket broadcast)
+    // 5. Mise à jour du calibrateur acoustique (Phase 7)
+    calibrator.update();
+
+    // 5b. Mise à jour du test manager (Phase 8)
+    testManager.update();
+
+    // 6. Mise à jour du serveur Web (WebSocket broadcast)
     webServer.update();
 
-    // 6. Affichage périodique de l'état (toutes les 5 secondes)
+    // 7. Affichage périodique de l'état (toutes les 5 secondes)
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
