@@ -270,6 +270,10 @@ MidiInputConfig* ConfigManager::getMidiInputConfig() {
     return &_midi_input_config;
 }
 
+void ConfigManager::setMidiInputConfig(const MidiInputConfig& config) {
+    _midi_input_config = config;
+}
+
 MidiRoutingConfig* ConfigManager::getRoutingConfigs() {
     return _routing_configs;
 }
