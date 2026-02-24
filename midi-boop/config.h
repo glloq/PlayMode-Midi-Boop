@@ -126,8 +126,16 @@
 #define CAL_INTER_RETRY_MS      600     // Délai entre essais (ms)
 #define CAL_TRIGGER_VELOCITY    110     // Vélocité MIDI pour les frappes de calibration
 
+// --- Test Manager (Phase 8) ---
+#define TEST_DEFAULT_VELOCITY       100     // Vélocité par défaut pour les tests
+#define TEST_DEFAULT_INTERVAL_MS    400     // Intervalle sweep inter-actionneurs (ms)
+#define TEST_DEFAULT_HOLD_MS        120     // Durée d'activation par défaut (ms)
+#define TEST_BURST_DEFAULT_COUNT    5       // Nombre de frappes burst par défaut
+#define TEST_BURST_DEFAULT_INTVL_MS 150     // Intervalle inter-frappe burst (ms)
+#define TEST_LOG_SIZE               64      // Taille du journal circulaire d'événements
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          5       // v5 : + calibrateur acoustique (phase 7)
+#define CONFIG_VERSION          6       // v6 : + test manager industriel (phase 8)
 
 #endif // CONFIG_H

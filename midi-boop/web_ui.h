@@ -169,6 +169,7 @@ tr:hover td{background:var(--bg2)}
   <button onclick="showPage('power')">Power</button>
   <button onclick="showPage('safety')">Safety</button>
   <button onclick="showPage('calibration')">Calibration</button>
+  <button onclick="showPage('test')">Test</button>
   <button onclick="showPage('settings')">Paramètres</button>
 </nav>
 
@@ -609,6 +610,120 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
+<!-- ============ TEST & MAINTENANCE ============ -->
+<div class="page" id="page-test">
+  <div class="section-title">Test Industriel &amp; Maintenance</div>
+
+  <!-- État courant -->
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:20px">
+    <div class="card">
+      <h3>Mode</h3>
+      <div class="val" id="test-mode" style="font-size:18px">Inactif</div>
+    </div>
+    <div class="card">
+      <h3>Progression</h3>
+      <div class="val"><span id="test-progress">0</span><span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill" id="test-bar" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+    <div class="card">
+      <h3>Actionneur</h3>
+      <div class="val" id="test-cur-act" style="font-size:18px">—</div>
+    </div>
+    <div class="card">
+      <h3>Événements envoyés</h3>
+      <div class="val" id="test-events-sent">0</div>
+    </div>
+    <div class="card">
+      <h3>Tests complétés</h3>
+      <div class="val" id="test-tests-run">0</div>
+    </div>
+  </div>
+
+  <!-- Contrôles globaux -->
+  <div class="btn-row" style="margin-bottom:20px">
+    <button class="btn danger" id="test-stop-btn" style="display:none" onclick="stopTest()">⬛ Arrêter</button>
+    <button class="btn" onclick="api('/api/test/log/clear','POST',{}).then(loadTestLog)" style="margin-left:auto">🗑 Effacer journal</button>
+    <button class="btn" onclick="loadTestStatus();loadTestLog()">↻</button>
+  </div>
+
+  <!-- === Sweep === -->
+  <div class="section-title">Sweep — Test séquentiel</div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Vélocité</label>
+        <input type="number" id="sw-vel" min="1" max="127" value="100">
+      </div>
+      <div class="form-group">
+        <label>Intervalle (ms)</label>
+        <input type="number" id="sw-interval" min="50" max="5000" value="400">
+      </div>
+      <div class="form-group">
+        <label>Durée frappe (ms)</label>
+        <input type="number" id="sw-hold" min="20" max="2000" value="120">
+      </div>
+      <div class="form-group" style="justify-content:flex-end;align-items:flex-end">
+        <label><input type="checkbox" id="sw-loop"> Boucle infinie</label>
+      </div>
+    </div>
+    <button class="btn primary" onclick="startSweep()">▶ Lancer sweep</button>
+  </div>
+
+  <!-- === Burst === -->
+  <div class="section-title">Burst — Rafale sur un actionneur</div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Actionneur</label>
+        <select id="burst-act" style="background:var(--bg3);border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:var(--radius)"></select>
+      </div>
+      <div class="form-group">
+        <label>Frappes</label>
+        <input type="number" id="burst-count" min="1" max="50" value="5">
+      </div>
+      <div class="form-group">
+        <label>Vélocité</label>
+        <input type="number" id="burst-vel" min="1" max="127" value="100">
+      </div>
+      <div class="form-group">
+        <label>Intervalle (ms)</label>
+        <input type="number" id="burst-interval" min="30" max="2000" value="150">
+      </div>
+    </div>
+    <button class="btn primary" onclick="startBurst()">▶ Lancer burst</button>
+  </div>
+
+  <!-- === Stress === -->
+  <div class="section-title">Stress — Tous actionneurs simultanés</div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px">
+    <p style="color:var(--fg2);font-size:13px;margin-bottom:12px">Déclenche tous les actionneurs actifs en même temps. Le Power Manager et le Safety Manager filtrent selon les budgets.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Vélocité</label>
+        <input type="number" id="stress-vel" min="1" max="127" value="80">
+      </div>
+      <div class="form-group">
+        <label>Durée frappe (ms)</label>
+        <input type="number" id="stress-hold" min="20" max="2000" value="120">
+      </div>
+    </div>
+    <button class="btn danger" onclick="startStress()">⚡ Stress test</button>
+  </div>
+
+  <!-- Journal -->
+  <div class="section-title">Journal des événements
+    <span style="font-size:12px;font-weight:400;color:var(--fg2);margin-left:8px">(32 derniers)</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Temps</th><th>Actionneur</th><th>Vélocité</th><th>Mode</th><th>État</th></tr>
+    </thead>
+    <tbody id="test-log-table">
+      <tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun événement</td></tr>
+    </tbody>
+  </table>
+</div>
+
 <script>
 // ============================================================================
 // State
@@ -800,6 +915,7 @@ function showPage(page) {
   if (page === 'power') loadPower();
   if (page === 'safety') loadSafety();
   if (page === 'calibration') { loadCalibrateStatus(); loadCalibrateResults(); }
+  if (page === 'test') { loadTestStatus(); loadTestLog(); populateBurstSelect(); }
   if (page === 'settings') { loadWiFiConfig(); loadBuses(); }
 }
 
@@ -1489,12 +1605,147 @@ function toast(msg, type) {
 }
 
 // ============================================================================
+// Test Manager (Phase 8)
+// ============================================================================
+let testPollInterval = null;
+
+const TEST_MODE_NAMES = {
+  idle:'Inactif', sweep:'Sweep ▶', burst:'Burst ▶', stress:'Stress ▶'
+};
+
+async function loadTestStatus() {
+  const d = await api('/api/test/status');
+  if (!d) return;
+
+  el('test-mode', TEST_MODE_NAMES[d.mode] || d.mode);
+  el('test-progress', d.progress || 0);
+  el('test-events-sent', d.events_sent || 0);
+  el('test-tests-run', d.tests_run || 0);
+
+  const bar = document.getElementById('test-bar');
+  if (bar) bar.style.width = (d.progress || 0) + '%';
+
+  const stopBtn = document.getElementById('test-stop-btn');
+  if (stopBtn) stopBtn.style.display = d.running ? 'inline-block' : 'none';
+
+  if (d.running) {
+    el('test-cur-act', 'Act ' + d.current_act);
+    if (!testPollInterval) testPollInterval = setInterval(loadTestStatus, 800);
+  } else {
+    el('test-cur-act', '—');
+    if (testPollInterval) { clearInterval(testPollInterval); testPollInterval = null; }
+    loadTestLog();
+  }
+}
+
+async function loadTestLog() {
+  const data = await api('/api/test/log');
+  const tbody = document.getElementById('test-log-table');
+  if (!tbody || !data || !data.length) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun événement</td></tr>';
+    return;
+  }
+  let html = '';
+  for (const e of data) {
+    const badge = e.ok
+      ? '<span class="badge on">OK</span>'
+      : '<span class="badge off">Queue pleine</span>';
+    html += '<tr>';
+    html += '<td>' + e.t + ' ms</td>';
+    html += '<td>Act ' + e.act + '</td>';
+    html += '<td>' + e.vel + '</td>';
+    html += '<td>' + (TEST_MODE_NAMES[e.mode] || e.mode) + '</td>';
+    html += '<td>' + badge + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function startSweep() {
+  if (document.getElementById('test-stop-btn').style.display !== 'none') {
+    toast('Un test est déjà en cours', 'warn'); return;
+  }
+  const body = {
+    velocity:    parseInt(document.getElementById('sw-vel').value),
+    interval_ms: parseInt(document.getElementById('sw-interval').value),
+    hold_ms:     parseInt(document.getElementById('sw-hold').value),
+    loop:        document.getElementById('sw-loop').checked
+  };
+  api('/api/test/sweep', 'POST', body).then(r => {
+    if (r && r.ok) {
+      toast('Sweep démarré', 'ok');
+      loadTestStatus();
+      testPollInterval = testPollInterval || setInterval(loadTestStatus, 800);
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function startBurst() {
+  if (document.getElementById('test-stop-btn').style.display !== 'none') {
+    toast('Un test est déjà en cours', 'warn'); return;
+  }
+  const sel = document.getElementById('burst-act');
+  const body = {
+    id:          parseInt(sel ? sel.value : 0),
+    count:       parseInt(document.getElementById('burst-count').value),
+    velocity:    parseInt(document.getElementById('burst-vel').value),
+    interval_ms: parseInt(document.getElementById('burst-interval').value)
+  };
+  api('/api/test/burst', 'POST', body).then(r => {
+    if (r && r.ok) {
+      toast('Burst démarré (act ' + body.id + ')', 'ok');
+      loadTestStatus();
+      testPollInterval = testPollInterval || setInterval(loadTestStatus, 800);
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function startStress() {
+  if (!confirm('Lancer le stress test ?\nTous les actionneurs vont se déclencher simultanément.')) return;
+  const body = {
+    velocity: parseInt(document.getElementById('stress-vel').value),
+    hold_ms:  parseInt(document.getElementById('stress-hold').value)
+  };
+  api('/api/test/stress', 'POST', body).then(r => {
+    if (r && r.ok) {
+      toast('Stress test exécuté', 'ok');
+      setTimeout(loadTestLog, 500);
+    } else {
+      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+    }
+  });
+}
+
+function stopTest() {
+  api('/api/test/stop', 'POST', {}).then(r => {
+    if (r && r.ok) toast('Test arrêté', 'warn');
+    loadTestStatus();
+  });
+}
+
+function populateBurstSelect() {
+  const sel = document.getElementById('burst-act');
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (const a of actuators) {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = 'Act ' + a.id + ' (' + (a.type === 0 ? 'Servo' : 'Sol') + ' ch' + a.pca_ch + ')';
+    sel.appendChild(opt);
+  }
+}
+
+// ============================================================================
 // Init
 // ============================================================================
 window.addEventListener('load', () => {
   connectWS();
   // Preload data
-  loadActuators().then(() => loadInstrumentSelects());
+  loadActuators().then(() => { loadInstrumentSelects(); populateBurstSelect(); });
   api('/api/routing').then(r => { routing = r || []; });
 });
 </script>

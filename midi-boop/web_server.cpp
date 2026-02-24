@@ -9,6 +9,7 @@
 #include "pca_driver.h"
 #include "actuator_engine.h"
 #include "calibrator.h"
+#include "test_manager.h"
 #include <ArduinoJson.h>
 
 // ============================================================================
@@ -29,6 +30,7 @@ WebServer::WebServer(uint16_t port)
     , _pca(nullptr)
     , _engine(nullptr)
     , _calibrator(nullptr)
+    , _testManager(nullptr)
     , _last_ws_broadcast_ms(0)
 {
 }
@@ -50,6 +52,10 @@ void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
 
 void WebServer::setCalibrator(Calibrator* calibrator) {
     _calibrator = calibrator;
+}
+
+void WebServer::setTestManager(TestManager* testManager) {
+    _testManager = testManager;
 }
 
 bool WebServer::begin() {
@@ -292,6 +298,45 @@ void WebServer::setupAPIRoutes() {
     });
     _server.on("/api/calibrate/stop", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostCalibrateStop(req);
+    });
+
+    // --- Test Manager industriel (Phase 8) ---
+    _server.on("/api/test/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetTestStatus(req);
+    });
+    _server.on("/api/test/log", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetTestLog(req);
+    });
+
+    auto* sweepHandler = new AsyncCallbackJsonWebHandler("/api/test/sweep",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body; serializeJson(json, body);
+            handlePostTestSweep(req, (uint8_t*)body.c_str(), body.length());
+        });
+    sweepHandler->setMethod(HTTP_POST);
+    _server.addHandler(sweepHandler);
+
+    auto* burstHandler = new AsyncCallbackJsonWebHandler("/api/test/burst",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body; serializeJson(json, body);
+            handlePostTestBurst(req, (uint8_t*)body.c_str(), body.length());
+        });
+    burstHandler->setMethod(HTTP_POST);
+    _server.addHandler(burstHandler);
+
+    auto* stressHandler = new AsyncCallbackJsonWebHandler("/api/test/stress",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body; serializeJson(json, body);
+            handlePostTestStress(req, (uint8_t*)body.c_str(), body.length());
+        });
+    stressHandler->setMethod(HTTP_POST);
+    _server.addHandler(stressHandler);
+
+    _server.on("/api/test/stop", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostTestStop(req);
+    });
+    _server.on("/api/test/log/clear", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostTestClearLog(req);
     });
 }
 
@@ -1312,5 +1357,191 @@ void WebServer::handlePostCalibrateStop(AsyncWebServerRequest* request) {
         return;
     }
     _calibrator->stop();
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ============================================================================
+// Test Manager industriel (Phase 8)
+// ============================================================================
+
+static const char* testModeName(TestMode m) {
+    switch (m) {
+        case TEST_IDLE:   return "idle";
+        case TEST_SWEEP:  return "sweep";
+        case TEST_BURST:  return "burst";
+        case TEST_STRESS: return "stress";
+        default:          return "unknown";
+    }
+}
+
+void WebServer::handleGetTestStatus(AsyncWebServerRequest* request) {
+    StaticJsonDocument<256> doc;
+
+    if (!_testManager) {
+        doc["available"] = false;
+        doc["mode"]      = "idle";
+        String out; serializeJson(doc, out);
+        request->send(200, "application/json", out);
+        return;
+    }
+
+    doc["available"]    = true;
+    doc["mode"]         = testModeName(_testManager->getMode());
+    doc["running"]      = _testManager->isRunning();
+    doc["progress"]     = _testManager->getProgress();
+    doc["current_act"]  = _testManager->getCurrentActuatorId();
+    doc["events_sent"]  = _testManager->getEventsSent();
+    doc["tests_run"]    = _testManager->getTestsRun();
+    doc["log_count"]    = _testManager->getLogCount();
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetTestLog(AsyncWebServerRequest* request) {
+    if (!_testManager) {
+        request->send(503, "application/json",
+                      "{\"error\":\"test manager non disponible\"}");
+        return;
+    }
+
+    // Limite le nombre d'entrées retournées (max 32 pour économiser la RAM JSON)
+    const uint8_t MAX_ENTRIES = 32;
+    StaticJsonDocument<1536> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    uint8_t count = _testManager->getLogCount();
+    if (count > MAX_ENTRIES) count = MAX_ENTRIES;
+
+    for (uint8_t i = 0; i < count; i++) {
+        const TestLogEntry& e = _testManager->getLogEntry(i);
+        JsonObject obj = arr.createNestedObject();
+        obj["t"]    = e.timestamp_ms;
+        obj["act"]  = e.actuator_id;
+        obj["vel"]  = e.velocity;
+        obj["mode"] = testModeName(e.mode);
+        obj["ok"]   = e.scheduled;
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
+                                    uint8_t* data, size_t len) {
+    if (!_testManager) {
+        request->send(503, "application/json",
+                      "{\"error\":\"test manager non disponible\"}");
+        return;
+    }
+    if (_testManager->isRunning()) {
+        request->send(409, "application/json",
+                      "{\"error\":\"test en cours\"}");
+        return;
+    }
+
+    StaticJsonDocument<128> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        return;
+    }
+
+    uint8_t  velocity    = doc["velocity"]    | TEST_DEFAULT_VELOCITY;
+    uint16_t interval_ms = doc["interval_ms"] | TEST_DEFAULT_INTERVAL_MS;
+    uint16_t hold_ms     = doc["hold_ms"]     | TEST_DEFAULT_HOLD_MS;
+    bool     loop        = doc["loop"]        | false;
+
+    if (_testManager->startSweep(velocity, interval_ms, hold_ms, loop)) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(400, "application/json",
+                      "{\"error\":\"impossible de démarrer le sweep\"}");
+    }
+}
+
+void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
+                                    uint8_t* data, size_t len) {
+    if (!_testManager) {
+        request->send(503, "application/json",
+                      "{\"error\":\"test manager non disponible\"}");
+        return;
+    }
+    if (_testManager->isRunning()) {
+        request->send(409, "application/json",
+                      "{\"error\":\"test en cours\"}");
+        return;
+    }
+
+    StaticJsonDocument<128> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        return;
+    }
+
+    uint8_t  act_id      = doc["id"]          | 0;
+    uint8_t  count       = doc["count"]       | (uint8_t)TEST_BURST_DEFAULT_COUNT;
+    uint8_t  velocity    = doc["velocity"]    | TEST_DEFAULT_VELOCITY;
+    uint16_t interval_ms = doc["interval_ms"] | (uint16_t)TEST_BURST_DEFAULT_INTVL_MS;
+
+    if (_testManager->startBurst(act_id, count, velocity, interval_ms)) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(400, "application/json",
+                      "{\"error\":\"impossible de démarrer le burst\"}");
+    }
+}
+
+void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
+                                     uint8_t* data, size_t len) {
+    if (!_testManager) {
+        request->send(503, "application/json",
+                      "{\"error\":\"test manager non disponible\"}");
+        return;
+    }
+    if (_testManager->isRunning()) {
+        request->send(409, "application/json",
+                      "{\"error\":\"test en cours\"}");
+        return;
+    }
+
+    StaticJsonDocument<64> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        // Body optionnel pour stress
+        doc.clear();
+    }
+
+    uint8_t  velocity = doc["velocity"] | TEST_DEFAULT_VELOCITY;
+    uint16_t hold_ms  = doc["hold_ms"]  | TEST_DEFAULT_HOLD_MS;
+
+    if (_testManager->startStress(velocity, hold_ms)) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(400, "application/json",
+                      "{\"error\":\"impossible de lancer le stress test\"}");
+    }
+}
+
+void WebServer::handlePostTestStop(AsyncWebServerRequest* request) {
+    if (!_testManager) {
+        request->send(503, "application/json",
+                      "{\"error\":\"test manager non disponible\"}");
+        return;
+    }
+    _testManager->stop();
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handlePostTestClearLog(AsyncWebServerRequest* request) {
+    if (!_testManager) {
+        request->send(503, "application/json",
+                      "{\"error\":\"test manager non disponible\"}");
+        return;
+    }
+    _testManager->clearLog();
     request->send(200, "application/json", "{\"ok\":true}");
 }
