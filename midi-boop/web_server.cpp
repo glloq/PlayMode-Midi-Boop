@@ -1127,7 +1127,8 @@ void WebServer::broadcastStatus() {
 // ============================================================================
 
 void WebServer::buildStatusJSON(String& output) {
-    StaticJsonDocument<1024> doc;
+    // AUDIT FIX : taille augmentée à 2048 (active_actuators + power + safety + log_count)
+    StaticJsonDocument<2048> doc;
 
     doc["uptime_s"] = millis() / 1000;
     doc["heap"]     = ESP.getFreeHeap();
@@ -1582,7 +1583,11 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
         if (min_level > 4) min_level = 4;
     }
 
-    uint8_t total = logger.getCount();
+    // AUDIT FIX : snapshot thread-safe via getAllEntries() au lieu d'accès direct
+    // (le handler web tourne dans une tâche FreeRTOS distincte de la loop principale)
+    static LogEntry snapshot[LOG_BUFFER_SIZE];
+    uint8_t total = 0;
+    logger.getAllEntries(snapshot, total);
 
     String out = "{\"count\":";
     out += total;
@@ -1592,7 +1597,7 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
     uint8_t shown = 0;
 
     for (uint8_t i = 0; i < total && shown < 100; i++) {
-        const LogEntry& e = logger.getEntry(i);
+        const LogEntry& e = snapshot[i];
         if ((int)e.level < min_level) continue;
 
         if (!first) out += ",";

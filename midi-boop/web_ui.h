@@ -767,7 +767,7 @@ tr:hover td{background:var(--bg2)}
       <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
     </label>
   </div>
-  <div style="overflow-y:auto;max-height:calc(100vh - 280px)">
+  <div class="log-container" style="overflow-y:auto;max-height:calc(100vh - 280px)">
     <table>
       <thead><tr><th style="width:80px">Temps</th><th style="width:60px">Niveau</th><th style="width:75px">Catégorie</th><th>Message</th></tr></thead>
       <tbody id="log-table"><tr><td colspan="4" style="color:var(--fg2)">Chargement…</td></tr></tbody>
@@ -809,6 +809,9 @@ function connectWS() {
 
   ws.onopen = () => {
     wsConnected = true;
+    // AUDIT FIX : reset du compteur de logs à -1 pour forcer un refresh
+    // au premier message (gère le cas redémarrage serveur + client déjà connecté)
+    logLastCount = -1;
     document.getElementById('ws-dot').className = 'dot';
     document.getElementById('ws-status').textContent = 'Connecté';
   };
@@ -1833,10 +1836,13 @@ function formatLogTime(ms) {
 }
 
 function escHtml(s) {
+  // AUDIT FIX : ajout des guillemets pour une protection XSS complète (attributs HTML)
   return String(s)
     .replace(/&/g,'&amp;')
     .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;');
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }
 
 async function loadLogs() {
@@ -1875,8 +1881,9 @@ function renderLogs() {
   }
   tbody.innerHTML = html;
 
+  // AUDIT FIX : sélecteur robuste via classe dédiée .log-container
   if (document.getElementById('log-autoscroll')?.checked) {
-    const wrap = tbody.closest('div[style*="overflow"]');
+    const wrap = tbody.closest('.log-container');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
   }
 }

@@ -62,6 +62,11 @@ public:
     // Retourne l'entrée à l'indice idx (0 = la plus récente)
     const LogEntry& getEntry(uint8_t idx) const;
 
+    // Copie thread-safe de tout le buffer dans out_buf (taille LOG_BUFFER_SIZE).
+    // count_out reçoit le nombre d'entrées valides copiées (ordre : idx 0 = plus récente).
+    // À utiliser depuis les handlers web pour éviter les races avec log().
+    void getAllEntries(LogEntry* out_buf, uint8_t& count_out) const;
+
     // Efface le journal
     void clear();
 

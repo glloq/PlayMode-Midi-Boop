@@ -39,7 +39,7 @@ enum EventAction : uint8_t {
 
 // --- État interne d'un actionneur ---
 struct ActuatorState {
-    bool active;                 // Note en cours
+    volatile bool active;        // Note en cours (volatile : écrit Core 1, lu Core 0)
     uint16_t current_position;   // Position PWM courante (0-4095)
     bool alternate_state;        // État alterné (A ou B)
     bool scratch_direction;      // Direction gratter (+ ou -)

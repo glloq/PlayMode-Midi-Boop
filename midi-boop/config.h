@@ -42,7 +42,7 @@
 #define SCHEDULER_PRIORITY      5       // Priorité FreeRTOS (haute)
 #define SCHEDULER_STACK_SIZE    8192    // Stack en bytes
 #define SCHEDULER_TICK_MS       1       // Tick scheduler en ms
-#define SCHEDULER_QUEUE_SIZE    64      // Taille file d'attente événements
+#define SCHEDULER_QUEUE_SIZE    128     // Taille file d'attente événements
 #define SCHEDULER_MAX_EVENTS    128     // Max événements dans la priority queue
 
 // --- Actionneurs ---
@@ -136,7 +136,7 @@
 
 // --- Log Manager (Phase 9) ---
 #define LOG_BUFFER_SIZE         128     // Entrées max dans le journal circulaire
-#define LOG_MAX_MSG_LEN         52      // Longueur max d'un message log (incl. '\0')
+#define LOG_MAX_MSG_LEN         64      // Longueur max d'un message log (incl. '\0')
 
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
