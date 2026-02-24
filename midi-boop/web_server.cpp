@@ -10,6 +10,7 @@
 #include "actuator_engine.h"
 #include "calibrator.h"
 #include "test_manager.h"
+#include "log_manager.h"
 #include <ArduinoJson.h>
 
 // ============================================================================
@@ -337,6 +338,14 @@ void WebServer::setupAPIRoutes() {
     });
     _server.on("/api/test/log/clear", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostTestClearLog(req);
+    });
+
+    // --- Log Manager (Phase 9) ---
+    _server.on("/api/logs", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetLogs(req);
+    });
+    _server.on("/api/logs/clear", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostLogsClear(req);
     });
 }
 
@@ -881,8 +890,10 @@ void WebServer::handlePostSave(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
     if (_config->save()) {
+        logger.log(LOG_INFO, CAT_SYSTEM, "Config sauvegardée sur flash");
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
+        logger.log(LOG_ERROR, CAT_SYSTEM, "Échec sauvegarde config");
         request->send(500, "application/json",
                       "{\"error\":\"save failed\"}");
     }
@@ -893,6 +904,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
 
     _config->loadDefaults();
     if (_dispatcher) _dispatcher->refreshConfig();
+    logger.log(LOG_WARN, CAT_SYSTEM, "Reset usine appliqué");
     request->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -943,8 +955,10 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
     bool activate = doc["active"] | false;
     if (activate) {
         _safety->activateKillSwitch();
+        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch ACTIVÉ depuis l'UI web");
     } else {
         _safety->deactivateKillSwitch();
+        logger.log(LOG_INFO, CAT_SAFETY, "Kill switch désactivé depuis l'UI web");
     }
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1182,6 +1196,9 @@ void WebServer::buildStatusJSON(String& output) {
     JsonObject wifi = doc.createNestedObject("wifi");
     wifi["connected"] = WiFi.isConnected();
     wifi["rssi"]      = WiFi.RSSI();
+
+    // Log count (Phase 9) — permet à l'UI de détecter de nouvelles entrées
+    doc["log_count"] = logger.getCount();
 
     serializeJson(doc, output);
 }
@@ -1455,6 +1472,8 @@ void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
     bool     loop        = doc["loop"]        | false;
 
     if (_testManager->startSweep(velocity, interval_ms, hold_ms, loop)) {
+        logger.log(LOG_INFO, CAT_TEST, "Sweep démarré vel=%d int=%dms hold=%dms loop=%d",
+                   velocity, interval_ms, hold_ms, (int)loop);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -1488,6 +1507,8 @@ void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
     uint16_t interval_ms = doc["interval_ms"] | (uint16_t)TEST_BURST_DEFAULT_INTVL_MS;
 
     if (_testManager->startBurst(act_id, count, velocity, interval_ms)) {
+        logger.log(LOG_INFO, CAT_TEST, "Burst démarré act=%d count=%d vel=%d",
+                   act_id, count, velocity);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -1519,6 +1540,8 @@ void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
     uint16_t hold_ms  = doc["hold_ms"]  | TEST_DEFAULT_HOLD_MS;
 
     if (_testManager->startStress(velocity, hold_ms)) {
+        logger.log(LOG_INFO, CAT_TEST, "Stress test exécuté vel=%d hold=%dms",
+                   velocity, hold_ms);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -1543,5 +1566,58 @@ void WebServer::handlePostTestClearLog(AsyncWebServerRequest* request) {
         return;
     }
     _testManager->clearLog();
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ============================================================================
+// Log Manager (Phase 9)
+// ============================================================================
+
+void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
+    // Filtre optionnel ?level=N (0=DEBUG .. 4=CRITICAL)
+    int min_level = 0;
+    if (request->hasParam("level")) {
+        min_level = request->getParam("level")->value().toInt();
+        if (min_level < 0) min_level = 0;
+        if (min_level > 4) min_level = 4;
+    }
+
+    uint8_t total = logger.getCount();
+
+    String out = "{\"count\":";
+    out += total;
+    out += ",\"entries\":[";
+
+    bool first = true;
+    uint8_t shown = 0;
+
+    for (uint8_t i = 0; i < total && shown < 100; i++) {
+        const LogEntry& e = logger.getEntry(i);
+        if ((int)e.level < min_level) continue;
+
+        if (!first) out += ",";
+        out += "{\"t\":";    out += e.timestamp_ms;
+        out += ",\"lvl\":";  out += (int)e.level;
+        out += ",\"cat\":";  out += (int)e.category;
+        out += ",\"msg\":\"";
+        // Échappement minimal du message
+        for (const char* p = e.message; *p; p++) {
+            if      (*p == '"')  out += "\\\"";
+            else if (*p == '\\') out += "\\\\";
+            else if (*p == '\n') out += "\\n";
+            else                 out += *p;
+        }
+        out += "\"}";
+        first = false;
+        shown++;
+    }
+
+    out += "]}";
+    request->send(200, "application/json", out);
+}
+
+void WebServer::handlePostLogsClear(AsyncWebServerRequest* request) {
+    logger.clear();
+    logger.log(LOG_INFO, CAT_SYSTEM, "Journal système effacé");
     request->send(200, "application/json", "{\"ok\":true}");
 }

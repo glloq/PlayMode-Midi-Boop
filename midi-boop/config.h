@@ -134,8 +134,12 @@
 #define TEST_BURST_DEFAULT_INTVL_MS 150     // Intervalle inter-frappe burst (ms)
 #define TEST_LOG_SIZE               64      // Taille du journal circulaire d'événements
 
+// --- Log Manager (Phase 9) ---
+#define LOG_BUFFER_SIZE         128     // Entrées max dans le journal circulaire
+#define LOG_MAX_MSG_LEN         52      // Longueur max d'un message log (incl. '\0')
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          6       // v6 : + test manager industriel (phase 8)
+#define CONFIG_VERSION          7       // v7 : + log manager temps réel (phase 9)
 
 #endif // CONFIG_H

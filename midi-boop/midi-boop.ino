@@ -33,6 +33,7 @@
 #include "midi_dispatcher.h"
 #include "calibrator.h"
 #include "test_manager.h"
+#include "log_manager.h"
 #include "web_server.h"
 
 // --- Objets globaux (Phase 1) ---
@@ -77,8 +78,11 @@ void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
     delay(1000);  // Attendre la stabilisation du port série
 
+    // Initialiser le logger en premier (avant tout le reste)
+    logger.begin();
+
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B\u221ep v0.8");
+    Serial.println("  PlayMode Midi B\u221ep v0.9");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -86,10 +90,16 @@ void setup() {
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================");
 
+    logger.log(LOG_INFO, CAT_SYSTEM, "Demarrage PlayMode Midi Boop v0.9");
+
     // 1. Initialiser le Config Manager (LittleFS)
     Serial.println("\n[INIT] Config Manager...");
     if (!configManager.begin()) {
         Serial.println("[INIT] ERREUR : Config Manager");
+        logger.log(LOG_ERROR, CAT_SYSTEM, "Config Manager : echec init LittleFS");
+    } else {
+        logger.log(LOG_INFO, CAT_SYSTEM, "Config: %d act, %d inst",
+                   configManager.getActuatorCount(), configManager.getInstrumentCount());
     }
 
     // 2. Initialiser le driver PCA9685 (dual-bus I²C)
@@ -129,6 +139,9 @@ void setup() {
     scheduler.setSafetyManager(&safetyManager);
     if (!scheduler.begin()) {
         Serial.println("[INIT] ERREUR : Scheduler");
+        logger.log(LOG_ERROR, CAT_SCHED, "Scheduler : echec démarrage Core 1");
+    } else {
+        logger.log(LOG_INFO, CAT_SCHED, "Scheduler démarré sur Core 1");
     }
 
     // 7. Initialiser le WiFi Manager
@@ -137,11 +150,15 @@ void setup() {
     if (wifiCfg->enabled) {
         if (wifiManager.begin(*wifiCfg)) {
             Serial.printf("[INIT] WiFi connecté : %s\n", wifiManager.getIP().toString().c_str());
+            logger.log(LOG_INFO, CAT_SYSTEM, "WiFi connecté : %s",
+                       wifiManager.getIP().toString().c_str());
         } else {
             Serial.println("[INIT] ATTENTION : WiFi non disponible");
+            logger.log(LOG_WARN, CAT_SYSTEM, "WiFi non disponible (AP fallback)");
         }
     } else {
         Serial.println("[INIT] WiFi désactivé");
+        logger.log(LOG_INFO, CAT_SYSTEM, "WiFi désactivé");
     }
 
     // 8. Configurer le jitter buffer et démarrer les transports MIDI
@@ -150,6 +167,10 @@ void setup() {
     jitterBuffer.setDepth(midiCfg->jitter_buffer_ms);
     if (!midiTransport.begin(*midiCfg)) {
         Serial.println("[INIT] ATTENTION : Aucun transport MIDI actif");
+        logger.log(LOG_WARN, CAT_MIDI, "Aucun transport MIDI actif");
+    } else {
+        logger.log(LOG_INFO, CAT_MIDI, "MIDI Transport prêt (jitter=%dms)",
+                   midiCfg->jitter_buffer_ms);
     }
 
     // 9. Initialiser le Power Manager (Phase 5)
@@ -165,6 +186,8 @@ void setup() {
             budget.instrument_max_polyphony[i] = 4;
         }
         powerManager.begin(budget);
+        logger.log(LOG_INFO, CAT_POWER, "Power Manager: max %dmA poly=%d",
+                   POWER_GLOBAL_MAX_MA, POWER_MAX_POLYPHONY);
     }
 
     // 10. Initialiser le MIDI Dispatcher avec PowerManager (mapping notes/CC)
@@ -181,21 +204,30 @@ void setup() {
     webServer.setTestManager(&testManager);
     if (!webServer.begin()) {
         Serial.println("[INIT] ERREUR : Web Server");
+        logger.log(LOG_ERROR, CAT_SYSTEM, "Web Server : echec démarrage");
     } else {
         Serial.printf("[INIT] Web UI accessible sur http://%s:%d\n",
                       WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
+        logger.log(LOG_INFO, CAT_SYSTEM, "Web UI sur http://%s:%d",
+                   WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
     }
 
     // 12. Initialiser le Calibrateur Acoustique (Phase 7)
     Serial.println("\n[INIT] Calibrateur Acoustique...");
     if (!calibrator.begin()) {
         Serial.println("[INIT] ATTENTION : Microphone I²S non disponible (calibration désactivée)");
+        logger.log(LOG_WARN, CAT_CAL, "Micro I2S non disponible (calibration désactivée)");
+    } else {
+        logger.log(LOG_INFO, CAT_CAL, "Calibrateur acoustique prêt");
     }
 
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée — Phase 8");
+    Serial.println("  Initialisation terminée — Phase 9");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
+
+    logger.log(LOG_INFO, CAT_SYSTEM, "Init terminée — heap libre: %d bytes",
+               ESP.getFreeHeap());
 
 #ifdef ENABLE_TEST_HARNESS
     delay(500);
@@ -233,6 +265,39 @@ void loop() {
 
     // 5b. Mise à jour du test manager (Phase 8)
     testManager.update();
+
+    // 5c. Détection de changements d'état pour le journal (Phase 9)
+    {
+        static bool last_kill = false;
+        static bool last_wifi = false;
+        static bool last_degrad = false;
+
+        bool cur_kill  = safetyManager.isKillSwitchActive();
+        bool cur_wifi  = WiFi.isConnected();
+        bool cur_degrad = safetyManager.isDegradationActive();
+
+        if (cur_kill != last_kill) {
+            logger.log(cur_kill ? LOG_CRITICAL : LOG_INFO, CAT_SAFETY,
+                       cur_kill ? "Kill switch activé automatiquement"
+                                : "Kill switch désactivé");
+            last_kill = cur_kill;
+        }
+        if (cur_wifi != last_wifi) {
+            if (cur_wifi) {
+                logger.log(LOG_INFO, CAT_SYSTEM, "WiFi reconnecté : %s",
+                           WiFi.localIP().toString().c_str());
+            } else {
+                logger.log(LOG_WARN, CAT_SYSTEM, "WiFi déconnecté");
+            }
+            last_wifi = cur_wifi;
+        }
+        if (cur_degrad != last_degrad) {
+            logger.log(cur_degrad ? LOG_WARN : LOG_INFO, CAT_SAFETY,
+                       cur_degrad ? "Dégradation gracieuse activée (seuil courant)"
+                                  : "Dégradation gracieuse levée");
+            last_degrad = cur_degrad;
+        }
+    }
 
     // 6. Mise à jour du serveur Web (WebSocket broadcast)
     webServer.update();

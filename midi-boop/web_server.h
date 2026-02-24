@@ -151,6 +151,10 @@ private:
     void handlePostTestStop(AsyncWebServerRequest* request);
     void handlePostTestClearLog(AsyncWebServerRequest* request);
 
+    // --- Log Manager (Phase 9) ---
+    void handleGetLogs(AsyncWebServerRequest* request);
+    void handlePostLogsClear(AsyncWebServerRequest* request);
+
     // DELETE — suppression
     void handleDeleteInstrument(AsyncWebServerRequest* request);
     void handleDeleteActuator(AsyncWebServerRequest* request);

@@ -170,6 +170,7 @@ tr:hover td{background:var(--bg2)}
   <button onclick="showPage('safety')">Safety</button>
   <button onclick="showPage('calibration')">Calibration</button>
   <button onclick="showPage('test')">Test</button>
+  <button onclick="showPage('logs')">Logs</button>
   <button onclick="showPage('settings')">Paramètres</button>
 </nav>
 
@@ -223,6 +224,14 @@ tr:hover td{background:var(--bg2)}
   <table>
     <thead><tr><th>ID</th><th>Type</th><th>État</th><th>Position</th></tr></thead>
     <tbody id="d-active-table"><tr><td colspan="4" style="color:var(--fg2)">Aucun actionneur actif</td></tr></tbody>
+  </table>
+
+  <div class="section-title" style="margin-top:20px">Derniers événements
+    <a onclick="showPage('logs')" style="float:right;font-size:12px;font-weight:400;color:var(--accent);cursor:pointer">Voir tous →</a>
+  </div>
+  <table>
+    <thead><tr><th style="width:80px">Temps</th><th style="width:60px">Niveau</th><th>Message</th></tr></thead>
+    <tbody id="d-log-table"><tr><td colspan="3" style="color:var(--fg2)">Aucun événement récent</td></tr></tbody>
   </table>
 </div>
 
@@ -724,6 +733,49 @@ tr:hover td{background:var(--bg2)}
   </table>
 </div>
 
+<!-- ============ LOGS ============ -->
+<div class="page" id="page-logs">
+  <div class="section-title">Journal système
+    <button class="btn sm" style="float:right;margin-left:8px" onclick="clearLogs()">Effacer</button>
+    <button class="btn sm" style="float:right" onclick="loadLogs()">Actualiser</button>
+  </div>
+  <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+    <div>
+      <label style="font-size:12px;color:var(--fg2)">Niveau min</label>
+      <select id="log-level-filter" onchange="renderLogs()" style="background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:4px 8px;border-radius:4px;margin-left:6px">
+        <option value="0">Tout (DEBUG+)</option>
+        <option value="1">INFO+</option>
+        <option value="2">WARN+</option>
+        <option value="3">ERROR+</option>
+        <option value="4">CRITICAL</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--fg2)">Catégorie</label>
+      <select id="log-cat-filter" onchange="renderLogs()" style="background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:4px 8px;border-radius:4px;margin-left:6px">
+        <option value="-1">Toutes</option>
+        <option value="0">Système</option>
+        <option value="1">MIDI</option>
+        <option value="2">Scheduler</option>
+        <option value="3">Safety</option>
+        <option value="4">Power</option>
+        <option value="5">Calibration</option>
+        <option value="6">Test</option>
+      </select>
+    </div>
+    <label style="font-size:12px;color:var(--fg2);margin-left:auto;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+    </label>
+  </div>
+  <div style="overflow-y:auto;max-height:calc(100vh - 280px)">
+    <table>
+      <thead><tr><th style="width:80px">Temps</th><th style="width:60px">Niveau</th><th style="width:75px">Catégorie</th><th>Message</th></tr></thead>
+      <tbody id="log-table"><tr><td colspan="4" style="color:var(--fg2)">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+  <div id="log-count-info" style="color:var(--fg2);font-size:12px;margin-top:8px;text-align:right"></div>
+</div>
+
 <script>
 // ============================================================================
 // State
@@ -740,6 +792,11 @@ const SERVO_BEHAVIORS = ['Frappe','Alterné','Gratter','Touche'];
 const SOL_BEHAVIORS = ['Frappe','Hit-and-Hold'];
 const CC_TARGETS = ['Position','Amplitude','Vitesse','PWM Hold'];
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+// Log Manager (Phase 9)
+let logCache = [];
+let logLastCount = 0;
+let logPollInterval = null;
 
 function noteName(n) { return NOTE_NAMES[n%12] + Math.floor(n/12-1); }
 
@@ -769,6 +826,12 @@ function connectWS() {
     try {
       const d = JSON.parse(evt.data);
       updateDashboard(d);
+      // Refresh logs si nouvelles entrées détectées
+      if (d.log_count !== undefined && d.log_count !== logLastCount) {
+        logLastCount = d.log_count;
+        loadDashboardLog();
+        if (currentPage === 'logs') loadLogs();
+      }
     } catch(e) {}
   };
 }
@@ -916,6 +979,7 @@ function showPage(page) {
   if (page === 'safety') loadSafety();
   if (page === 'calibration') { loadCalibrateStatus(); loadCalibrateResults(); }
   if (page === 'test') { loadTestStatus(); loadTestLog(); populateBurstSelect(); }
+  if (page === 'logs') loadLogs();
   if (page === 'settings') { loadWiFiConfig(); loadBuses(); }
 }
 
@@ -1740,6 +1804,122 @@ function populateBurstSelect() {
 }
 
 // ============================================================================
+// Log Manager (Phase 9)
+// ============================================================================
+
+function logLevelBadge(lvl) {
+  const names  = ['DBG','INF','WRN','ERR','CRT'];
+  const styles = [
+    'color:var(--fg2)',
+    'color:var(--green)',
+    'color:#f59e0b',
+    'color:var(--red)',
+    'color:var(--red);font-weight:700'
+  ];
+  return '<span style="font-size:11px;font-family:monospace;'+(styles[lvl]||'')+'">'+(names[lvl]||'?')+'</span>';
+}
+
+function logCatBadge(cat) {
+  const names = ['SYS','MIDI','SCHED','SAFE','PWR','CAL','TEST'];
+  return '<span style="font-size:11px;color:var(--fg2)">'+(names[cat]||'?')+'</span>';
+}
+
+function formatLogTime(ms) {
+  const t = Math.floor(ms / 1000);
+  const h = Math.floor(t / 3600).toString().padStart(2,'0');
+  const m = Math.floor((t % 3600) / 60).toString().padStart(2,'0');
+  const s = (t % 60).toString().padStart(2,'0');
+  return h+':'+m+':'+s;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+async function loadLogs() {
+  try {
+    const r = await api('/api/logs');
+    if (r && r.entries) {
+      logCache = r.entries;
+      renderLogs();
+      const info = document.getElementById('log-count-info');
+      if (info) info.textContent = logCache.length + ' entrée(s) — ' + r.count + ' au total';
+    }
+  } catch(e) {}
+}
+
+function renderLogs() {
+  const minLevel  = parseInt(document.getElementById('log-level-filter')?.value  || '0');
+  const catFilter = parseInt(document.getElementById('log-cat-filter')?.value     || '-1');
+  const tbody = document.getElementById('log-table');
+  if (!tbody) return;
+
+  const filtered = logCache.filter(e => e.lvl >= minLevel && (catFilter < 0 || e.cat === catFilter));
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg2)">Aucune entrée</td></tr>';
+    return;
+  }
+
+  let html = '';
+  for (const e of filtered) {
+    html += '<tr>';
+    html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap">' + formatLogTime(e.t) + '</td>';
+    html += '<td>' + logLevelBadge(e.lvl) + '</td>';
+    html += '<td>' + logCatBadge(e.cat) + '</td>';
+    html += '<td style="font-size:12px">' + escHtml(e.msg) + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+
+  if (document.getElementById('log-autoscroll')?.checked) {
+    const wrap = tbody.closest('div[style*="overflow"]');
+    if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  }
+}
+
+function clearLogs() {
+  if (!confirm('Effacer tout le journal système ?')) return;
+  api('/api/logs/clear', 'POST', {}).then(r => {
+    if (r && r.ok) {
+      logCache = [];
+      renderLogs();
+      toast('Journal effacé', 'ok');
+      loadDashboardLog();
+    } else {
+      toast('Erreur', 'error');
+    }
+  });
+}
+
+// Mini-log pour le Dashboard (5 dernières entrées INFO+)
+async function loadDashboardLog() {
+  try {
+    const r = await api('/api/logs');
+    if (!r || !r.entries) return;
+    const recent = r.entries.filter(e => e.lvl >= 1).slice(0, 5);
+    const tbody = document.getElementById('d-log-table');
+    if (!tbody) return;
+    if (recent.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--fg2)">Aucun événement récent</td></tr>';
+      return;
+    }
+    let html = '';
+    for (const e of recent) {
+      html += '<tr>';
+      html += '<td style="font-size:11px;font-family:monospace">' + formatLogTime(e.t) + '</td>';
+      html += '<td>' + logLevelBadge(e.lvl) + '</td>';
+      html += '<td style="font-size:12px">' + escHtml(e.msg) + '</td>';
+      html += '</tr>';
+    }
+    tbody.innerHTML = html;
+  } catch(e) {}
+}
+
+// ============================================================================
 // Init
 // ============================================================================
 window.addEventListener('load', () => {
@@ -1747,6 +1927,7 @@ window.addEventListener('load', () => {
   // Preload data
   loadActuators().then(() => { loadInstrumentSelects(); populateBurstSelect(); });
   api('/api/routing').then(r => { routing = r || []; });
+  loadDashboardLog();
 });
 </script>
 </body>
