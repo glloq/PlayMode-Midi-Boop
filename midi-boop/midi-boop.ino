@@ -4,13 +4,13 @@
 // ============================================================================
 //
 // Architecture dual-core ESP32 :
-//   Core 0 : WiFi, MIDI parsing, Web UI (loop)
-//   Core 1 : Scheduler temps réel, PCA/I²C, sécurité
+//   Core 0 : WiFi, MIDI parsing, Power Manager, Web UI (loop)
+//   Core 1 : Scheduler temps réel, PCA/I²C, Safety Manager
 //
 // Bibliothèques requises :
 //   - Adafruit PWM Servo Driver Library
 //   - ArduinoJson
-//   - MIDI Library (FortySevenEffects) — pour AppleMIDI
+//   - MIDI Library (FortySevenEffects) — pour Serial MIDI
 //   - AppleMIDI (lathoub) — pour RTP-MIDI
 //   - ESPAsyncWebServer (phase 6)
 //   - AsyncTCP (phase 6)
@@ -25,18 +25,22 @@
 #include "scheduler.h"
 #include "config_manager.h"
 #include "safety_manager.h"
+#include "power_manager.h"
 #include "midi_input.h"
 #include "event_normalizer.h"
 
 // --- Objets globaux (Phase 1) ---
-PCADriver pcaDriver;
+PCADriver      pcaDriver;
 ActuatorEngine actuatorEngine(pcaDriver);
-Scheduler scheduler(actuatorEngine);
-ConfigManager configManager;
+Scheduler      scheduler(actuatorEngine);
+ConfigManager  configManager;
 
 // --- Objets globaux (Phase 2) ---
 SafetyManager safetyManager(pcaDriver);
-MidiInput midiInput;
+MidiInput     midiInput;
+
+// --- Objets globaux (Phase 5) ---
+PowerManager   powerManager;
 EventNormalizer eventNormalizer(scheduler, configManager);
 
 // --- Mode test (décommenter pour activer le test harness sans MIDI) ---
@@ -55,7 +59,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B∞p v0.2");
+    Serial.println("  PlayMode Midi B\u221ep v0.5");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -110,16 +114,33 @@ void setup() {
         Serial.println("[INIT] ERREUR : Scheduler");
     }
 
-    // 7. Initialiser MIDI Input (Serial + WiFi/UDP + RTP-MIDI)
+    // 7. Initialiser le Power Manager (Phase 5)
+    Serial.println("\n[INIT] Power Manager...");
+    {
+        PowerBudget budget = {};
+        budget.global_max_ma         = POWER_GLOBAL_MAX_MA;
+        budget.servo_bus_max_ma      = POWER_SERVO_BUS_MAX_MA;
+        budget.solenoid_bus_max_ma   = POWER_SOLENOID_BUS_MAX_MA;
+        budget.global_max_polyphony  = POWER_MAX_POLYPHONY;
+        budget.smart_rejection       = true;  // Rejet intelligent par vélocité
+        // Polyphonie par instrument : 4 par défaut (modifiable depuis Web UI phase 6)
+        for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+            budget.instrument_max_polyphony[i] = 4;
+        }
+        powerManager.begin(budget);
+    }
+
+    // 8. Initialiser MIDI Input (Serial + WiFi/UDP + RTP-MIDI)
     Serial.println("\n[INIT] MIDI Input...");
     midiInput.begin(configManager.getWiFiConfig());
 
-    // 8. Initialiser l'Event Normalizer (mapping notes/CC)
+    // 9. Initialiser l'Event Normalizer avec le Power Manager (Phase 5)
     Serial.println("\n[INIT] Event Normalizer...");
+    eventNormalizer.setPowerManager(&powerManager);
     eventNormalizer.begin();
 
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée — Phase 2");
+    Serial.println("  Initialisation terminée — Phase 5");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
@@ -131,7 +152,7 @@ void setup() {
 }
 
 // ============================================================================
-// LOOP — Core 0 : Pipeline MIDI complet
+// LOOP — Core 0 : Pipeline MIDI complet + Power Manager
 // ============================================================================
 void loop() {
     // 1. Lire les entrées MIDI et remplir le jitter buffer
@@ -143,24 +164,46 @@ void loop() {
         eventNormalizer.processMidiEvent(midi_event);
     }
 
-    // 3. Affichage périodique de l'état
+    // 3. Mise à jour périodique du Power Manager
+    {
+        ActuatorConfig* actuators = configManager.getActuators();
+        uint8_t count = configManager.getActuatorCount();
+        // Construire un tableau de pointeurs pour le power manager
+        static ActuatorConfig* act_ptrs[MAX_ACTUATORS];
+        for (uint8_t i = 0; i < count; i++) act_ptrs[i] = &actuators[i];
+        powerManager.update(act_ptrs, count);
+    }
+
+    // 4. Affichage périodique de l'état (toutes les 5 secondes)
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
     if (now - last_status > 5000) {
         last_status = now;
+
+        const PowerStats& pwr = powerManager.getStats();
+
         Serial.printf("[STATUS] Sched: %d queue, %d traités | "
-                      "MIDI: %d reçus, %d routés, %d unmapped | "
-                      "Safety: %dmA, %d actifs%s | Heap: %d\n",
+                      "MIDI: %d reçus, %d routés, %d unmapped, %d power-rejected | "
+                      "Safety: %dmA, %d actifs%s | "
+                      "Power: %umA/%umA (%u%%) srv=%umA sol=%umA%s | "
+                      "Heap: %d\n",
                       scheduler.getQueuedEventCount(),
                       scheduler.getProcessedCount(),
                       midiInput.getReceivedCount(),
                       eventNormalizer.getRoutedCount(),
                       eventNormalizer.getUnmappedCount(),
+                      eventNormalizer.getPowerRejectedCount(),
                       safetyManager.getEstimatedCurrentMA(),
                       safetyManager.getActiveActuatorCount(),
                       safetyManager.isKillSwitchActive() ? " [KILL]" :
                           (safetyManager.isDegradationActive() ? " [DEGRAD]" : ""),
+                      pwr.total_estimated_ma,
+                      powerManager.getBudget().global_max_ma,
+                      pwr.budget_used_percent,
+                      pwr.servo_bus_ma,
+                      pwr.solenoid_bus_ma,
+                      pwr.degradation_active ? " [DEGRAD]" : "",
                       ESP.getFreeHeap());
     }
 
@@ -268,7 +311,7 @@ void runTestSequence() {
     // Test 2 : Servo Alterné (actionneur 1) — 3 notes successives
     for (int i = 0; i < 3; i++) {
         SchedulerEvent evt = {};
-        evt.trigger_time_us = now_us + 500000 + (i * 300000);  // +500ms, +800ms, +1100ms
+        evt.trigger_time_us = now_us + 500000 + (i * 300000);
         evt.actuator_id = 1;
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 80;

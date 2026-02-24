@@ -2,17 +2,24 @@
 
 // ============================================================================
 // PlayMode Midi B∞p — Event Normalizer (implémentation)
+// Phase 5 : intégration PowerManager
 // ============================================================================
 
 EventNormalizer::EventNormalizer(Scheduler& scheduler, ConfigManager& configManager)
     : _scheduler(scheduler),
       _configManager(configManager),
+      _powerManager(nullptr),
       _routing_count(0),
       _processed_count(0),
       _routed_count(0),
-      _unmapped_count(0) {
+      _unmapped_count(0),
+      _power_rejected_count(0) {
     memset(_routing, 0, sizeof(_routing));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
+}
+
+void EventNormalizer::setPowerManager(PowerManager* pm) {
+    _powerManager = pm;
 }
 
 // ============================================================================
@@ -45,7 +52,9 @@ void EventNormalizer::begin() {
         }
     }
 
-    Serial.printf("[NORM] %d instruments configurés\n", _routing_count);
+    Serial.printf("[NORM] %d instruments configurés%s\n",
+                  _routing_count,
+                  _powerManager ? " [PowerManager actif]" : "");
 }
 
 // ============================================================================
@@ -69,16 +78,16 @@ void EventNormalizer::processMidiEvent(const MidiEvent& event) {
     // Router selon le type de message
     switch (event.type) {
         case MIDI_MSG_NOTE_ON:
-            handleNoteOn(inst_idx, event);
+            handleNoteOn((uint8_t)inst_idx, event);
             break;
         case MIDI_MSG_NOTE_OFF:
-            handleNoteOff(inst_idx, event);
+            handleNoteOff((uint8_t)inst_idx, event);
             break;
         case MIDI_MSG_CC:
-            handleCC(inst_idx, event);
+            handleCC((uint8_t)inst_idx, event);
             break;
         case MIDI_MSG_PROGRAM_CHANGE:
-            handleProgramChange(inst_idx, event);
+            handleProgramChange((uint8_t)inst_idx, event);
             break;
     }
 }
@@ -104,25 +113,33 @@ void EventNormalizer::handleNoteOn(uint8_t instrument_index, const MidiEvent& ev
     // Appliquer la courbe de vélocité
     uint8_t mapped_velocity = applyVelocityCurve(instrument_index, event.data2);
 
-    // Récupérer la latence de l'actionneur pour compensation
-    ActuatorConfig* actuators = _configManager.getActuators();
-    uint8_t act_count = _configManager.getActuatorCount();
-    uint16_t actuator_latency = 0;
+    // Retrouver la config de l'actionneur cible
+    ActuatorConfig* act = findActuatorConfig(mapping->actuator_id);
 
-    for (uint8_t i = 0; i < act_count; i++) {
-        if (actuators[i].id == mapping->actuator_id) {
-            actuator_latency = actuators[i].latency_ms;
-            break;
+    // --- Vérification PowerManager (Phase 5) ---
+    if (_powerManager != nullptr && act != nullptr) {
+        if (!_powerManager->canActivate(*act, instrument_index, mapped_velocity)) {
+            _power_rejected_count++;
+            return;  // Budget énergétique ou polyphonie dépassé
         }
     }
+
+    // Récupérer la latence de l'actionneur pour compensation
+    uint16_t actuator_latency = (act != nullptr) ? act->latency_ms : 0;
 
     // Calculer le timestamp avec compensation de latence
     uint32_t trigger_time = computeTriggerTime(instrument_index, actuator_latency);
 
     // Envoyer au scheduler
     if (pushSchedulerEvent(mapping->actuator_id, ACTION_NOTE_ON,
-                           mapped_velocity, 0, trigger_time, 0)) {
+                           mapped_velocity, 0, trigger_time, 0,
+                           instrument_index)) {
         _routed_count++;
+
+        // Notifier le PowerManager de l'activation effective
+        if (_powerManager != nullptr && act != nullptr) {
+            _powerManager->notifyActivation(*act, instrument_index, mapped_velocity);
+        }
     }
 }
 
@@ -141,8 +158,17 @@ void EventNormalizer::handleNoteOff(uint8_t instrument_index, const MidiEvent& e
     uint32_t trigger_time = (uint32_t)esp_timer_get_time();
 
     pushSchedulerEvent(mapping->actuator_id, ACTION_NOTE_OFF,
-                       event.data2, 0, trigger_time, 0);
+                       event.data2, 0, trigger_time, 0,
+                       instrument_index);
     _routed_count++;
+
+    // Notifier le PowerManager de la désactivation
+    if (_powerManager != nullptr) {
+        ActuatorConfig* act = findActuatorConfig(mapping->actuator_id);
+        if (act != nullptr) {
+            _powerManager->notifyDeactivation(*act, instrument_index);
+        }
+    }
 }
 
 // ============================================================================
@@ -160,17 +186,7 @@ void EventNormalizer::handleCC(uint8_t instrument_index, const MidiEvent& event)
     uint16_t mapped_value = mapCCValue(event.data2, mapping->range_min, mapping->range_max);
 
     // Trouver l'actionneur cible
-    ActuatorConfig* actuators = _configManager.getActuators();
-    uint8_t act_count = _configManager.getActuatorCount();
-    ActuatorConfig* target = nullptr;
-
-    for (uint8_t i = 0; i < act_count; i++) {
-        if (actuators[i].id == mapping->actuator_id) {
-            target = &actuators[i];
-            break;
-        }
-    }
-
+    ActuatorConfig* target = findActuatorConfig(mapping->actuator_id);
     if (target == nullptr) return;
 
     uint32_t trigger_time = (uint32_t)esp_timer_get_time();
@@ -337,8 +353,9 @@ void EventNormalizer::reloadConfig() {
 // ============================================================================
 
 uint32_t EventNormalizer::getProcessedCount() const { return _processed_count; }
-uint32_t EventNormalizer::getRoutedCount() const { return _routed_count; }
-uint32_t EventNormalizer::getUnmappedCount() const { return _unmapped_count; }
+uint32_t EventNormalizer::getRoutedCount() const     { return _routed_count; }
+uint32_t EventNormalizer::getUnmappedCount() const   { return _unmapped_count; }
+uint32_t EventNormalizer::getPowerRejectedCount() const { return _power_rejected_count; }
 
 // ============================================================================
 // Méthodes internes
@@ -375,6 +392,18 @@ CCMapping* EventNormalizer::findCCMapping(uint8_t instrument_index, uint8_t cc_n
     for (uint8_t i = 0; i < routing.cc_map_count; i++) {
         if (routing.cc_map[i].cc_number == cc_number) {
             return &routing.cc_map[i];
+        }
+    }
+    return nullptr;
+}
+
+ActuatorConfig* EventNormalizer::findActuatorConfig(uint8_t actuator_id) {
+    ActuatorConfig* actuators = _configManager.getActuators();
+    uint8_t count = _configManager.getActuatorCount();
+
+    for (uint8_t i = 0; i < count; i++) {
+        if (actuators[i].id == actuator_id) {
+            return &actuators[i];
         }
     }
     return nullptr;
@@ -423,26 +452,29 @@ uint32_t EventNormalizer::computeTriggerTime(uint8_t instrument_index,
     // Résultat : tous les sons arrivent au même moment physique.
     uint16_t compensation_ms = max_lat - min(actuator_latency_ms, max_lat);
 
-    // Ajouter le délai de compensation
     return now_us + ((uint32_t)compensation_ms * 1000);
 }
 
-uint16_t EventNormalizer::mapCCValue(uint8_t cc_value, uint16_t range_min, uint16_t range_max) {
-    return map(cc_value, 0, 127, range_min, range_max);
+uint16_t EventNormalizer::mapCCValue(uint8_t cc_value,
+                                      uint16_t range_min, uint16_t range_max) {
+    return (uint16_t)map(cc_value, 0, 127, range_min, range_max);
 }
 
 bool EventNormalizer::pushSchedulerEvent(uint8_t actuator_id, EventAction action,
                                           uint8_t velocity, uint16_t value,
-                                          uint32_t trigger_time_us, uint8_t priority) {
-    SchedulerEvent event;
-    event.trigger_time_us = trigger_time_us;
-    event.actuator_id = actuator_id;
-    event.action = action;
-    event.velocity = velocity;
-    event.value = value;
-    event.priority = priority;
+                                          uint32_t trigger_time_us, uint8_t priority,
+                                          uint8_t instrument_index) {
+    (void)instrument_index;  // Utilisé dans handleNoteOn/Off pour le logging
 
-    return _scheduler.pushEvent(event);
+    SchedulerEvent evt;
+    evt.trigger_time_us = trigger_time_us;
+    evt.actuator_id     = actuator_id;
+    evt.action          = action;
+    evt.velocity        = velocity;
+    evt.value           = value;
+    evt.priority        = priority;
+
+    return _scheduler.pushEvent(evt);
 }
 
 void EventNormalizer::computeMaxLatency(uint8_t instrument_index) {
@@ -485,10 +517,10 @@ void EventNormalizer::buildDefaultMapping(uint8_t instrument_index) {
 
     for (uint8_t i = 0; i < act_count && i < MAX_NOTE_MAPPINGS; i++) {
         NoteMapping& nm = routing.note_map[i];
-        nm.midi_note = base_note + i;
-        nm.actuator_id = instruments[instrument_index].actuator_ids[i];
+        nm.midi_note       = base_note + i;
+        nm.actuator_id     = instruments[instrument_index].actuator_ids[i];
         nm.behavior_override = 0xFF;  // Utiliser le défaut de l'actionneur
-        nm.enabled = true;
+        nm.enabled         = true;
         routing.note_map_count++;
     }
 }

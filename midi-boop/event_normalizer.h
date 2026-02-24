@@ -6,6 +6,7 @@
 #include "types.h"
 #include "scheduler.h"
 #include "config_manager.h"
+#include "power_manager.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — Event Normalizer (MIDI → SchedulerEvent)
@@ -15,6 +16,9 @@
 // applique le mapping notes/CC, les courbes de vélocité,
 // la compensation de latence, et produit des SchedulerEvent.
 //
+// Phase 5 : intègre le PowerManager pour contrôle de polyphonie et
+// de budget énergétique avant chaque NOTE_ON.
+//
 
 class EventNormalizer {
 public:
@@ -22,6 +26,9 @@ public:
 
     // Initialise les tables de routage depuis la configuration
     void begin();
+
+    // Enregistre le PowerManager (optionnel — peut être null)
+    void setPowerManager(PowerManager* pm);
 
     // Traite un événement MIDI et génère les SchedulerEvents correspondants
     void processMidiEvent(const MidiEvent& event);
@@ -52,10 +59,12 @@ public:
     uint32_t getProcessedCount() const;
     uint32_t getRoutedCount() const;
     uint32_t getUnmappedCount() const;
+    uint32_t getPowerRejectedCount() const;
 
 private:
-    Scheduler& _scheduler;
-    ConfigManager& _configManager;
+    Scheduler&      _scheduler;
+    ConfigManager&  _configManager;
+    PowerManager*   _powerManager;  // Optionnel (Phase 5)
 
     // Tables de routage par instrument
     MidiRoutingConfig _routing[MAX_INSTRUMENTS];
@@ -68,6 +77,7 @@ private:
     uint32_t _processed_count;
     uint32_t _routed_count;
     uint32_t _unmapped_count;
+    uint32_t _power_rejected_count;
 
     // --- Méthodes internes ---
 
@@ -80,10 +90,10 @@ private:
     // Trouve le mapping CC pour un instrument (nullptr si non trouvé)
     CCMapping* findCCMapping(uint8_t instrument_index, uint8_t cc_number);
 
-    // Traite un Note On
+    // Traite un Note On (avec vérification PowerManager)
     void handleNoteOn(uint8_t instrument_index, const MidiEvent& event);
 
-    // Traite un Note Off
+    // Traite un Note Off (avec notification PowerManager)
     void handleNoteOff(uint8_t instrument_index, const MidiEvent& event);
 
     // Traite un Control Change
@@ -102,15 +112,20 @@ private:
     uint16_t mapCCValue(uint8_t cc_value, uint16_t range_min, uint16_t range_max);
 
     // Crée et envoie un SchedulerEvent au scheduler
+    // Pour les NOTE_ON, vérifie le PowerManager avant de pousser l'événement.
     bool pushSchedulerEvent(uint8_t actuator_id, EventAction action,
                             uint8_t velocity, uint16_t value,
-                            uint32_t trigger_time_us, uint8_t priority);
+                            uint32_t trigger_time_us, uint8_t priority,
+                            uint8_t instrument_index = MAX_INSTRUMENTS);
 
     // Calcule la latence maximale parmi les actionneurs d'un instrument
     void computeMaxLatency(uint8_t instrument_index);
 
     // Construit le mapping par défaut (1:1 note → actuateur)
     void buildDefaultMapping(uint8_t instrument_index);
+
+    // Retrouve la config d'un actionneur par ID (depuis ConfigManager)
+    ActuatorConfig* findActuatorConfig(uint8_t actuator_id);
 };
 
 #endif // EVENT_NORMALIZER_H
