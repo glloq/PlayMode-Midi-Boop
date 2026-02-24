@@ -8,6 +8,7 @@
 #include "midi_transport.h"
 #include "pca_driver.h"
 #include "actuator_engine.h"
+#include "calibrator.h"
 #include <ArduinoJson.h>
 
 // ============================================================================
@@ -27,6 +28,7 @@ WebServer::WebServer(uint16_t port)
     , _transport(nullptr)
     , _pca(nullptr)
     , _engine(nullptr)
+    , _calibrator(nullptr)
     , _last_ws_broadcast_ms(0)
 {
 }
@@ -44,6 +46,10 @@ void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
     _transport  = transport;
     _pca        = pca;
     _engine     = engine;
+}
+
+void WebServer::setCalibrator(Calibrator* calibrator) {
+    _calibrator = calibrator;
 }
 
 bool WebServer::begin() {
@@ -263,6 +269,30 @@ void WebServer::setupAPIRoutes() {
         });
     killHandler->setMethod(HTTP_POST);
     _server.addHandler(killHandler);
+
+    // --- Calibration acoustique (Phase 7) ---
+    _server.on("/api/calibrate/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetCalibrateStatus(req);
+    });
+    _server.on("/api/calibrate/results", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetCalibrateResults(req);
+    });
+
+    auto* calHandler = new AsyncCallbackJsonWebHandler("/api/calibrate",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostCalibrate(req, (uint8_t*)body.c_str(), body.length());
+        });
+    calHandler->setMethod(HTTP_POST);
+    _server.addHandler(calHandler);
+
+    _server.on("/api/calibrate/apply", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostCalibrateApply(req);
+    });
+    _server.on("/api/calibrate/stop", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostCalibrateStop(req);
+    });
 }
 
 // ============================================================================
@@ -1137,4 +1167,150 @@ void WebServer::buildBusJSON(const BusConfig& bus, String& output) {
     doc["enabled"] = bus.enabled;
     doc["pca_count"] = bus.pca_count;
     serializeJson(doc, output);
+}
+
+// ============================================================================
+// Calibration acoustique (Phase 7)
+// ============================================================================
+
+static const char* calStateName(CalibrationState s) {
+    switch (s) {
+        case CAL_IDLE:       return "idle";
+        case CAL_AMBIENT:    return "ambient";
+        case CAL_TRIGGERING: return "triggering";
+        case CAL_RECORDING:  return "recording";
+        case CAL_PAUSING:    return "pausing";
+        case CAL_COMPLETE:   return "complete";
+        case CAL_ERROR:      return "error";
+        default:             return "unknown";
+    }
+}
+
+void WebServer::handleGetCalibrateStatus(AsyncWebServerRequest* request) {
+    StaticJsonDocument<256> doc;
+
+    if (!_calibrator) {
+        doc["available"] = false;
+        doc["state"]     = "idle";
+        String out; serializeJson(doc, out);
+        request->send(200, "application/json", out);
+        return;
+    }
+
+    doc["available"]    = true;
+    doc["state"]        = calStateName(_calibrator->getState());
+    doc["running"]      = _calibrator->isRunning();
+    doc["progress"]     = _calibrator->getProgress();
+    doc["current_act"]  = _calibrator->getCurrentActuatorId();
+    doc["result_count"] = _calibrator->getResultCount();
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
+    if (!_calibrator) {
+        request->send(503, "application/json",
+                      "{\"error\":\"calibrateur non disponible\"}");
+        return;
+    }
+
+    StaticJsonDocument<1024> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    uint8_t count = _calibrator->getResultCount();
+
+    // Itérer sur les actionneurs actifs pour récupérer leurs résultats
+    if (_config) {
+        ActuatorConfig* acts     = _config->getActuators();
+        uint8_t         act_count = _config->getActuatorCount();
+
+        for (uint8_t i = 0; i < act_count; i++) {
+            const CalibrationResult* res =
+                _calibrator->getResult(acts[i].id);
+
+            JsonObject obj = arr.createNestedObject();
+            obj["actuator_id"]     = acts[i].id;
+            obj["current_latency"] = acts[i].latency_ms;
+
+            if (res) {
+                obj["measured_ms"]   = res->measured_latency_ms;
+                obj["samples_taken"] = res->samples_taken;
+                obj["success"]       = res->success;
+                obj["timestamp_ms"]  = res->timestamp_ms;
+            } else {
+                obj["measured_ms"]   = nullptr;
+                obj["success"]       = nullptr;
+            }
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handlePostCalibrate(AsyncWebServerRequest* request,
+                                    uint8_t* data, size_t len) {
+    if (!_calibrator) {
+        request->send(503, "application/json",
+                      "{\"error\":\"calibrateur non disponible\"}");
+        return;
+    }
+    if (_calibrator->isRunning()) {
+        request->send(409, "application/json",
+                      "{\"error\":\"calibration en cours\"}");
+        return;
+    }
+
+    StaticJsonDocument<128> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        return;
+    }
+
+    bool ok;
+    if (doc["all"] | false) {
+        ok = _calibrator->startCalibrationAll();
+    } else {
+        uint8_t act_id = doc["id"] | 0;
+        ok = _calibrator->startCalibration(act_id);
+    }
+
+    if (ok) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(400, "application/json",
+                      "{\"error\":\"impossible de démarrer la calibration\"}");
+    }
+}
+
+void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
+    if (!_calibrator) {
+        request->send(503, "application/json",
+                      "{\"error\":\"calibrateur non disponible\"}");
+        return;
+    }
+
+    uint8_t applied = _calibrator->applyResults();
+
+    StaticJsonDocument<64> doc;
+    doc["ok"]      = true;
+    doc["applied"] = applied;
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handlePostCalibrateStop(AsyncWebServerRequest* request) {
+    if (!_calibrator) {
+        request->send(503, "application/json",
+                      "{\"error\":\"calibrateur non disponible\"}");
+        return;
+    }
+    _calibrator->stop();
+    request->send(200, "application/json", "{\"ok\":true}");
 }

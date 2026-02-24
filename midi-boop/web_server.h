@@ -15,6 +15,7 @@ class MidiDispatcher;
 class MidiTransport;
 class PCADriver;
 class ActuatorEngine;
+class Calibrator;
 
 // ============================================================================
 // PlayMode Midi B∞p — Web Server (Phase 6)
@@ -38,6 +39,9 @@ public:
                     SafetyManager* safety, PowerManager* power,
                     MidiDispatcher* dispatcher, MidiTransport* transport,
                     PCADriver* pca, ActuatorEngine* engine);
+
+    // Enregistre le calibrateur (Phase 7, optionnel)
+    void setCalibrator(Calibrator* calibrator);
 
     // Démarre le serveur HTTP + WebSocket
     bool begin();
@@ -70,6 +74,7 @@ private:
     MidiTransport*   _transport;
     PCADriver*       _pca;
     ActuatorEngine*  _engine;
+    Calibrator*      _calibrator;
 
     // Timing WebSocket broadcast
     uint32_t _last_ws_broadcast_ms;
@@ -120,6 +125,14 @@ private:
     void handlePostKillSwitch(AsyncWebServerRequest* request,
                               uint8_t* data, size_t len);
     void handlePostScanI2C(AsyncWebServerRequest* request);
+
+    // --- Calibration acoustique (Phase 7) ---
+    void handleGetCalibrateStatus(AsyncWebServerRequest* request);
+    void handleGetCalibrateResults(AsyncWebServerRequest* request);
+    void handlePostCalibrate(AsyncWebServerRequest* request,
+                             uint8_t* data, size_t len);
+    void handlePostCalibrateApply(AsyncWebServerRequest* request);
+    void handlePostCalibrateStop(AsyncWebServerRequest* request);
 
     // DELETE — suppression
     void handleDeleteInstrument(AsyncWebServerRequest* request);

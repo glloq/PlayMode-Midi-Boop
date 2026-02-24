@@ -109,8 +109,25 @@
 #define WEB_WS_BROADCAST_MS      200     // Intervalle broadcast WebSocket stats (ms)
 #define WEB_MAX_WS_CLIENTS       4       // Max clients WebSocket simultanés
 
+// --- Calibrateur Acoustique (Phase 7) ---
+#define CAL_I2S_PORT            0       // Port I²S ESP32 (0 ou 1)
+#define CAL_I2S_WS_PIN          15      // Word Select / LRCK (INMP441 L/R → GND = left)
+#define CAL_I2S_SCK_PIN         14      // Bit Clock / BCLK
+#define CAL_I2S_SD_PIN          32      // Data In (SD/DOUT du microphone)
+#define CAL_SAMPLE_RATE         16000   // Fréquence d'échantillonnage (Hz)
+#define CAL_DMA_BUF_COUNT       8       // Nombre de buffers DMA I²S
+#define CAL_DMA_BUF_LEN         128     // Longueur d'un buffer DMA (samples)
+#define CAL_READ_CHUNK          64      // Samples lus par appel update()
+#define CAL_AMBIENT_MS          80      // Durée mesure bruit ambiant (ms)
+#define CAL_MEASURE_WINDOW_MS   350     // Fenêtre max de détection post-trigger (ms)
+#define CAL_RETRIES             3       // Mesures pour moyennage par actionneur
+#define CAL_ONSET_MULTIPLIER    4       // Seuil onset = ambient_mean_abs × mult
+#define CAL_ONSET_MIN_THRESHOLD 500     // Seuil absolu minimum (LSB sur 24 bits)
+#define CAL_INTER_RETRY_MS      600     // Délai entre essais (ms)
+#define CAL_TRIGGER_VELOCITY    110     // Vélocité MIDI pour les frappes de calibration
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          4       // v4 : phase 4 pipeline + phase 5 power + phase 6 web
+#define CONFIG_VERSION          5       // v5 : + calibrateur acoustique (phase 7)
 
 #endif // CONFIG_H
