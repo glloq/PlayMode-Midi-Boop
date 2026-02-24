@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "midi_types.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — Structures de données partagées
@@ -123,33 +124,8 @@ struct EventComparator {
 };
 
 // ============================================================================
-// Phase 2 — MIDI, Mapping, Safety
+// Mapping MIDI et Sécurité
 // ============================================================================
-
-// --- Source d'entrée MIDI ---
-enum MidiSource : uint8_t {
-    MIDI_SOURCE_SERIAL  = 0,   // MIDI DIN / série hardware
-    MIDI_SOURCE_UDP     = 1,   // UDP brut sur WiFi
-    MIDI_SOURCE_RTP     = 2    // RTP-MIDI (AppleMIDI)
-};
-
-// --- Type de message MIDI ---
-enum MidiMessageType : uint8_t {
-    MIDI_MSG_NOTE_OFF       = 0x80,
-    MIDI_MSG_NOTE_ON        = 0x90,
-    MIDI_MSG_CC             = 0xB0,
-    MIDI_MSG_PROGRAM_CHANGE = 0xC0
-};
-
-// --- Événement MIDI brut (avant normalisation) ---
-struct MidiEvent {
-    uint32_t receive_time_us;    // Timestamp réception (esp_timer_get_time)
-    MidiMessageType type;         // Type de message
-    uint8_t channel;              // Canal MIDI 0-15
-    uint8_t data1;                // Note number ou CC number
-    uint8_t data2;                // Velocity ou CC value
-    MidiSource source;            // Source du message
-};
 
 // --- Mapping note MIDI → actionneur ---
 struct NoteMapping {
@@ -213,14 +189,6 @@ struct SafetyState {
     bool kill_switch_active;              // Kill switch déclenché
     bool degradation_active;              // Dégradation gracieuse active
     bool over_current;                    // Dépassement courant total
-};
-
-// --- Configuration WiFi (pour MIDI réseau) ---
-struct WiFiConfig {
-    char ssid[WIFI_SSID_MAX_LEN];
-    char password[WIFI_PASS_MAX_LEN];
-    bool enabled;
-    bool ap_mode;                  // true = Access Point, false = Station
 };
 
 #endif // TYPES_H

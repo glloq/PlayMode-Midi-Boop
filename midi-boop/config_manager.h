@@ -6,7 +6,6 @@
 #include <LittleFS.h>
 #include "config.h"
 #include "types.h"
-#include "midi_types.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — Config Manager (JSON / LittleFS)
@@ -50,8 +49,12 @@ public:
 
     // --- WiFi ---
 
-    WiFiConfig& getWiFiConfig();
+    WiFiConfig* getWiFiConfig();
     void setWiFiConfig(const WiFiConfig& config);
+
+    // --- MIDI Input ---
+
+    MidiInputConfig* getMidiInputConfig();
 
     // --- Routage MIDI ---
 
@@ -59,13 +62,11 @@ public:
     uint8_t getRoutingCount() const;
     bool addRoutingConfig(const MidiRoutingConfig& routing);
 
+    // Cherche le routage pour un instrument donné (par index)
+    MidiRoutingConfig* getRoutingForInstrument(uint8_t instrument_index);
+
     // Version de la config
     uint8_t getVersion() const;
-
-    // --- Accesseurs Phase 3 (WiFi + MIDI) ---
-
-    WiFiConfig* getWiFiConfig();
-    MidiInputConfig* getMidiInputConfig();
 
 private:
     WiFiConfig _wifi_config;
@@ -75,7 +76,6 @@ private:
     uint8_t _actuator_count;
     InstrumentConfig _instruments[MAX_INSTRUMENTS];
     uint8_t _instrument_count;
-    WiFiConfig _wifi_config;
     MidiRoutingConfig _routing_configs[MAX_INSTRUMENTS];
     uint8_t _routing_count;
     uint8_t _version;
@@ -103,6 +103,12 @@ private:
 
     // Désérialise la config WiFi depuis JSON
     void deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj);
+
+    // Sérialise la config MIDI Input en JSON
+    void serializeMidiInput(const MidiInputConfig& midi, JsonObject& obj);
+
+    // Désérialise la config MIDI Input depuis JSON
+    void deserializeMidiInput(MidiInputConfig& midi, const JsonObject& obj);
 
     // Sérialise un routage MIDI en JSON
     void serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj);

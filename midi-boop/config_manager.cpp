@@ -13,7 +13,6 @@ ConfigManager::ConfigManager()
     memset(&_midi_input_config, 0, sizeof(_midi_input_config));
     memset(_actuators, 0, sizeof(_actuators));
     memset(_instruments, 0, sizeof(_instruments));
-    memset(&_wifi_config, 0, sizeof(_wifi_config));
     memset(_routing_configs, 0, sizeof(_routing_configs));
 }
 
@@ -60,25 +59,15 @@ bool ConfigManager::load() {
     _version = doc["version"] | CONFIG_VERSION;
 
     // WiFi
-    JsonObject wifiObj = doc["wifi"].as<JsonObject>();
-    if (!wifiObj.isNull()) {
-        strlcpy(_wifi_config.ssid, wifiObj["ssid"] | "", sizeof(_wifi_config.ssid));
-        strlcpy(_wifi_config.password, wifiObj["password"] | "", sizeof(_wifi_config.password));
-        strlcpy(_wifi_config.hostname, wifiObj["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
-        _wifi_config.enabled = wifiObj["enabled"] | true;
-        _wifi_config.ap_fallback = wifiObj["ap_fallback"] | WIFI_AP_FALLBACK;
+    if (doc.containsKey("wifi")) {
+        JsonObject wifiObj = doc["wifi"].as<JsonObject>();
+        deserializeWiFi(_wifi_config, wifiObj);
     }
 
     // MIDI Input
-    JsonObject midiObj = doc["midi_input"].as<JsonObject>();
-    if (!midiObj.isNull()) {
-        _midi_input_config.serial_enabled = midiObj["serial_enabled"] | true;
-        _midi_input_config.udp_enabled = midiObj["udp_enabled"] | true;
-        _midi_input_config.rtp_enabled = midiObj["rtp_enabled"] | true;
-        _midi_input_config.udp_port = midiObj["udp_port"] | MIDI_UDP_PORT;
-        _midi_input_config.rtp_port = midiObj["rtp_port"] | MIDI_RTP_PORT;
-        _midi_input_config.jitter_buffer_ms = midiObj["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
-        _midi_input_config.serial_rx_pin = midiObj["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+    if (doc.containsKey("midi_input")) {
+        JsonObject midiObj = doc["midi_input"].as<JsonObject>();
+        deserializeMidiInput(_midi_input_config, midiObj);
     }
 
     // Bus
@@ -108,12 +97,6 @@ bool ConfigManager::load() {
         _instrument_count++;
     }
 
-    // WiFi
-    if (doc.containsKey("wifi")) {
-        JsonObject wifiObj = doc["wifi"].as<JsonObject>();
-        deserializeWiFi(_wifi_config, wifiObj);
-    }
-
     // Routage MIDI
     _routing_count = 0;
     if (doc.containsKey("routing")) {
@@ -137,21 +120,11 @@ bool ConfigManager::save() {
 
     // WiFi
     JsonObject wifiObj = doc["wifi"].to<JsonObject>();
-    wifiObj["ssid"] = _wifi_config.ssid;
-    wifiObj["password"] = _wifi_config.password;
-    wifiObj["hostname"] = _wifi_config.hostname;
-    wifiObj["enabled"] = _wifi_config.enabled;
-    wifiObj["ap_fallback"] = _wifi_config.ap_fallback;
+    serializeWiFi(_wifi_config, wifiObj);
 
     // MIDI Input
     JsonObject midiObj = doc["midi_input"].to<JsonObject>();
-    midiObj["serial_enabled"] = _midi_input_config.serial_enabled;
-    midiObj["udp_enabled"] = _midi_input_config.udp_enabled;
-    midiObj["rtp_enabled"] = _midi_input_config.rtp_enabled;
-    midiObj["udp_port"] = _midi_input_config.udp_port;
-    midiObj["rtp_port"] = _midi_input_config.rtp_port;
-    midiObj["jitter_buffer_ms"] = _midi_input_config.jitter_buffer_ms;
-    midiObj["serial_rx_pin"] = _midi_input_config.serial_rx_pin;
+    serializeMidiInput(_midi_input_config, midiObj);
 
     // Bus
     JsonArray busArray = doc["buses"].to<JsonArray>();
@@ -173,10 +146,6 @@ bool ConfigManager::save() {
         JsonObject instObj = instArray.add<JsonObject>();
         serializeInstrument(_instruments[i], instObj);
     }
-
-    // WiFi
-    JsonObject wifiObj = doc["wifi"].to<JsonObject>();
-    serializeWiFi(_wifi_config, wifiObj);
 
     // Routage MIDI
     JsonArray routeArray = doc["routing"].to<JsonArray>();
@@ -227,8 +196,18 @@ void ConfigManager::loadDefaults() {
     // WiFi défauts
     strlcpy(_wifi_config.ssid, "MidiBoop", sizeof(_wifi_config.ssid));
     strlcpy(_wifi_config.password, "midiboop", sizeof(_wifi_config.password));
+    strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
     _wifi_config.enabled = false;
-    _wifi_config.ap_mode = true;
+    _wifi_config.ap_fallback = true;
+
+    // MIDI Input défauts
+    _midi_input_config.serial_enabled = true;
+    _midi_input_config.udp_enabled = true;
+    _midi_input_config.rtp_enabled = true;
+    _midi_input_config.udp_port = MIDI_UDP_PORT;
+    _midi_input_config.rtp_port = MIDI_RTP_PORT;
+    _midi_input_config.jitter_buffer_ms = MIDI_JITTER_BUFFER_MS;
+    _midi_input_config.serial_rx_pin = MIDI_SERIAL_RX_PIN;
 
     Serial.println("[CONFIG] Défauts chargés");
 }
@@ -279,12 +258,16 @@ uint8_t ConfigManager::getVersion() const {
     return _version;
 }
 
-WiFiConfig& ConfigManager::getWiFiConfig() {
-    return _wifi_config;
+WiFiConfig* ConfigManager::getWiFiConfig() {
+    return &_wifi_config;
 }
 
 void ConfigManager::setWiFiConfig(const WiFiConfig& config) {
     _wifi_config = config;
+}
+
+MidiInputConfig* ConfigManager::getMidiInputConfig() {
+    return &_midi_input_config;
 }
 
 MidiRoutingConfig* ConfigManager::getRoutingConfigs() {
@@ -302,8 +285,17 @@ bool ConfigManager::addRoutingConfig(const MidiRoutingConfig& routing) {
     return true;
 }
 
+MidiRoutingConfig* ConfigManager::getRoutingForInstrument(uint8_t instrument_index) {
+    for (uint8_t i = 0; i < _routing_count; i++) {
+        if (_routing_configs[i].instrument_index == instrument_index) {
+            return &_routing_configs[i];
+        }
+    }
+    return nullptr;
+}
+
 // ============================================================================
-// Sérialisation / Désérialisation
+// Sérialisation / Désérialisation — Actionneurs
 // ============================================================================
 
 void ConfigManager::serializeActuator(const ActuatorConfig& act, JsonObject& obj) {
@@ -369,6 +361,10 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
     memset(&act.state, 0, sizeof(ActuatorState));
 }
 
+// ============================================================================
+// Sérialisation / Désérialisation — Bus
+// ============================================================================
+
 void ConfigManager::serializeBus(const BusConfig& bus, JsonObject& obj) {
     obj["id"] = bus.id;
     obj["sda_pin"] = bus.sda_pin;
@@ -389,6 +385,10 @@ void ConfigManager::deserializeBus(BusConfig& bus, const JsonObject& obj) {
     bus.enabled = obj["enabled"] | true;
     bus.pca_count = 0;
 }
+
+// ============================================================================
+// Sérialisation / Désérialisation — Instruments
+// ============================================================================
 
 void ConfigManager::serializeInstrument(const InstrumentConfig& inst, JsonObject& obj) {
     obj["name"] = inst.name;
@@ -445,15 +445,41 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
 void ConfigManager::serializeWiFi(const WiFiConfig& wifi, JsonObject& obj) {
     obj["ssid"] = wifi.ssid;
     obj["password"] = wifi.password;
+    obj["hostname"] = wifi.hostname;
     obj["enabled"] = wifi.enabled;
-    obj["ap_mode"] = wifi.ap_mode;
+    obj["ap_fallback"] = wifi.ap_fallback;
 }
 
 void ConfigManager::deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj) {
     strlcpy(wifi.ssid, obj["ssid"] | "MidiBoop", sizeof(wifi.ssid));
     strlcpy(wifi.password, obj["password"] | "midiboop", sizeof(wifi.password));
+    strlcpy(wifi.hostname, obj["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(wifi.hostname));
     wifi.enabled = obj["enabled"] | false;
-    wifi.ap_mode = obj["ap_mode"] | true;
+    wifi.ap_fallback = obj["ap_fallback"] | WIFI_AP_FALLBACK;
+}
+
+// ============================================================================
+// Sérialisation / Désérialisation — MIDI Input
+// ============================================================================
+
+void ConfigManager::serializeMidiInput(const MidiInputConfig& midi, JsonObject& obj) {
+    obj["serial_enabled"] = midi.serial_enabled;
+    obj["udp_enabled"] = midi.udp_enabled;
+    obj["rtp_enabled"] = midi.rtp_enabled;
+    obj["udp_port"] = midi.udp_port;
+    obj["rtp_port"] = midi.rtp_port;
+    obj["jitter_buffer_ms"] = midi.jitter_buffer_ms;
+    obj["serial_rx_pin"] = midi.serial_rx_pin;
+}
+
+void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject& obj) {
+    midi.serial_enabled = obj["serial_enabled"] | true;
+    midi.udp_enabled = obj["udp_enabled"] | true;
+    midi.rtp_enabled = obj["rtp_enabled"] | true;
+    midi.udp_port = obj["udp_port"] | MIDI_UDP_PORT;
+    midi.rtp_port = obj["rtp_port"] | MIDI_RTP_PORT;
+    midi.jitter_buffer_ms = obj["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
+    midi.serial_rx_pin = obj["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
 }
 
 // ============================================================================

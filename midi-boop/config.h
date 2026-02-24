@@ -53,25 +53,6 @@
 #define SAFETY_MAX_DUTY_CYCLE   80      // % max duty cycle par actionneur
 #define SAFETY_MAX_FREQ_HZ      50      // Fréquence max de déclenchement
 #define SAFETY_WATCHDOG_MS      5000    // Timeout watchdog actionneur
-
-// --- MIDI Input ---
-#define MIDI_SERIAL_BAUD        31250   // MIDI DIN baud rate standard
-#define MIDI_SERIAL_RX_PIN      4       // GPIO pour MIDI DIN RX
-#define MIDI_UDP_PORT           5004    // Port UDP pour MIDI réseau
-#define MIDI_RTP_PORT           5004    // Port RTP-MIDI (AppleMIDI)
-
-// --- Jitter Buffer ---
-#define JITTER_BUFFER_SIZE      64      // Max événements dans le jitter buffer
-#define JITTER_BUFFER_MS        30      // Délai jitter buffer par défaut (ms)
-#define JITTER_BUFFER_MIN_MS    10      // Délai minimum configurable
-#define JITTER_BUFFER_MAX_MS    80      // Délai maximum configurable
-
-// --- Event Normalizer ---
-#define MAX_NOTE_MAPPINGS       16      // Max mappings note par instrument (sparse, 1 par actuateur)
-#define MAX_CC_MAPPINGS         32      // Max mappings CC par instrument
-#define VELOCITY_CURVE_POINTS   5       // Points de la courbe de vélocité
-
-// --- Safety Manager (compléments) ---
 #define SAFETY_CHECK_INTERVAL_MS    10      // Fréquence vérification sécurité (ms)
 #define SAFETY_MAX_TOTAL_CURRENT_MA 5000    // Courant max total estimé (mA)
 #define SAFETY_SERVO_CURRENT_MA     250     // Courant estimé par servo actif (mA)
@@ -79,13 +60,6 @@
 #define SAFETY_SOLENOID_HOLD_MA     150     // Courant estimé solénoïde en maintien (mA)
 #define SAFETY_MAX_POLYPHONY        12      // Max actionneurs actifs simultanément
 #define SAFETY_DEGRADATION_THRESHOLD_MA 4000 // Seuil dégradation gracieuse (mA)
-
-// --- WiFi ---
-#define WIFI_SSID_MAX_LEN       32
-#define WIFI_PASS_MAX_LEN       64
-
-// --- Série ---
-#define SERIAL_BAUD_RATE        115200
 
 // --- WiFi ---
 #define WIFI_DEFAULT_HOSTNAME    "midi-boop"
@@ -104,11 +78,19 @@
 // --- Jitter Buffer ---
 #define JITTER_BUFFER_SIZE       64      // Max événements dans le jitter buffer
 
+// --- Event Normalizer / Mapping ---
+#define MAX_NOTE_MAPPINGS       16      // Max mappings note par instrument (sparse, 1 par actuateur)
+#define MAX_CC_MAPPINGS         32      // Max mappings CC par instrument
+#define VELOCITY_CURVE_POINTS   5       // Points de la courbe de vélocité
+
 // --- MIDI Note Mapping ---
 #define MIDI_NOTE_UNMAPPED       0xFF    // Valeur sentinelle pour note non mappée
 
+// --- Série ---
+#define SERIAL_BAUD_RATE        115200
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          2
+#define CONFIG_VERSION          3
 
 #endif // CONFIG_H
