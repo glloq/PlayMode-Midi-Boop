@@ -5,11 +5,21 @@
 // PlayMode Midi B∞p — Couche Transport MIDI (implémentation)
 // ============================================================================
 
-// Session AppleMIDI globale (nécessaire pour les callbacks statiques)
-static APPLEMIDI_NAMESPACE::AppleMIDISession<WiFiUDP>* g_rtpSession = nullptr;
+// Session RTP-MIDI et interface MIDI (AppleMIDI v3.x).
+//
+// L'API AppleMIDI a changé en v3.x :
+//   - setHandleNoteOn/Off/CC  ne sont PLUS sur AppleMIDISession
+//   - Ils sont sur MidiInterface (objet "MIDI" créé par la macro ci-dessous)
+//   - setHandleConnected/Disconnected restent sur la session (AppleRTP)
+//
+// APPLEMIDI_CREATE_INSTANCE crée deux globals :
+//   AppleRTP → AppleMIDISession<WiFiUDP>  (session réseau, port 5004)
+//   MIDI     → MidiInterface              (callbacks NoteOn/Off/CC + read())
+APPLEMIDI_CREATE_INSTANCE(WiFiUDP, AppleRTP, "midi-boop", 5004);
+
 static MidiTransport* g_transportInstance = nullptr;
 
-// Callbacks AppleMIDI (fonctions libres car l'API utilise des lambdas/fonctions)
+// Callbacks AppleMIDI — connexion réseau
 static void onAppleMidiConnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc, const char* name) {
     Serial.printf("[RTP-MIDI] Connecté : %s\n", name);
 }
@@ -112,7 +122,6 @@ void MidiTransport::stop() {
     if (_rtpActive) {
         _rtpActive = false;
         g_transportInstance = nullptr;
-        // La session AppleMIDI sera nettoyée automatiquement
     }
     Serial.println("[MIDI-TR] Tous les transports arrêtés");
 }
@@ -148,26 +157,23 @@ bool MidiTransport::initUDP() {
 }
 
 // ============================================================================
-// Initialisation RTP-MIDI (AppleMIDI)
+// Initialisation RTP-MIDI (AppleMIDI v3.x)
 // ============================================================================
 bool MidiTransport::initRTP() {
     g_transportInstance = this;
 
-    static APPLEMIDI_NAMESPACE::AppleMIDISession<WiFiUDP> rtpSession("midi-boop");
-    g_rtpSession = &rtpSession;
+    // Connexion / déconnexion → sur la session AppleMIDI
+    AppleRTP.setHandleConnected(onAppleMidiConnected);
+    AppleRTP.setHandleDisconnected(onAppleMidiDisconnected);
 
-    rtpSession.setHandleConnected(onAppleMidiConnected);
-    rtpSession.setHandleDisconnected(onAppleMidiDisconnected);
-
-    // Enregistrer les callbacks MIDI
-    rtpSession.setHandleNoteOn(onAppleMidiNoteOn);
-    rtpSession.setHandleNoteOff(onAppleMidiNoteOff);
-    rtpSession.setHandleControlChange(onAppleMidiControlChange);
-
-    rtpSession.begin();
+    // Messages MIDI → sur l'interface MidiInterface (API v3.x, non sur la session)
+    MIDI.setHandleNoteOn(onAppleMidiNoteOn);
+    MIDI.setHandleNoteOff(onAppleMidiNoteOff);
+    MIDI.setHandleControlChange(onAppleMidiControlChange);
+    MIDI.begin(MIDI_CHANNEL_OMNI);
 
     _rtpActive = true;
-    Serial.printf("[MIDI-TR] RTP-MIDI (AppleMIDI) actif (port %d)\n", _config.rtp_port);
+    Serial.println("[MIDI-TR] RTP-MIDI (AppleMIDI) actif (port 5004)");
     return true;
 }
 
@@ -206,12 +212,10 @@ void MidiTransport::pollUDP() {
 }
 
 // ============================================================================
-// Poll RTP-MIDI (AppleMIDI)
+// Poll RTP-MIDI (AppleMIDI v3.x)
 // ============================================================================
 void MidiTransport::pollRTP() {
-    if (g_rtpSession != nullptr) {
-        g_rtpSession->read();
-    }
+    MIDI.read();
 }
 
 // ============================================================================
