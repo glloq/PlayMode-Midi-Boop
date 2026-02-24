@@ -121,4 +121,105 @@ struct EventComparator {
     }
 };
 
+// ============================================================================
+// Phase 2 — MIDI, Mapping, Safety
+// ============================================================================
+
+// --- Source d'entrée MIDI ---
+enum MidiSource : uint8_t {
+    MIDI_SOURCE_SERIAL  = 0,   // MIDI DIN / série hardware
+    MIDI_SOURCE_UDP     = 1,   // UDP brut sur WiFi
+    MIDI_SOURCE_RTP     = 2    // RTP-MIDI (AppleMIDI)
+};
+
+// --- Type de message MIDI ---
+enum MidiMessageType : uint8_t {
+    MIDI_MSG_NOTE_OFF       = 0x80,
+    MIDI_MSG_NOTE_ON        = 0x90,
+    MIDI_MSG_CC             = 0xB0,
+    MIDI_MSG_PROGRAM_CHANGE = 0xC0
+};
+
+// --- Événement MIDI brut (avant normalisation) ---
+struct MidiEvent {
+    uint32_t receive_time_us;    // Timestamp réception (esp_timer_get_time)
+    MidiMessageType type;         // Type de message
+    uint8_t channel;              // Canal MIDI 0-15
+    uint8_t data1;                // Note number ou CC number
+    uint8_t data2;                // Velocity ou CC value
+    MidiSource source;            // Source du message
+};
+
+// --- Mapping note MIDI → actionneur ---
+struct NoteMapping {
+    uint8_t midi_note;            // Note MIDI (0-127)
+    uint8_t actuator_id;          // ID actionneur cible
+    uint8_t behavior_override;    // Comportement spécifique (0xFF = défaut actuator)
+    bool enabled;
+};
+
+// --- Cible d'un mapping CC ---
+enum CCTarget : uint8_t {
+    CC_TARGET_POSITION     = 0,   // Position directe du servo (0-180)
+    CC_TARGET_AMPLITUDE    = 1,   // Amplitude de frappe
+    CC_TARGET_SPEED        = 2,   // Vitesse de mouvement
+    CC_TARGET_PWM_HOLD     = 3    // PWM de maintien solénoïde
+};
+
+// --- Mapping CC MIDI → paramètre actionneur ---
+struct CCMapping {
+    uint8_t cc_number;            // Numéro CC (0-127)
+    uint8_t actuator_id;          // ID actionneur cible
+    CCTarget target;              // Paramètre ciblé
+    uint16_t range_min;           // Valeur min de sortie
+    uint16_t range_max;           // Valeur max de sortie
+    bool enabled;
+};
+
+// --- Point de courbe de vélocité ---
+struct VelocityCurvePoint {
+    uint8_t input;                // Vélocité MIDI entrée (0-127)
+    uint8_t output;               // Vélocité mappée sortie (0-127)
+};
+
+// --- Configuration de routage MIDI par instrument ---
+struct MidiRoutingConfig {
+    uint8_t instrument_index;     // Index dans le tableau instruments
+    NoteMapping note_map[MAX_NOTE_MAPPINGS]; // Mappings note actifs (sparse)
+    uint8_t note_map_count;       // Nombre de mappings actifs
+    CCMapping cc_map[MAX_CC_MAPPINGS];
+    uint8_t cc_map_count;
+    VelocityCurvePoint velocity_curve[VELOCITY_CURVE_POINTS];
+    uint8_t velocity_curve_count;
+};
+
+// --- État de sécurité par actionneur ---
+struct ActuatorSafetyState {
+    uint32_t window_start_us;     // Début fenêtre de comptage (pour freq/duty)
+    uint16_t trigger_count_window; // Nombre de déclenchements dans la fenêtre
+    uint32_t active_time_us;      // Temps actif cumulé dans la fenêtre
+    uint32_t last_activity_us;    // Dernier moment d'activité (pour watchdog)
+    bool watchdog_triggered;      // Watchdog déclenché
+    bool rate_limited;            // Fréquence limitée
+    bool duty_limited;            // Duty cycle limité
+    uint16_t estimated_current_ma; // Courant estimé actuel (mA)
+};
+
+// --- État global de sécurité ---
+struct SafetyState {
+    uint32_t total_estimated_current_ma;  // Courant total estimé
+    uint8_t active_actuator_count;        // Nombre actionneurs actifs
+    bool kill_switch_active;              // Kill switch déclenché
+    bool degradation_active;              // Dégradation gracieuse active
+    bool over_current;                    // Dépassement courant total
+};
+
+// --- Configuration WiFi (pour MIDI réseau) ---
+struct WiFiConfig {
+    char ssid[WIFI_SSID_MAX_LEN];
+    char password[WIFI_PASS_MAX_LEN];
+    bool enabled;
+    bool ap_mode;                  // true = Access Point, false = Station
+};
+
 #endif // TYPES_H

@@ -10,6 +10,8 @@
 // Bibliothèques requises :
 //   - Adafruit PWM Servo Driver Library
 //   - ArduinoJson
+//   - MIDI Library (FortySevenEffects) — pour AppleMIDI
+//   - AppleMIDI (lathoub) — pour RTP-MIDI
 //   - ESPAsyncWebServer (phase 6)
 //   - AsyncTCP (phase 6)
 //
@@ -21,16 +23,28 @@
 #include "actuator_engine.h"
 #include "scheduler.h"
 #include "config_manager.h"
+#include "safety_manager.h"
+#include "midi_input.h"
+#include "event_normalizer.h"
 
-// --- Objets globaux ---
+// --- Objets globaux (Phase 1) ---
 PCADriver pcaDriver;
 ActuatorEngine actuatorEngine(pcaDriver);
 Scheduler scheduler(actuatorEngine);
 ConfigManager configManager;
 
-// --- Prototypes test ---
+// --- Objets globaux (Phase 2) ---
+SafetyManager safetyManager(pcaDriver);
+MidiInput midiInput;
+EventNormalizer eventNormalizer(scheduler, configManager);
+
+// --- Mode test (décommenter pour activer le test harness sans MIDI) ---
+// #define ENABLE_TEST_HARNESS
+
+#ifdef ENABLE_TEST_HARNESS
 void setupTestActuators();
 void runTestSequence();
+#endif
 
 // ============================================================================
 // SETUP — Initialisation
@@ -40,7 +54,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B∞p v0.1");
+    Serial.println("  PlayMode Midi B∞p v0.2");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -60,7 +74,7 @@ void setup() {
         Serial.println("[INIT] ATTENTION : Problème init PCA (certains bus manquants ?)");
     }
 
-    // 3. Configurer les actionneurs de test (ou depuis config)
+    // 3. Configurer les actionneurs (depuis config ou test)
     Serial.println("\n[INIT] Actionneurs...");
     if (configManager.getActuatorCount() > 0) {
         // Charger depuis la config sauvegardée
@@ -71,60 +85,92 @@ void setup() {
             scheduler.registerActuator(&actuators[i]);
         }
         Serial.printf("[INIT] %d actionneurs chargés depuis config\n", count);
-    } else {
+    }
+#ifdef ENABLE_TEST_HARNESS
+    else {
         // Mode test : créer des actionneurs hardcodés
         setupTestActuators();
     }
+#endif
 
     // 4. Activer les bus PCA (OE = LOW)
     Serial.println("\n[INIT] Activation des sorties PCA...");
     pcaDriver.enableBus(0, true);
     pcaDriver.enableBus(1, true);
 
-    // 5. Démarrer le scheduler sur Core 1
+    // 5. Initialiser le Safety Manager
+    Serial.println("\n[INIT] Safety Manager...");
+    safetyManager.begin();
+
+    // 6. Démarrer le scheduler sur Core 1 (avec safety intégré)
     Serial.println("\n[INIT] Scheduler...");
+    scheduler.setSafetyManager(&safetyManager);
     if (!scheduler.begin()) {
         Serial.println("[INIT] ERREUR : Scheduler");
     }
 
+    // 7. Initialiser MIDI Input (Serial + WiFi/UDP + RTP-MIDI)
+    Serial.println("\n[INIT] MIDI Input...");
+    midiInput.begin(configManager.getWiFiConfig());
+
+    // 8. Initialiser l'Event Normalizer (mapping notes/CC)
+    Serial.println("\n[INIT] Event Normalizer...");
+    eventNormalizer.begin();
+
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée");
+    Serial.println("  Initialisation terminée — Phase 2");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
-    // 6. Lancer la séquence de test
+#ifdef ENABLE_TEST_HARNESS
+    // Lancer la séquence de test si en mode test
     delay(500);
     runTestSequence();
+#endif
 }
 
 // ============================================================================
-// LOOP — Core 0 (futur : MIDI, Web UI)
+// LOOP — Core 0 : Pipeline MIDI complet
 // ============================================================================
 void loop() {
-    // Placeholder pour Core 0
-    // Futures fonctionnalités :
-    //   - MIDI Input (UDP/RTP-MIDI) — Phase 3
-    //   - Web UI (ESPAsyncWebServer) — Phase 6
-    //   - Monitoring série
+    // 1. Lire les entrées MIDI et remplir le jitter buffer
+    midiInput.update();
 
-    // Affichage périodique de l'état du scheduler
+    // 2. Retirer les événements prêts du jitter buffer et les normaliser
+    MidiEvent midi_event;
+    while (midiInput.readEvent(midi_event)) {
+        eventNormalizer.processMidiEvent(midi_event);
+    }
+
+    // 3. Affichage périodique de l'état
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
     if (now - last_status > 5000) {
         last_status = now;
-        Serial.printf("[STATUS] Scheduler : %d événements en queue, %d traités | Heap : %d\n",
+        Serial.printf("[STATUS] Sched: %d queue, %d traités | "
+                      "MIDI: %d reçus, %d routés, %d unmapped | "
+                      "Safety: %dmA, %d actifs%s | Heap: %d\n",
                       scheduler.getQueuedEventCount(),
                       scheduler.getProcessedCount(),
+                      midiInput.getReceivedCount(),
+                      eventNormalizer.getRoutedCount(),
+                      eventNormalizer.getUnmappedCount(),
+                      safetyManager.getEstimatedCurrentMA(),
+                      safetyManager.getActiveActuatorCount(),
+                      safetyManager.isKillSwitchActive() ? " [KILL]" :
+                          (safetyManager.isDegradationActive() ? " [DEGRAD]" : ""),
                       ESP.getFreeHeap());
     }
 
-    delay(10);  // Céder du temps CPU
+    delay(1);  // Yield minimal — MIDI nécessite une lecture fréquente
 }
 
 // ============================================================================
-// Configuration d'actionneurs de test (sans PCA physique)
+// Test Harness (compilation conditionnelle)
 // ============================================================================
+
+#ifdef ENABLE_TEST_HARNESS
 
 // Stockage statique pour les actionneurs de test
 static ActuatorConfig testActuators[4];
@@ -199,9 +245,6 @@ void setupTestActuators() {
     Serial.printf("[TEST] %d actionneurs de test créés\n", testActuatorCount);
 }
 
-// ============================================================================
-// Séquence de test — Envoie des événements hardcodés au scheduler
-// ============================================================================
 void runTestSequence() {
     Serial.println("\n[TEST] === Début séquence de test ===\n");
 
@@ -273,3 +316,5 @@ void runTestSequence() {
     Serial.println("\n[TEST] Séquence envoyée au scheduler");
     Serial.println("[TEST] Les événements seront exécutés automatiquement\n");
 }
+
+#endif // ENABLE_TEST_HARNESS

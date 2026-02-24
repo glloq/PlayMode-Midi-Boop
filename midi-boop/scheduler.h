@@ -9,6 +9,9 @@
 #include "types.h"
 #include "actuator_engine.h"
 
+// Forward declaration
+class SafetyManager;
+
 // ============================================================================
 // PlayMode Midi B∞p — Real-Time Scheduler (Core 1)
 // ============================================================================
@@ -41,8 +44,12 @@ public:
     // Vérifie si le scheduler tourne
     bool isRunning() const;
 
+    // Enregistre le safety manager pour pré-vérification
+    void setSafetyManager(SafetyManager* safety);
+
 private:
     ActuatorEngine& _engine;
+    SafetyManager* _safety_manager;  // Pointeur safety (peut être null)
     TaskHandle_t _task_handle;
     QueueHandle_t _input_queue;     // Queue FreeRTOS pour événements entrants
     bool _running;
