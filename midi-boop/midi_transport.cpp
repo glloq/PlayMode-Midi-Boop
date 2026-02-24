@@ -165,8 +165,8 @@ bool MidiTransport::initRTP() {
     // Connexion / déconnexion → sur la session via getTransport()
     // (AppleRTP est la MidiInterface dans cette version de la bibliothèque ;
     //  la session sous-jacente est accessible par getTransport())
-    AppleRTP.getTransport().setHandleConnected(onAppleMidiConnected);
-    AppleRTP.getTransport().setHandleDisconnected(onAppleMidiDisconnected);
+    AppleRTP.getTransport()->setHandleConnected(onAppleMidiConnected);
+    AppleRTP.getTransport()->setHandleDisconnected(onAppleMidiDisconnected);
 
     // Messages MIDI → directement sur la MidiInterface AppleRTP
     AppleRTP.setHandleNoteOn(onAppleMidiNoteOn);
