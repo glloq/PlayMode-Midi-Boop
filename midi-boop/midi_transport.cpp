@@ -162,15 +162,17 @@ bool MidiTransport::initUDP() {
 bool MidiTransport::initRTP() {
     g_transportInstance = this;
 
-    // Connexion / déconnexion → sur la session AppleMIDI
-    AppleRTP.setHandleConnected(onAppleMidiConnected);
-    AppleRTP.setHandleDisconnected(onAppleMidiDisconnected);
+    // Connexion / déconnexion → sur la session via getTransport()
+    // (AppleRTP est la MidiInterface dans cette version de la bibliothèque ;
+    //  la session sous-jacente est accessible par getTransport())
+    AppleRTP.getTransport().setHandleConnected(onAppleMidiConnected);
+    AppleRTP.getTransport().setHandleDisconnected(onAppleMidiDisconnected);
 
-    // Messages MIDI → sur l'interface MidiInterface (API v3.x, non sur la session)
-    MIDI.setHandleNoteOn(onAppleMidiNoteOn);
-    MIDI.setHandleNoteOff(onAppleMidiNoteOff);
-    MIDI.setHandleControlChange(onAppleMidiControlChange);
-    MIDI.begin(MIDI_CHANNEL_OMNI);
+    // Messages MIDI → directement sur la MidiInterface AppleRTP
+    AppleRTP.setHandleNoteOn(onAppleMidiNoteOn);
+    AppleRTP.setHandleNoteOff(onAppleMidiNoteOff);
+    AppleRTP.setHandleControlChange(onAppleMidiControlChange);
+    AppleRTP.begin(MIDI_CHANNEL_OMNI);
 
     _rtpActive = true;
     Serial.println("[MIDI-TR] RTP-MIDI (AppleMIDI) actif (port 5004)");
@@ -215,7 +217,7 @@ void MidiTransport::pollUDP() {
 // Poll RTP-MIDI (AppleMIDI v3.x)
 // ============================================================================
 void MidiTransport::pollRTP() {
-    MIDI.read();
+    AppleRTP.read();
 }
 
 // ============================================================================
