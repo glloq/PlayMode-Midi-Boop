@@ -21,12 +21,6 @@
 // Les messages parsés sont insérés dans le JitterBuffer.
 //
 
-// Forward declaration pour éviter d'inclure le header AppleMIDI lourd
-// L'implémentation RTP est dans midi_transport.cpp
-namespace APPLEMIDI_NAMESPACE {
-    template<class UdpClass> class AppleMIDISession;
-}
-
 class MidiTransport {
 public:
     MidiTransport(JitterBuffer& jitterBuffer);
