@@ -8,14 +8,18 @@
 #include "scheduler.h"
 #include "config_manager.h"
 
+// Forward declaration
+class PowerManager;
+
 // ============================================================================
-// PlayMode Midi B∞p — MIDI Dispatcher (Phase 3+4)
+// PlayMode Midi B∞p — MIDI Dispatcher (Phase 3+4+5)
 // ============================================================================
 //
 // Route les messages MIDI vers les actionneurs via le scheduler.
 // Lookup : canal MIDI → instrument → note → actionneur.
 // Applique la compensation de latence pour synchroniser les actionneurs.
 // Phase 4 : dispatch CC, courbes de vélocité.
+// Phase 5 : vérification PowerManager avant NOTE_ON.
 //
 
 class MidiDispatcher {
@@ -34,11 +38,19 @@ public:
     // Nombre de messages ignorés (note non mappée, canal inconnu)
     uint32_t getDroppedCount() const;
 
+    // Nombre de messages rejetés par le PowerManager (budget/polyphonie)
+    uint32_t getPowerRejectedCount() const;
+
+    // Enregistre le PowerManager (optionnel — peut être null)
+    void setPowerManager(PowerManager* pm);
+
 private:
     Scheduler& _scheduler;
     ConfigManager& _config;
+    PowerManager* _powerManager;
     uint32_t _dispatched_count;
     uint32_t _dropped_count;
+    uint32_t _power_rejected_count;
 
     // Table de lookup rapide : [canal MIDI] → index instrument (-1 = non mappé)
     int8_t _channel_to_instrument[16];

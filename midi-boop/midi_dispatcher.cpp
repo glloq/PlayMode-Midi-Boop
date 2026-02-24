@@ -1,4 +1,5 @@
 #include "midi_dispatcher.h"
+#include "power_manager.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — MIDI Dispatcher (implémentation)
@@ -7,8 +8,10 @@
 MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
     : _scheduler(scheduler),
       _config(config),
+      _powerManager(nullptr),
       _dispatched_count(0),
-      _dropped_count(0) {
+      _dropped_count(0),
+      _power_rejected_count(0) {
     memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
     memset(_routing_cache, 0, sizeof(_routing_cache));
@@ -73,6 +76,14 @@ uint32_t MidiDispatcher::getDroppedCount() const {
     return _dropped_count;
 }
 
+uint32_t MidiDispatcher::getPowerRejectedCount() const {
+    return _power_rejected_count;
+}
+
+void MidiDispatcher::setPowerManager(PowerManager* pm) {
+    _powerManager = pm;
+}
+
 // ============================================================================
 // Gestion Note On
 // ============================================================================
@@ -101,6 +112,14 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
     // Appliquer la courbe de vélocité
     uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);
 
+    // Phase 5 : vérifier le budget énergétique avant activation
+    if (_powerManager && act_config) {
+        if (!_powerManager->canActivate(*act_config, inst_idx, velocity)) {
+            _power_rejected_count++;
+            return;
+        }
+    }
+
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;
     evt.actuator_id = actuator_id;
@@ -110,6 +129,10 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
+        // Notifier le PowerManager de l'activation
+        if (_powerManager && act_config) {
+            _powerManager->notifyActivation(*act_config, inst_idx, velocity);
+        }
     } else {
         _dropped_count++;
     }
@@ -133,15 +156,24 @@ void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
         return;
     }
 
+    uint8_t actuator_id = inst.actuator_ids[act_slot];
+
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time();
-    evt.actuator_id = inst.actuator_ids[act_slot];
+    evt.actuator_id = actuator_id;
     evt.action = ACTION_NOTE_OFF;
     evt.velocity = 0;
     evt.priority = 0;
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
+        // Notifier le PowerManager de la désactivation
+        if (_powerManager) {
+            ActuatorConfig* act_config = findActuatorConfig(actuator_id);
+            if (act_config) {
+                _powerManager->notifyDeactivation(*act_config, inst_idx);
+            }
+        }
     } else {
         _dropped_count++;
     }

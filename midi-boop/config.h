@@ -61,6 +61,18 @@
 #define SAFETY_MAX_POLYPHONY        12      // Max actionneurs actifs simultanément
 #define SAFETY_DEGRADATION_THRESHOLD_MA 4000 // Seuil dégradation gracieuse (mA)
 
+// --- Power Manager (Phase 5) ---
+#define POWER_SERVO_BUS_MAX_MA          3000    // Budget max bus servos (mA)
+#define POWER_SOLENOID_BUS_MAX_MA       4000    // Budget max bus solénoïdes (mA)
+#define POWER_GLOBAL_MAX_MA             6000    // Budget global total (mA)
+#define POWER_SERVO_IDLE_MA             30      // Courant servo au repos (mA, logique PCA)
+#define POWER_SERVO_ACTIVE_MA           250     // Courant servo actif moyen (mA)
+#define POWER_SOLENOID_FULL_MA          500     // Courant solénoïde pleine puissance (mA)
+#define POWER_SOLENOID_HOLD_MA          150     // Courant solénoïde en maintien (mA)
+#define POWER_UPDATE_INTERVAL_MS        50      // Intervalle mise à jour stats power (ms)
+#define POWER_MAX_POLYPHONY             12      // Polyphonie max globale (par défaut)
+#define POWER_DEGRADATION_THRESHOLD_PCT 80      // Seuil % budget pour dégradation gracieuse
+
 // --- WiFi ---
 #define WIFI_DEFAULT_HOSTNAME    "midi-boop"
 #define WIFI_CONNECT_TIMEOUT_MS  10000   // Timeout connexion STA (ms)
@@ -77,6 +89,9 @@
 
 // --- Jitter Buffer ---
 #define JITTER_BUFFER_SIZE       64      // Max événements dans le jitter buffer
+#define JITTER_BUFFER_MS         30      // Délai jitter buffer par défaut (ms)
+#define JITTER_BUFFER_MIN_MS     10      // Délai minimum configurable
+#define JITTER_BUFFER_MAX_MS     80      // Délai maximum configurable
 
 // --- Event Normalizer / Mapping ---
 #define MAX_NOTE_MAPPINGS       16      // Max mappings note par instrument (sparse, 1 par actuateur)
@@ -89,8 +104,13 @@
 // --- Série ---
 #define SERIAL_BAUD_RATE        115200
 
+// --- Web Server (Phase 6) ---
+#define WEB_SERVER_PORT          80      // Port HTTP du serveur web
+#define WEB_WS_BROADCAST_MS      200     // Intervalle broadcast WebSocket stats (ms)
+#define WEB_MAX_WS_CLIENTS       4       // Max clients WebSocket simultanés
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          3
+#define CONFIG_VERSION          4       // v4 : phase 4 pipeline + phase 5 power + phase 6 web
 
 #endif // CONFIG_H

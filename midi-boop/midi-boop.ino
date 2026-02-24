@@ -4,13 +4,13 @@
 // ============================================================================
 //
 // Architecture dual-core ESP32 :
-//   Core 0 : WiFi, MIDI parsing, Web UI (loop)
-//   Core 1 : Scheduler temps réel, PCA/I²C, sécurité
+//   Core 0 : WiFi, MIDI parsing, Power Manager, Web UI (loop)
+//   Core 1 : Scheduler temps réel, PCA/I²C, Safety Manager
 //
 // Bibliothèques requises :
 //   - Adafruit PWM Servo Driver Library
 //   - ArduinoJson
-//   - MIDI Library (FortySevenEffects) — pour AppleMIDI
+//   - MIDI Library (FortySevenEffects) — pour Serial MIDI
 //   - AppleMIDI (lathoub) — pour RTP-MIDI
 //   - ESPAsyncWebServer (phase 6)
 //   - AsyncTCP (phase 6)
@@ -25,16 +25,18 @@
 #include "scheduler.h"
 #include "config_manager.h"
 #include "safety_manager.h"
+#include "power_manager.h"
 #include "wifi_manager.h"
 #include "jitter_buffer.h"
 #include "midi_transport.h"
 #include "midi_dispatcher.h"
+#include "web_server.h"
 
 // --- Objets globaux (Phase 1) ---
-PCADriver pcaDriver;
+PCADriver      pcaDriver;
 ActuatorEngine actuatorEngine(pcaDriver);
-Scheduler scheduler(actuatorEngine);
-ConfigManager configManager;
+Scheduler      scheduler(actuatorEngine);
+ConfigManager  configManager;
 
 // --- Objets globaux (Phase 2) ---
 SafetyManager safetyManager(pcaDriver);
@@ -44,6 +46,12 @@ WiFiManager wifiManager;
 JitterBuffer jitterBuffer;
 MidiTransport midiTransport(jitterBuffer);
 MidiDispatcher midiDispatcher(scheduler, configManager);
+
+// --- Objets globaux (Phase 5) ---
+PowerManager powerManager;
+
+// --- Objets globaux (Phase 6) ---
+WebServer webServer;
 
 // --- Mode test (décommenter pour activer le test harness sans MIDI) ---
 // #define ENABLE_TEST_HARNESS
@@ -61,7 +69,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B∞p v0.4");
+    Serial.println("  PlayMode Midi B\u221ep v0.6");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -84,7 +92,6 @@ void setup() {
     // 3. Configurer les actionneurs (depuis config ou test)
     Serial.println("\n[INIT] Actionneurs...");
     if (configManager.getActuatorCount() > 0) {
-        // Charger depuis la config sauvegardée
         ActuatorConfig* actuators = configManager.getActuators();
         uint8_t count = configManager.getActuatorCount();
         for (uint8_t i = 0; i < count; i++) {
@@ -95,7 +102,6 @@ void setup() {
     }
 #ifdef ENABLE_TEST_HARNESS
     else {
-        // Mode test : créer des actionneurs hardcodés
         setupTestActuators();
     }
 #endif
@@ -137,24 +143,51 @@ void setup() {
         Serial.println("[INIT] ATTENTION : Aucun transport MIDI actif");
     }
 
-    // 9. Initialiser le MIDI Dispatcher (mapping notes/CC)
+    // 9. Initialiser le Power Manager (Phase 5)
+    Serial.println("\n[INIT] Power Manager...");
+    {
+        PowerBudget budget = {};
+        budget.global_max_ma         = POWER_GLOBAL_MAX_MA;
+        budget.servo_bus_max_ma      = POWER_SERVO_BUS_MAX_MA;
+        budget.solenoid_bus_max_ma   = POWER_SOLENOID_BUS_MAX_MA;
+        budget.global_max_polyphony  = POWER_MAX_POLYPHONY;
+        budget.smart_rejection       = true;
+        for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+            budget.instrument_max_polyphony[i] = 4;
+        }
+        powerManager.begin(budget);
+    }
+
+    // 10. Initialiser le MIDI Dispatcher avec PowerManager (mapping notes/CC)
     Serial.println("\n[INIT] MIDI Dispatcher...");
+    midiDispatcher.setPowerManager(&powerManager);
     midiDispatcher.refreshConfig();
 
+    // 11. Démarrer le serveur Web (Phase 6)
+    Serial.println("\n[INIT] Web Server...");
+    webServer.setModules(&configManager, &scheduler, &safetyManager,
+                         &powerManager, &midiDispatcher, &midiTransport,
+                         &pcaDriver, &actuatorEngine);
+    if (!webServer.begin()) {
+        Serial.println("[INIT] ERREUR : Web Server");
+    } else {
+        Serial.printf("[INIT] Web UI accessible sur http://%s:%d\n",
+                      WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
+    }
+
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée — Phase 4");
+    Serial.println("  Initialisation terminée — Phase 6");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
 #ifdef ENABLE_TEST_HARNESS
-    // Lancer la séquence de test si en mode test
     delay(500);
     runTestSequence();
 #endif
 }
 
 // ============================================================================
-// LOOP — Core 0 : Pipeline MIDI complet
+// LOOP — Core 0 : Pipeline MIDI + Power Manager + Web Server
 // ============================================================================
 void loop() {
     // 1. Maintenance WiFi (reconnexion si nécessaire)
@@ -169,15 +202,32 @@ void loop() {
         midiDispatcher.dispatch(msg);
     }
 
-    // 4. Affichage périodique de l'état
+    // 4. Mise à jour périodique du Power Manager
+    {
+        ActuatorConfig* actuators = configManager.getActuators();
+        uint8_t count = configManager.getActuatorCount();
+        static ActuatorConfig* act_ptrs[MAX_ACTUATORS];
+        for (uint8_t i = 0; i < count; i++) act_ptrs[i] = &actuators[i];
+        powerManager.update(act_ptrs, count);
+    }
+
+    // 5. Mise à jour du serveur Web (WebSocket broadcast)
+    webServer.update();
+
+    // 6. Affichage périodique de l'état (toutes les 5 secondes)
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
     if (now - last_status > 5000) {
         last_status = now;
+
+        const PowerStats& pwr = powerManager.getStats();
+
         Serial.printf("[STATUS] Sched: %d queue, %d traités | "
-                      "MIDI: S:%d U:%d R:%d | Disp: %d routés, %d dropped | "
-                      "Safety: %dmA, %d actifs%s | Heap: %d\n",
+                      "MIDI: S:%d U:%d R:%d | Disp: %d routés, %d dropped, %d pwr-rejected | "
+                      "Safety: %dmA, %d actifs%s | "
+                      "Power: %umA/%umA (%u%%) srv=%umA sol=%umA%s | "
+                      "Web: %d clients | Heap: %d\n",
                       scheduler.getQueuedEventCount(),
                       scheduler.getProcessedCount(),
                       midiTransport.getSerialByteCount(),
@@ -185,10 +235,18 @@ void loop() {
                       midiTransport.getRtpPacketCount(),
                       midiDispatcher.getDispatchedCount(),
                       midiDispatcher.getDroppedCount(),
+                      midiDispatcher.getPowerRejectedCount(),
                       safetyManager.getEstimatedCurrentMA(),
                       safetyManager.getActiveActuatorCount(),
                       safetyManager.isKillSwitchActive() ? " [KILL]" :
                           (safetyManager.isDegradationActive() ? " [DEGRAD]" : ""),
+                      pwr.total_estimated_ma,
+                      powerManager.getBudget().global_max_ma,
+                      pwr.budget_used_percent,
+                      pwr.servo_bus_ma,
+                      pwr.solenoid_bus_ma,
+                      pwr.degradation_active ? " [DEGRAD]" : "",
+                      webServer.getClientCount(),
                       ESP.getFreeHeap());
     }
 
@@ -201,14 +259,12 @@ void loop() {
 
 #ifdef ENABLE_TEST_HARNESS
 
-// Stockage statique pour les actionneurs de test
 static ActuatorConfig testActuators[4];
 static uint8_t testActuatorCount = 0;
 
 void setupTestActuators() {
     Serial.println("[TEST] Création d'actionneurs de test...");
 
-    // Servo 0 — Mode Frappe (bus 0, PCA 0x40, canal 0)
     testActuators[0] = {};
     testActuators[0].id = 0;
     testActuators[0].type = ACT_SERVO;
@@ -222,7 +278,6 @@ void setupTestActuators() {
     testActuators[0].latency_ms = 10;
     testActuators[0].enabled = true;
 
-    // Servo 1 — Mode Alterné (bus 0, PCA 0x40, canal 1)
     testActuators[1] = {};
     testActuators[1].id = 1;
     testActuators[1].type = ACT_SERVO;
@@ -237,7 +292,6 @@ void setupTestActuators() {
     testActuators[1].latency_ms = 12;
     testActuators[1].enabled = true;
 
-    // Solénoïde 0 — Mode Frappe (bus 1, PCA 0x40, canal 0)
     testActuators[2] = {};
     testActuators[2].id = 2;
     testActuators[2].type = ACT_SOLENOID;
@@ -249,7 +303,6 @@ void setupTestActuators() {
     testActuators[2].latency_ms = 5;
     testActuators[2].enabled = true;
 
-    // Solénoïde 1 — Mode Hit-and-Hold (bus 1, PCA 0x40, canal 1)
     testActuators[3] = {};
     testActuators[3].id = 3;
     testActuators[3].type = ACT_SOLENOID;
@@ -265,7 +318,6 @@ void setupTestActuators() {
 
     testActuatorCount = 4;
 
-    // Initialiser et enregistrer les actionneurs
     for (uint8_t i = 0; i < testActuatorCount; i++) {
         actuatorEngine.initActuator(testActuators[i]);
         scheduler.registerActuator(&testActuators[i]);
@@ -279,59 +331,52 @@ void runTestSequence() {
 
     uint32_t now_us = (uint32_t)esp_timer_get_time();
 
-    // Test 1 : Servo Frappe (actionneur 0) — Note On vélocité 100
     {
         SchedulerEvent evt = {};
-        evt.trigger_time_us = now_us + 100000;  // +100ms
+        evt.trigger_time_us = now_us + 100000;
         evt.actuator_id = 0;
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 100;
         evt.priority = 0;
-
         if (scheduler.pushEvent(evt)) {
             Serial.println("[TEST] Servo Frappe programmé à +100ms");
         }
     }
 
-    // Test 2 : Servo Alterné (actionneur 1) — 3 notes successives
     for (int i = 0; i < 3; i++) {
         SchedulerEvent evt = {};
-        evt.trigger_time_us = now_us + 500000 + (i * 300000);  // +500ms, +800ms, +1100ms
+        evt.trigger_time_us = now_us + 500000 + (i * 300000);
         evt.actuator_id = 1;
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 80;
         evt.priority = 0;
-
         if (scheduler.pushEvent(evt)) {
             Serial.printf("[TEST] Servo Alterné #%d programmé à +%dms\n", i + 1, 500 + (i * 300));
         }
     }
 
-    // Test 3 : Solénoïde Frappe (actionneur 2) — Note On vélocité 127
     {
         SchedulerEvent evt = {};
-        evt.trigger_time_us = now_us + 2000000;  // +2000ms
+        evt.trigger_time_us = now_us + 2000000;
         evt.actuator_id = 2;
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 127;
         evt.priority = 0;
-
         if (scheduler.pushEvent(evt)) {
             Serial.println("[TEST] Solénoïde Frappe programmé à +2000ms");
         }
     }
 
-    // Test 4 : Solénoïde Hit-and-Hold (actionneur 3) — Note On puis Note Off
     {
         SchedulerEvent evt_on = {};
-        evt_on.trigger_time_us = now_us + 3000000;  // +3000ms
+        evt_on.trigger_time_us = now_us + 3000000;
         evt_on.actuator_id = 3;
         evt_on.action = ACTION_NOTE_ON;
         evt_on.velocity = 100;
         evt_on.priority = 0;
 
         SchedulerEvent evt_off = {};
-        evt_off.trigger_time_us = now_us + 4000000;  // +4000ms (1s de maintien)
+        evt_off.trigger_time_us = now_us + 4000000;
         evt_off.actuator_id = 3;
         evt_off.action = ACTION_NOTE_OFF;
         evt_off.velocity = 0;

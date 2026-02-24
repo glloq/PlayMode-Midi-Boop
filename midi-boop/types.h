@@ -191,4 +191,31 @@ struct SafetyState {
     bool over_current;                    // Dépassement courant total
 };
 
+// ============================================================================
+// Phase 5 — Power Manager
+// ============================================================================
+
+// --- Budget énergétique (configuration) ---
+struct PowerBudget {
+    uint32_t global_max_ma;                              // Budget global total (mA)
+    uint32_t servo_bus_max_ma;                           // Budget bus servos (bus 0) (mA)
+    uint32_t solenoid_bus_max_ma;                        // Budget bus solénoïdes (bus 1) (mA)
+    uint8_t  global_max_polyphony;                       // Polyphonie max globale
+    uint8_t  instrument_max_polyphony[MAX_INSTRUMENTS];  // Polyphonie max par instrument
+    bool     smart_rejection;                            // Rejet intelligent (priorité vélocité)
+};
+
+// --- Statistiques de consommation (runtime) ---
+struct PowerStats {
+    uint32_t total_estimated_ma;                          // Courant total estimé (mA)
+    uint32_t servo_bus_ma;                                // Courant bus servo estimé (mA)
+    uint32_t solenoid_bus_ma;                             // Courant bus solénoïde estimé (mA)
+    uint8_t  global_active_count;                         // Actionneurs actifs au total
+    uint8_t  instrument_active_count[MAX_INSTRUMENTS];    // Actionneurs actifs par instrument
+    uint32_t total_rejected;                              // Événements rejetés depuis démarrage
+    uint8_t  budget_used_percent;                         // % budget global utilisé
+    bool     degradation_active;                          // Dégradation gracieuse active
+    bool     budget_exceeded;                             // Budget dépassé (soft limit)
+};
+
 #endif // TYPES_H

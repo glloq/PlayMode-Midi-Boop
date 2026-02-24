@@ -30,31 +30,34 @@ public:
     // Vérifie si une config existe sur le filesystem
     bool configExists();
 
-    // --- Accesseurs ---
+    // --- Accesseurs bus ---
 
     BusConfig* getBuses();
     uint8_t getBusCount() const;
 
+    // --- Accesseurs actionneurs ---
+
     ActuatorConfig* getActuators();
     uint8_t getActuatorCount() const;
-
-    InstrumentConfig* getInstruments();
-    uint8_t getInstrumentCount() const;
 
     // Ajoute un actionneur
     bool addActuator(const ActuatorConfig& actuator);
 
+    // --- Accesseurs instruments ---
+
+    InstrumentConfig* getInstruments();
+    uint8_t getInstrumentCount() const;
+
     // Ajoute un instrument
     bool addInstrument(const InstrumentConfig& instrument);
 
-    // --- WiFi ---
+    // --- WiFi + MIDI ---
 
     WiFiConfig* getWiFiConfig();
     void setWiFiConfig(const WiFiConfig& config);
 
-    // --- MIDI Input ---
-
     MidiInputConfig* getMidiInputConfig();
+    void setMidiInputConfig(const MidiInputConfig& config);
 
     // --- Routage MIDI ---
 
