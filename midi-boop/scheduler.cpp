@@ -1,4 +1,5 @@
 #include "scheduler.h"
+#include "safety_manager.h"
 
 // ============================================================================
 // PlayMode Midi B∞p — Real-Time Scheduler (implémentation)
@@ -9,6 +10,7 @@ QueueHandle_t g_scheduler_queue = NULL;
 
 Scheduler::Scheduler(ActuatorEngine& engine)
     : _engine(engine),
+      _safety_manager(nullptr),
       _task_handle(NULL),
       _input_queue(NULL),
       _running(false),
@@ -98,6 +100,11 @@ bool Scheduler::isRunning() const {
     return _running;
 }
 
+void Scheduler::setSafetyManager(SafetyManager* safety) {
+    _safety_manager = safety;
+    Serial.printf("[SCHED] Safety Manager %s\n", safety ? "enregistré" : "désactivé");
+}
+
 // ============================================================================
 // Tâche FreeRTOS — Point d'entrée statique
 // ============================================================================
@@ -119,7 +126,12 @@ void Scheduler::run() {
         // 2. Traiter les événements dont le timestamp est atteint
         processReadyEvents();
 
-        // 3. Attendre le prochain tick
+        // 3. Mise à jour périodique de la sécurité
+        if (_safety_manager != nullptr) {
+            _safety_manager->update(_actuators, _actuator_count);
+        }
+
+        // 4. Attendre le prochain tick
         vTaskDelay(SCHEDULER_TICK_MS / portTICK_PERIOD_MS);
     }
 
@@ -183,8 +195,17 @@ void Scheduler::processReadyEvents() {
         // Trouver l'actionneur cible
         ActuatorConfig* actuator = findActuator(event.actuator_id);
         if (actuator != nullptr) {
-            _engine.processEvent(*actuator, event);
-            _processed_count++;
+            // Vérification sécurité avant exécution
+            bool safe = true;
+            if (_safety_manager != nullptr) {
+                safe = _safety_manager->checkEvent(*actuator, event);
+            }
+
+            if (safe) {
+                _engine.processEvent(*actuator, event);
+                _processed_count++;
+            }
+            // Événement bloqué par sécurité : silencieusement ignoré
         } else {
             Serial.printf("[SCHED] Actionneur %d non trouvé\n", event.actuator_id);
         }
