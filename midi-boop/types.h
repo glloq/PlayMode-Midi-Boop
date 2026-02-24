@@ -91,6 +91,7 @@ struct InstrumentConfig {
     uint8_t midi_channel;        // Canal MIDI assigné (0-15)
     uint8_t bus_id;              // Bus I²C dédié
     uint8_t actuator_ids[PCA_CHANNELS]; // IDs des actionneurs associés
+    uint8_t midi_notes[PCA_CHANNELS];   // Note MIDI pour chaque actionneur (0xFF = non mappé)
     uint8_t actuator_count;      // Nombre d'actionneurs
     uint16_t default_latency_ms; // Latence par défaut
     bool auto_calibration;       // Calibration auto activée

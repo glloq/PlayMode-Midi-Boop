@@ -57,8 +57,28 @@
 // --- Série ---
 #define SERIAL_BAUD_RATE        115200
 
+// --- WiFi ---
+#define WIFI_DEFAULT_HOSTNAME    "midi-boop"
+#define WIFI_CONNECT_TIMEOUT_MS  10000   // Timeout connexion STA (ms)
+#define WIFI_RECONNECT_INTERVAL  5000    // Intervalle entre tentatives reconnexion (ms)
+#define WIFI_AP_FALLBACK         true    // Démarrer en AP si STA échoue
+
+// --- MIDI Input ---
+#define MIDI_SERIAL_BAUD         31250   // Baud rate MIDI standard
+#define MIDI_SERIAL_RX_PIN       4       // GPIO pour entrée Serial MIDI (Serial2 RX)
+#define MIDI_UDP_PORT            5004    // Port UDP MIDI
+#define MIDI_RTP_PORT            5004    // Port RTP-MIDI (AppleMIDI standard)
+#define MIDI_JITTER_BUFFER_MS    30      // Profondeur jitter buffer par défaut (ms)
+#define MIDI_JITTER_BUFFER_MAX   100     // Profondeur max jitter buffer (ms)
+
+// --- Jitter Buffer ---
+#define JITTER_BUFFER_SIZE       64      // Max événements dans le jitter buffer
+
+// --- MIDI Note Mapping ---
+#define MIDI_NOTE_UNMAPPED       0xFF    // Valeur sentinelle pour note non mappée
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          1
+#define CONFIG_VERSION          2
 
 #endif // CONFIG_H

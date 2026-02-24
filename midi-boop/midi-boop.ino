@@ -4,12 +4,13 @@
 // ============================================================================
 //
 // Architecture dual-core ESP32 :
-//   Core 0 : WiFi, Web UI, MIDI parsing (loop)
+//   Core 0 : WiFi, MIDI parsing, Web UI (loop)
 //   Core 1 : Scheduler temps réel, PCA/I²C, sécurité
 //
 // Bibliothèques requises :
 //   - Adafruit PWM Servo Driver Library
 //   - ArduinoJson
+//   - AppleMIDI (lathoub/Arduino-AppleMIDI-Library)
 //   - ESPAsyncWebServer (phase 6)
 //   - AsyncTCP (phase 6)
 //
@@ -17,20 +18,33 @@
 
 #include "config.h"
 #include "types.h"
+#include "midi_types.h"
 #include "pca_driver.h"
 #include "actuator_engine.h"
 #include "scheduler.h"
 #include "config_manager.h"
+#include "wifi_manager.h"
+#include "jitter_buffer.h"
+#include "midi_transport.h"
+#include "midi_dispatcher.h"
 
-// --- Objets globaux ---
+// --- Objets globaux (Phase 1) ---
 PCADriver pcaDriver;
 ActuatorEngine actuatorEngine(pcaDriver);
 Scheduler scheduler(actuatorEngine);
 ConfigManager configManager;
 
+// --- Objets globaux (Phase 3 — MIDI) ---
+WiFiManager wifiManager;
+JitterBuffer jitterBuffer;
+MidiTransport midiTransport(jitterBuffer);
+MidiDispatcher midiDispatcher(scheduler, configManager);
+
 // --- Prototypes test ---
+#ifdef ENABLE_TEST_SEQUENCE
 void setupTestActuators();
 void runTestSequence();
+#endif
 
 // ============================================================================
 // SETUP — Initialisation
@@ -40,7 +54,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B∞p v0.1");
+    Serial.println("  PlayMode Midi B∞p v0.2");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -60,7 +74,7 @@ void setup() {
         Serial.println("[INIT] ATTENTION : Problème init PCA (certains bus manquants ?)");
     }
 
-    // 3. Configurer les actionneurs de test (ou depuis config)
+    // 3. Configurer les actionneurs (depuis config ou mode test)
     Serial.println("\n[INIT] Actionneurs...");
     if (configManager.getActuatorCount() > 0) {
         // Charger depuis la config sauvegardée
@@ -71,10 +85,13 @@ void setup() {
             scheduler.registerActuator(&actuators[i]);
         }
         Serial.printf("[INIT] %d actionneurs chargés depuis config\n", count);
-    } else {
+    }
+#ifdef ENABLE_TEST_SEQUENCE
+    else {
         // Mode test : créer des actionneurs hardcodés
         setupTestActuators();
     }
+#endif
 
     // 4. Activer les bus PCA (OE = LOW)
     Serial.println("\n[INIT] Activation des sorties PCA...");
@@ -87,44 +104,92 @@ void setup() {
         Serial.println("[INIT] ERREUR : Scheduler");
     }
 
+    // 6. Initialiser le WiFi
+    Serial.println("\n[INIT] WiFi...");
+    WiFiConfig* wifiCfg = configManager.getWiFiConfig();
+    if (wifiCfg->enabled && strlen(wifiCfg->ssid) > 0) {
+        if (wifiManager.begin(*wifiCfg)) {
+            Serial.printf("[INIT] WiFi connecté : %s\n", wifiManager.getIP().toString().c_str());
+        } else {
+            Serial.println("[INIT] WiFi : mode AP (pas de connexion STA)");
+        }
+    } else if (wifiCfg->enabled && wifiCfg->ap_fallback) {
+        // Pas de SSID configuré mais AP fallback activé
+        wifiManager.begin(*wifiCfg);
+        Serial.printf("[INIT] WiFi AP : %s\n", wifiManager.getIP().toString().c_str());
+    } else {
+        Serial.println("[INIT] WiFi désactivé ou SSID vide");
+    }
+
+    // 7. Initialiser le MIDI dispatcher
+    Serial.println("\n[INIT] MIDI Dispatcher...");
+    midiDispatcher.refreshConfig();
+
+    // 8. Initialiser le jitter buffer
+    MidiInputConfig* midiCfg = configManager.getMidiInputConfig();
+    jitterBuffer.setDepth(midiCfg->jitter_buffer_ms);
+    Serial.printf("[INIT] Jitter buffer : %d ms\n", midiCfg->jitter_buffer_ms);
+
+    // 9. Initialiser les transports MIDI
+    Serial.println("\n[INIT] MIDI Transports...");
+    if (midiTransport.begin(*midiCfg)) {
+        Serial.println("[INIT] Transports MIDI actifs");
+    } else {
+        Serial.println("[INIT] ATTENTION : Aucun transport MIDI initialisé");
+    }
+
     Serial.println("\n========================================");
     Serial.println("  Initialisation terminée");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
-    // 6. Lancer la séquence de test
+#ifdef ENABLE_TEST_SEQUENCE
     delay(500);
     runTestSequence();
+#endif
 }
 
 // ============================================================================
-// LOOP — Core 0 (futur : MIDI, Web UI)
+// LOOP — Core 0 (WiFi, MIDI, Web UI)
 // ============================================================================
 void loop() {
-    // Placeholder pour Core 0
-    // Futures fonctionnalités :
-    //   - MIDI Input (UDP/RTP-MIDI) — Phase 3
-    //   - Web UI (ESPAsyncWebServer) — Phase 6
-    //   - Monitoring série
+    // 1. Maintenir la connexion WiFi
+    wifiManager.maintain();
 
-    // Affichage périodique de l'état du scheduler
+    // 2. Lire les transports MIDI (bytes → parseur → jitter buffer)
+    midiTransport.poll();
+
+    // 3. Drainer le jitter buffer → dispatch vers scheduler
+    MidiMessage msg;
+    while (jitterBuffer.pop(msg)) {
+        midiDispatcher.dispatch(msg);
+    }
+
+    // 4. Affichage périodique de l'état
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
     if (now - last_status > 5000) {
         last_status = now;
-        Serial.printf("[STATUS] Scheduler : %d événements en queue, %d traités | Heap : %d\n",
+        Serial.printf("[STATUS] Sched: %d queued, %d processed | "
+                      "MIDI: %d dispatched, %d dropped | "
+                      "Jitter: %d buffered | Heap: %d\n",
                       scheduler.getQueuedEventCount(),
                       scheduler.getProcessedCount(),
+                      midiDispatcher.getDispatchedCount(),
+                      midiDispatcher.getDroppedCount(),
+                      jitterBuffer.count(),
                       ESP.getFreeHeap());
     }
 
-    delay(10);  // Céder du temps CPU
+    delay(1);  // Céder du temps au stack WiFi (1ms pour basse latence)
 }
 
 // ============================================================================
-// Configuration d'actionneurs de test (sans PCA physique)
+// Mode test (actif uniquement avec #define ENABLE_TEST_SEQUENCE)
 // ============================================================================
+
+#ifdef ENABLE_TEST_SEQUENCE
 
 // Stockage statique pour les actionneurs de test
 static ActuatorConfig testActuators[4];
@@ -273,3 +338,5 @@ void runTestSequence() {
     Serial.println("\n[TEST] Séquence envoyée au scheduler");
     Serial.println("[TEST] Les événements seront exécutés automatiquement\n");
 }
+
+#endif // ENABLE_TEST_SEQUENCE
