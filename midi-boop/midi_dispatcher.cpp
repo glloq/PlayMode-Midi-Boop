@@ -105,9 +105,12 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
     uint8_t actuator_id = inst.actuator_ids[act_slot];
 
     // Compensation de latence
+    // AUDIT FIX : utiliser arithmetic signée pour éviter l'underflow uint16_t
+    // si actuator_latency > _max_latency_ms (config invalide), compensation = 0.
     ActuatorConfig* act_config = findActuatorConfig(actuator_id);
     uint16_t actuator_latency = act_config ? act_config->latency_ms : inst.default_latency_ms;
-    uint16_t compensation_us = (_max_latency_ms[inst_idx] - actuator_latency) * 1000;
+    int32_t compensation_signed = ((int32_t)_max_latency_ms[inst_idx] - (int32_t)actuator_latency) * 1000;
+    uint32_t compensation_us = (compensation_signed > 0) ? (uint32_t)compensation_signed : 0;
 
     // Appliquer la courbe de vélocité
     uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);

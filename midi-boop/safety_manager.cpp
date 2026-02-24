@@ -273,8 +273,11 @@ void SafetyManager::checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuator)
         actuator.state.active = false;
 
         // Couper la sortie PWM directement
+        // AUDIT FIX : les servos étaient omis — retour à la position de repos.
         if (actuator.type == ACT_SOLENOID) {
             _pca.setActuatorPWM(actuator, 0);
+        } else if (actuator.type == ACT_SERVO) {
+            _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial));
         }
 
         Serial.printf("[SAFETY] Watchdog actionneur %d : forcé à OFF après %dms\n",
