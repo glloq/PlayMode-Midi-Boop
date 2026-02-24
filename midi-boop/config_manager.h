@@ -1,0 +1,80 @@
+#ifndef CONFIG_MANAGER_H
+#define CONFIG_MANAGER_H
+
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <LittleFS.h>
+#include "config.h"
+#include "types.h"
+
+// ============================================================================
+// PlayMode Midi B∞p — Config Manager (JSON / LittleFS)
+// ============================================================================
+
+class ConfigManager {
+public:
+    ConfigManager();
+
+    // Initialise LittleFS
+    bool begin();
+
+    // Charge la configuration depuis le fichier JSON
+    bool load();
+
+    // Sauvegarde la configuration dans le fichier JSON
+    bool save();
+
+    // Remet la configuration par défaut
+    void loadDefaults();
+
+    // Vérifie si une config existe sur le filesystem
+    bool configExists();
+
+    // --- Accesseurs ---
+
+    BusConfig* getBuses();
+    uint8_t getBusCount() const;
+
+    ActuatorConfig* getActuators();
+    uint8_t getActuatorCount() const;
+
+    InstrumentConfig* getInstruments();
+    uint8_t getInstrumentCount() const;
+
+    // Ajoute un actionneur
+    bool addActuator(const ActuatorConfig& actuator);
+
+    // Ajoute un instrument
+    bool addInstrument(const InstrumentConfig& instrument);
+
+    // Version de la config
+    uint8_t getVersion() const;
+
+private:
+    BusConfig _buses[2];
+    ActuatorConfig _actuators[MAX_ACTUATORS];
+    uint8_t _actuator_count;
+    InstrumentConfig _instruments[MAX_INSTRUMENTS];
+    uint8_t _instrument_count;
+    uint8_t _version;
+
+    // Sérialise un actionneur en JSON
+    void serializeActuator(const ActuatorConfig& act, JsonObject& obj);
+
+    // Désérialise un actionneur depuis JSON
+    void deserializeActuator(ActuatorConfig& act, const JsonObject& obj);
+
+    // Sérialise un bus en JSON
+    void serializeBus(const BusConfig& bus, JsonObject& obj);
+
+    // Désérialise un bus depuis JSON
+    void deserializeBus(BusConfig& bus, const JsonObject& obj);
+
+    // Sérialise un instrument en JSON
+    void serializeInstrument(const InstrumentConfig& inst, JsonObject& obj);
+
+    // Désérialise un instrument depuis JSON
+    void deserializeInstrument(InstrumentConfig& inst, const JsonObject& obj);
+};
+
+#endif // CONFIG_MANAGER_H
