@@ -7,11 +7,14 @@
 ConfigManager::ConfigManager()
     : _actuator_count(0),
       _instrument_count(0),
+      _routing_count(0),
       _version(CONFIG_VERSION) {
     memset(&_wifi_config, 0, sizeof(_wifi_config));
     memset(&_midi_input_config, 0, sizeof(_midi_input_config));
     memset(_actuators, 0, sizeof(_actuators));
     memset(_instruments, 0, sizeof(_instruments));
+    memset(&_wifi_config, 0, sizeof(_wifi_config));
+    memset(_routing_configs, 0, sizeof(_routing_configs));
 }
 
 bool ConfigManager::begin() {
@@ -105,8 +108,25 @@ bool ConfigManager::load() {
         _instrument_count++;
     }
 
-    Serial.printf("[CONFIG] Chargé : %d actionneurs, %d instruments\n",
-                  _actuator_count, _instrument_count);
+    // WiFi
+    if (doc.containsKey("wifi")) {
+        JsonObject wifiObj = doc["wifi"].as<JsonObject>();
+        deserializeWiFi(_wifi_config, wifiObj);
+    }
+
+    // Routage MIDI
+    _routing_count = 0;
+    if (doc.containsKey("routing")) {
+        JsonArray routeArray = doc["routing"].as<JsonArray>();
+        for (JsonObject routeObj : routeArray) {
+            if (_routing_count >= MAX_INSTRUMENTS) break;
+            deserializeRouting(_routing_configs[_routing_count], routeObj);
+            _routing_count++;
+        }
+    }
+
+    Serial.printf("[CONFIG] Chargé : %d actionneurs, %d instruments, %d routages\n",
+                  _actuator_count, _instrument_count, _routing_count);
     return true;
 }
 
@@ -154,6 +174,17 @@ bool ConfigManager::save() {
         serializeInstrument(_instruments[i], instObj);
     }
 
+    // WiFi
+    JsonObject wifiObj = doc["wifi"].to<JsonObject>();
+    serializeWiFi(_wifi_config, wifiObj);
+
+    // Routage MIDI
+    JsonArray routeArray = doc["routing"].to<JsonArray>();
+    for (uint8_t i = 0; i < _routing_count; i++) {
+        JsonObject routeObj = routeArray.add<JsonObject>();
+        serializeRouting(_routing_configs[i], routeObj);
+    }
+
     File file = LittleFS.open(CONFIG_FILE_PATH, "w");
     if (!file) {
         Serial.println("[CONFIG] Impossible d'écrire le fichier config");
@@ -190,23 +221,14 @@ void ConfigManager::loadDefaults() {
 
     _actuator_count = 0;
     _instrument_count = 0;
+    _routing_count = 0;
     _version = CONFIG_VERSION;
 
-    // WiFi defaults
-    strlcpy(_wifi_config.ssid, "", sizeof(_wifi_config.ssid));
-    strlcpy(_wifi_config.password, "", sizeof(_wifi_config.password));
-    strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
-    _wifi_config.enabled = true;
-    _wifi_config.ap_fallback = WIFI_AP_FALLBACK;
-
-    // MIDI Input defaults
-    _midi_input_config.serial_enabled = true;
-    _midi_input_config.udp_enabled = true;
-    _midi_input_config.rtp_enabled = true;
-    _midi_input_config.udp_port = MIDI_UDP_PORT;
-    _midi_input_config.rtp_port = MIDI_RTP_PORT;
-    _midi_input_config.jitter_buffer_ms = MIDI_JITTER_BUFFER_MS;
-    _midi_input_config.serial_rx_pin = MIDI_SERIAL_RX_PIN;
+    // WiFi défauts
+    strlcpy(_wifi_config.ssid, "MidiBoop", sizeof(_wifi_config.ssid));
+    strlcpy(_wifi_config.password, "midiboop", sizeof(_wifi_config.password));
+    _wifi_config.enabled = false;
+    _wifi_config.ap_mode = true;
 
     Serial.println("[CONFIG] Défauts chargés");
 }
@@ -257,12 +279,27 @@ uint8_t ConfigManager::getVersion() const {
     return _version;
 }
 
-WiFiConfig* ConfigManager::getWiFiConfig() {
-    return &_wifi_config;
+WiFiConfig& ConfigManager::getWiFiConfig() {
+    return _wifi_config;
 }
 
-MidiInputConfig* ConfigManager::getMidiInputConfig() {
-    return &_midi_input_config;
+void ConfigManager::setWiFiConfig(const WiFiConfig& config) {
+    _wifi_config = config;
+}
+
+MidiRoutingConfig* ConfigManager::getRoutingConfigs() {
+    return _routing_configs;
+}
+
+uint8_t ConfigManager::getRoutingCount() const {
+    return _routing_count;
+}
+
+bool ConfigManager::addRoutingConfig(const MidiRoutingConfig& routing) {
+    if (_routing_count >= MAX_INSTRUMENTS) return false;
+    _routing_configs[_routing_count] = routing;
+    _routing_count++;
+    return true;
 }
 
 // ============================================================================
@@ -398,5 +435,104 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
             inst.midi_notes[noteIdx] = v.as<uint8_t>();
             noteIdx++;
         }
+    }
+}
+
+// ============================================================================
+// Sérialisation / Désérialisation — WiFi
+// ============================================================================
+
+void ConfigManager::serializeWiFi(const WiFiConfig& wifi, JsonObject& obj) {
+    obj["ssid"] = wifi.ssid;
+    obj["password"] = wifi.password;
+    obj["enabled"] = wifi.enabled;
+    obj["ap_mode"] = wifi.ap_mode;
+}
+
+void ConfigManager::deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj) {
+    strlcpy(wifi.ssid, obj["ssid"] | "MidiBoop", sizeof(wifi.ssid));
+    strlcpy(wifi.password, obj["password"] | "midiboop", sizeof(wifi.password));
+    wifi.enabled = obj["enabled"] | false;
+    wifi.ap_mode = obj["ap_mode"] | true;
+}
+
+// ============================================================================
+// Sérialisation / Désérialisation — Routage MIDI
+// ============================================================================
+
+void ConfigManager::serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj) {
+    obj["instrument_index"] = routing.instrument_index;
+
+    // Note mappings
+    JsonArray noteArray = obj["note_map"].to<JsonArray>();
+    for (uint8_t i = 0; i < routing.note_map_count; i++) {
+        JsonObject nm = noteArray.add<JsonObject>();
+        nm["midi_note"] = routing.note_map[i].midi_note;
+        nm["actuator_id"] = routing.note_map[i].actuator_id;
+        nm["behavior_override"] = routing.note_map[i].behavior_override;
+        nm["enabled"] = routing.note_map[i].enabled;
+    }
+
+    // CC mappings
+    JsonArray ccArray = obj["cc_map"].to<JsonArray>();
+    for (uint8_t i = 0; i < routing.cc_map_count; i++) {
+        JsonObject cm = ccArray.add<JsonObject>();
+        cm["cc_number"] = routing.cc_map[i].cc_number;
+        cm["actuator_id"] = routing.cc_map[i].actuator_id;
+        cm["target"] = (uint8_t)routing.cc_map[i].target;
+        cm["range_min"] = routing.cc_map[i].range_min;
+        cm["range_max"] = routing.cc_map[i].range_max;
+        cm["enabled"] = routing.cc_map[i].enabled;
+    }
+
+    // Velocity curve
+    JsonArray velArray = obj["velocity_curve"].to<JsonArray>();
+    for (uint8_t i = 0; i < routing.velocity_curve_count; i++) {
+        JsonObject vp = velArray.add<JsonObject>();
+        vp["input"] = routing.velocity_curve[i].input;
+        vp["output"] = routing.velocity_curve[i].output;
+    }
+}
+
+void ConfigManager::deserializeRouting(MidiRoutingConfig& routing, const JsonObject& obj) {
+    routing.instrument_index = obj["instrument_index"] | 0;
+
+    // Note mappings
+    routing.note_map_count = 0;
+    JsonArray noteArray = obj["note_map"].as<JsonArray>();
+    for (JsonObject nm : noteArray) {
+        if (routing.note_map_count >= MAX_NOTE_MAPPINGS) break;
+        NoteMapping& m = routing.note_map[routing.note_map_count];
+        m.midi_note = nm["midi_note"] | 0;
+        m.actuator_id = nm["actuator_id"] | 0;
+        m.behavior_override = nm["behavior_override"] | 0xFF;
+        m.enabled = nm["enabled"] | true;
+        routing.note_map_count++;
+    }
+
+    // CC mappings
+    routing.cc_map_count = 0;
+    JsonArray ccArray = obj["cc_map"].as<JsonArray>();
+    for (JsonObject cm : ccArray) {
+        if (routing.cc_map_count >= MAX_CC_MAPPINGS) break;
+        CCMapping& c = routing.cc_map[routing.cc_map_count];
+        c.cc_number = cm["cc_number"] | 0;
+        c.actuator_id = cm["actuator_id"] | 0;
+        c.target = (CCTarget)(cm["target"] | 0);
+        c.range_min = cm["range_min"] | 0;
+        c.range_max = cm["range_max"] | 4095;
+        c.enabled = cm["enabled"] | true;
+        routing.cc_map_count++;
+    }
+
+    // Velocity curve
+    routing.velocity_curve_count = 0;
+    JsonArray velArray = obj["velocity_curve"].as<JsonArray>();
+    for (JsonObject vp : velArray) {
+        if (routing.velocity_curve_count >= VELOCITY_CURVE_POINTS) break;
+        VelocityCurvePoint& p = routing.velocity_curve[routing.velocity_curve_count];
+        p.input = vp["input"] | 0;
+        p.output = vp["output"] | 0;
+        routing.velocity_curve_count++;
     }
 }

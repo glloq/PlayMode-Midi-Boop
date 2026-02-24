@@ -48,6 +48,17 @@ public:
     // Ajoute un instrument
     bool addInstrument(const InstrumentConfig& instrument);
 
+    // --- WiFi ---
+
+    WiFiConfig& getWiFiConfig();
+    void setWiFiConfig(const WiFiConfig& config);
+
+    // --- Routage MIDI ---
+
+    MidiRoutingConfig* getRoutingConfigs();
+    uint8_t getRoutingCount() const;
+    bool addRoutingConfig(const MidiRoutingConfig& routing);
+
     // Version de la config
     uint8_t getVersion() const;
 
@@ -64,6 +75,9 @@ private:
     uint8_t _actuator_count;
     InstrumentConfig _instruments[MAX_INSTRUMENTS];
     uint8_t _instrument_count;
+    WiFiConfig _wifi_config;
+    MidiRoutingConfig _routing_configs[MAX_INSTRUMENTS];
+    uint8_t _routing_count;
     uint8_t _version;
 
     // Sérialise un actionneur en JSON
@@ -83,6 +97,18 @@ private:
 
     // Désérialise un instrument depuis JSON
     void deserializeInstrument(InstrumentConfig& inst, const JsonObject& obj);
+
+    // Sérialise la config WiFi en JSON
+    void serializeWiFi(const WiFiConfig& wifi, JsonObject& obj);
+
+    // Désérialise la config WiFi depuis JSON
+    void deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj);
+
+    // Sérialise un routage MIDI en JSON
+    void serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj);
+
+    // Désérialise un routage MIDI depuis JSON
+    void deserializeRouting(MidiRoutingConfig& routing, const JsonObject& obj);
 };
 
 #endif // CONFIG_MANAGER_H
