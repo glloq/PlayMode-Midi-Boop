@@ -37,16 +37,19 @@ a{color:var(--accent);text-decoration:none}
 
 /* Layout */
 .header{background:var(--bg2);border-bottom:1px solid var(--border);
-  padding:12px 20px;display:flex;align-items:center;gap:16px}
+  padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .header h1{font-size:18px;font-weight:600}
 .header h1 span{color:var(--accent)}
-.header .status{margin-left:auto;font-size:12px;color:var(--fg2)}
+.header .status{margin-left:auto;font-size:12px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .header .dot{width:8px;height:8px;border-radius:50%;display:inline-block;
   margin-right:4px;background:var(--green)}
 .header .dot.off{background:var(--red)}
 
 nav{background:var(--bg2);border-bottom:1px solid var(--border);
-  display:flex;gap:0;overflow-x:auto}
+  display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+nav::-webkit-scrollbar{height:2px}
+nav::-webkit-scrollbar-thumb{background:var(--border)}
 nav button{background:none;border:none;color:var(--fg2);padding:10px 18px;
   cursor:pointer;font-size:13px;border-bottom:2px solid transparent;
   white-space:nowrap;transition:all .15s}
@@ -74,6 +77,7 @@ nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
 .alert.ok{display:flex;background:#3fb9501a;border:1px solid #3fb95033;color:var(--green)}
 
 /* Tables */
+.table-responsive{overflow-x:auto;-webkit-overflow-scrolling:touch}
 table{width:100%;border-collapse:collapse;margin-bottom:16px}
 th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)}
 th{font-size:12px;color:var(--fg2);text-transform:uppercase;letter-spacing:.5px;background:var(--bg2)}
@@ -85,16 +89,16 @@ tr:hover td{background:var(--bg2)}
 .badge.servo{background:#58a6ff22;color:var(--accent)}
 .badge.sol{background:#d2992222;color:var(--yellow)}
 
-/* Buttons */
+/* Buttons — min-height 44px WCAG 2.5.5 touch target */
 .btn{background:var(--bg3);border:1px solid var(--border);color:var(--fg);
   padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;
-  transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+  transition:all .15s;display:inline-flex;align-items:center;gap:6px;min-height:44px}
 .btn:hover{background:var(--border);border-color:var(--fg2)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{opacity:.85}
 .btn.danger{background:var(--red);border-color:var(--red);color:#fff}
 .btn.danger:hover{opacity:.85}
-.btn.sm{padding:4px 10px;font-size:12px}
+.btn.sm{padding:4px 10px;font-size:12px;min-height:36px}
 .btn-row{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
 
 /* Forms */
@@ -107,42 +111,69 @@ tr:hover td{background:var(--bg2)}
 .form-group input:focus,.form-group select:focus{border-color:var(--accent);outline:none}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form-row.tri{grid-template-columns:1fr 1fr 1fr}
+.form-select{background:var(--bg);color:var(--fg);border:1px solid var(--border);
+  padding:4px 8px;border-radius:4px;font-size:13px}
 
 /* Modal */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
-  z-index:100;align-items:center;justify-content:center}
+  z-index:100;align-items:center;justify-content:center;padding:8px}
 .modal-overlay.show{display:flex}
 .modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
-  padding:24px;width:90%;max-width:500px;max-height:80vh;overflow-y:auto}
+  padding:24px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto}
 .modal h2{font-size:16px;margin-bottom:16px}
 
-/* Piano */
-.piano-container{overflow-x:auto;padding:12px 0}
-.piano{display:flex;position:relative;height:120px;user-select:none}
-.piano .white{width:36px;height:120px;background:#f0f0f0;border:1px solid #999;
+/* Piano — touches plus larges pour le tactile */
+.piano-container{overflow-x:auto;padding:12px 0;-webkit-overflow-scrolling:touch}
+.piano{display:flex;position:relative;height:130px;user-select:none;touch-action:none}
+.piano .white{width:40px;height:130px;background:#f0f0f0;border:1px solid #999;
   border-radius:0 0 4px 4px;cursor:pointer;position:relative;z-index:1;
   display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;
   font-size:9px;color:#666;transition:background .1s}
 .piano .white:hover{background:#e0e8f0}
 .piano .white.active{background:var(--accent);color:#fff}
 .piano .white.mapped{background:#d0e8ff}
-.piano .black{width:22px;height:75px;background:#222;border:1px solid #000;
+.piano .black{width:26px;height:85px;background:#222;border:1px solid #000;
   border-radius:0 0 3px 3px;cursor:pointer;position:absolute;z-index:2;
-  margin-left:-11px;transition:background .1s}
+  margin-left:-13px;transition:background .1s}
 .piano .black:hover{background:#444}
 .piano .black.active{background:var(--accent)}
 .piano .black.mapped{background:#2a5a8f}
 
-/* Section titles */
+/* Section titles — flexbox pour alignement mobile */
 .section-title{font-size:16px;font-weight:600;margin-bottom:16px;
-  padding-bottom:8px;border-bottom:1px solid var(--border)}
+  padding-bottom:8px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 
-/* Responsive */
+/* Log container */
+.log-container{overflow-y:auto;max-height:calc(100vh - 280px)}
+
+/* Responsive — mobile (<600px) */
 @media(max-width:600px){
+  .page{padding:12px}
   .cards{grid-template-columns:1fr 1fr}
   .form-row{grid-template-columns:1fr}
   .form-row.tri{grid-template-columns:1fr}
   nav button{padding:8px 12px;font-size:12px}
+  /* Prévention auto-zoom iOS (font-size < 16px déclenche le zoom) */
+  .form-group input,.form-group select{font-size:16px}
+  .header .status{font-size:11px}
+  .log-container{max-height:calc(100vh - 150px)}
+  .modal{padding:16px}
+}
+/* Très petits écrans (<380px) */
+@media(max-width:380px){
+  .cards{grid-template-columns:1fr}
+  .header .status span:not(#ws-status){display:none}
+}
+/* Tablette (601px–768px) */
+@media(min-width:601px) and (max-width:768px){
+  .cards{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+  .form-row.tri{grid-template-columns:1fr 1fr}
+}
+/* Mode paysage sur mobile */
+@media(max-width:768px) and (orientation:landscape){
+  .log-container{max-height:calc(100vh - 120px)}
+  .modal{max-height:95vh}
 }
 </style>
 </head>
@@ -221,40 +252,48 @@ tr:hover td{background:var(--bg2)}
   </div>
 
   <div class="section-title">Actionneurs actifs</div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th>ID</th><th>Type</th><th>État</th><th>Position</th></tr></thead>
     <tbody id="d-active-table"><tr><td colspan="4" style="color:var(--fg2)">Aucun actionneur actif</td></tr></tbody>
   </table>
-
-  <div class="section-title" style="margin-top:20px">Derniers événements
-    <a onclick="showPage('logs')" style="float:right;font-size:12px;font-weight:400;color:var(--accent);cursor:pointer">Voir tous →</a>
   </div>
+
+  <div class="section-title" style="margin-top:20px"><span>Derniers événements</span>
+    <a onclick="showPage('logs')" style="font-size:12px;font-weight:400;color:var(--accent);cursor:pointer">Voir tous →</a>
+  </div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th style="width:80px">Temps</th><th style="width:60px">Niveau</th><th>Message</th></tr></thead>
     <tbody id="d-log-table"><tr><td colspan="3" style="color:var(--fg2)">Aucun événement récent</td></tr></tbody>
   </table>
+  </div>
 </div>
 
 <!-- ============ INSTRUMENTS ============ -->
 <div class="page" id="page-instruments">
-  <div class="section-title">Instruments
-    <button class="btn primary sm" style="float:right" onclick="openInstrumentModal()">+ Ajouter</button>
+  <div class="section-title"><span>Instruments</span>
+    <button class="btn primary sm" onclick="openInstrumentModal()">+ Ajouter</button>
   </div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th>Nom</th><th>Canal</th><th>Bus</th><th>Actionneurs</th><th>Latence</th><th>État</th><th>Actions</th></tr></thead>
     <tbody id="instruments-table"><tr><td colspan="7" style="color:var(--fg2)">Chargement...</td></tr></tbody>
   </table>
+  </div>
 </div>
 
 <!-- ============ ACTUATORS ============ -->
 <div class="page" id="page-actuators">
-  <div class="section-title">Actionneurs
-    <button class="btn primary sm" style="float:right" onclick="openActuatorModal()">+ Ajouter</button>
+  <div class="section-title"><span>Actionneurs</span>
+    <button class="btn primary sm" onclick="openActuatorModal()">+ Ajouter</button>
   </div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th>ID</th><th>Type</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>Latence</th><th>État</th><th>Actions</th></tr></thead>
     <tbody id="actuators-table"><tr><td colspan="9" style="color:var(--fg2)">Chargement...</td></tr></tbody>
   </table>
+  </div>
 </div>
 
 <!-- ============ MIDI / MAPPING ============ -->
@@ -285,27 +324,31 @@ tr:hover td{background:var(--bg2)}
     </div>
   </div>
 
-  <div class="section-title">Mapping MIDI
-    <select id="mapping-instrument" onchange="loadRouting()" style="float:right;background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:4px 8px;border-radius:4px">
+  <div class="section-title"><span>Mapping MIDI</span>
+    <select id="mapping-instrument" onchange="loadRouting()" class="form-select">
     </select>
   </div>
   <div class="section-title" style="font-size:14px">Notes</div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th>Note MIDI</th><th>Actionneur</th><th>Actif</th><th>Actions</th></tr></thead>
     <tbody id="mapping-notes-table"><tr><td colspan="4" style="color:var(--fg2)">Sélectionner un instrument</td></tr></tbody>
   </table>
+  </div>
 
   <div class="section-title" style="font-size:14px">Control Changes</div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th>CC#</th><th>Actionneur</th><th>Cible</th><th>Min</th><th>Max</th><th>Actif</th></tr></thead>
     <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">Sélectionner un instrument</td></tr></tbody>
   </table>
+  </div>
 </div>
 
 <!-- ============ PIANO ============ -->
 <div class="page" id="page-piano">
-  <div class="section-title">Piano virtuel
-    <select id="piano-instrument" onchange="updatePianoMapping()" style="float:right;background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:4px 8px;border-radius:4px">
+  <div class="section-title"><span>Piano virtuel</span>
+    <select id="piano-instrument" onchange="updatePianoMapping()" class="form-select">
     </select>
   </div>
   <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Cliquer sur une touche pour tester l'actionneur correspondant. Les touches bleues sont mappées.</p>
@@ -459,10 +502,12 @@ tr:hover td{background:var(--bg2)}
   <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
 
   <div class="section-title" style="margin-top:24px">Bus I²C</div>
+  <div class="table-responsive">
   <table>
     <thead><tr><th>Bus</th><th>SDA</th><th>SCL</th><th>OE</th><th>Freq I²C</th><th>Freq PWM</th><th>PCA détectés</th><th>Actions</th></tr></thead>
     <tbody id="buses-table"><tr><td colspan="8" style="color:var(--fg2)">Chargement...</td></tr></tbody>
   </table>
+  </div>
   <button class="btn" onclick="scanI2C()">Scanner bus I²C</button>
 
   <div class="section-title" style="margin-top:24px">Configuration</div>
@@ -586,13 +631,14 @@ tr:hover td{background:var(--bg2)}
   <!-- Sélecteur actionneur unique -->
   <div id="cal-single-sel" style="display:none;margin-bottom:16px">
     <label style="font-size:13px;margin-right:8px">Actionneur :</label>
-    <select id="cal-act-select" style="background:var(--bg3);border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:var(--radius)"></select>
+    <select id="cal-act-select" class="form-select"></select>
     <button class="btn primary" style="margin-left:8px" onclick="confirmCalibrateOne()">Démarrer</button>
     <button class="btn" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">✕</button>
   </div>
 
   <!-- Tableau des résultats -->
   <div class="section-title">Résultats de calibration</div>
+  <div class="table-responsive">
   <table>
     <thead>
       <tr>
@@ -608,6 +654,7 @@ tr:hover td{background:var(--bg2)}
       <tr><td colspan="6" style="color:var(--fg2);text-align:center">Aucun résultat — lancez une calibration</td></tr>
     </tbody>
   </table>
+  </div>
 
   <!-- Note config I²S -->
   <div class="section-title" style="margin-top:24px">Configuration microphone</div>
@@ -684,7 +731,7 @@ tr:hover td{background:var(--bg2)}
     <div class="form-row">
       <div class="form-group">
         <label>Actionneur</label>
-        <select id="burst-act" style="background:var(--bg3);border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:var(--radius)"></select>
+        <select id="burst-act" class="form-select"></select>
       </div>
       <div class="form-group">
         <label>Frappes</label>
@@ -723,6 +770,7 @@ tr:hover td{background:var(--bg2)}
   <div class="section-title">Journal des événements
     <span style="font-size:12px;font-weight:400;color:var(--fg2);margin-left:8px">(32 derniers)</span>
   </div>
+  <div class="table-responsive">
   <table>
     <thead>
       <tr><th>Temps</th><th>Actionneur</th><th>Vélocité</th><th>Mode</th><th>État</th></tr>
@@ -731,18 +779,21 @@ tr:hover td{background:var(--bg2)}
       <tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun événement</td></tr>
     </tbody>
   </table>
+  </div>
 </div>
 
 <!-- ============ LOGS ============ -->
 <div class="page" id="page-logs">
-  <div class="section-title">Journal système
-    <button class="btn sm" style="float:right;margin-left:8px" onclick="clearLogs()">Effacer</button>
-    <button class="btn sm" style="float:right" onclick="loadLogs()">Actualiser</button>
+  <div class="section-title"><span>Journal système</span>
+    <div style="display:flex;gap:6px">
+      <button class="btn sm" onclick="loadLogs()">Actualiser</button>
+      <button class="btn sm" onclick="clearLogs()">Effacer</button>
+    </div>
   </div>
   <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
     <div>
       <label style="font-size:12px;color:var(--fg2)">Niveau min</label>
-      <select id="log-level-filter" onchange="renderLogs()" style="background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:4px 8px;border-radius:4px;margin-left:6px">
+      <select id="log-level-filter" onchange="renderLogs()" class="form-select" style="margin-left:6px">
         <option value="0">Tout (DEBUG+)</option>
         <option value="1">INFO+</option>
         <option value="2">WARN+</option>
@@ -752,7 +803,7 @@ tr:hover td{background:var(--bg2)}
     </div>
     <div>
       <label style="font-size:12px;color:var(--fg2)">Catégorie</label>
-      <select id="log-cat-filter" onchange="renderLogs()" style="background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:4px 8px;border-radius:4px;margin-left:6px">
+      <select id="log-cat-filter" onchange="renderLogs()" class="form-select" style="margin-left:6px">
         <option value="-1">Toutes</option>
         <option value="0">Système</option>
         <option value="1">MIDI</option>
@@ -767,11 +818,13 @@ tr:hover td{background:var(--bg2)}
       <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
     </label>
   </div>
-  <div class="log-container" style="overflow-y:auto;max-height:calc(100vh - 280px)">
+  <div class="log-container">
+    <div class="table-responsive">
     <table>
       <thead><tr><th style="width:80px">Temps</th><th style="width:60px">Niveau</th><th style="width:75px">Catégorie</th><th>Message</th></tr></thead>
       <tbody id="log-table"><tr><td colspan="4" style="color:var(--fg2)">Chargement…</td></tr></tbody>
     </table>
+    </div>
   </div>
   <div id="log-count-info" style="color:var(--fg2);font-size:12px;margin-top:8px;text-align:right"></div>
 </div>
@@ -1289,6 +1342,8 @@ function buildPiano() {
       key.onmousedown = () => pianoNoteOn(n);
       key.onmouseup = () => pianoNoteOff(n);
       key.onmouseleave = () => pianoNoteOff(n);
+      key.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(n); }, {passive:false});
+      key.addEventListener('touchend',   (e) => { e.preventDefault(); pianoNoteOff(n); }, {passive:false});
       container.appendChild(key);
       whiteIndex++;
     }
@@ -1304,10 +1359,12 @@ function buildPiano() {
       const key = document.createElement('div');
       key.className = 'black';
       key.dataset.note = n;
-      key.style.left = (wIdx * 36 - 11) + 'px';
+      key.style.left = (wIdx * 40 - 13) + 'px';
       key.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(n); };
       key.onmouseup = () => pianoNoteOff(n);
       key.onmouseleave = () => pianoNoteOff(n);
+      key.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(n); }, {passive:false});
+      key.addEventListener('touchend',   (e) => { e.preventDefault(); pianoNoteOff(n); }, {passive:false});
       container.appendChild(key);
     } else {
       wIdx++;
