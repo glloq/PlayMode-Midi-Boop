@@ -1,0 +1,1140 @@
+#include "web_server.h"
+#include "web_ui.h"
+#include "config_manager.h"
+#include "scheduler.h"
+#include "safety_manager.h"
+#include "power_manager.h"
+#include "event_normalizer.h"
+#include "midi_input.h"
+#include "pca_driver.h"
+#include "actuator_engine.h"
+#include <ArduinoJson.h>
+
+// ============================================================================
+// PlayMode Midi B∞p — Web Server Implementation (Phase 6)
+// ============================================================================
+
+WebServer::WebServer(uint16_t port)
+    : _server(port)
+    , _ws("/ws")
+    , _port(port)
+    , _running(false)
+    , _config(nullptr)
+    , _scheduler(nullptr)
+    , _safety(nullptr)
+    , _power(nullptr)
+    , _normalizer(nullptr)
+    , _midi(nullptr)
+    , _pca(nullptr)
+    , _engine(nullptr)
+    , _last_ws_broadcast_ms(0)
+{
+}
+
+void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
+                           SafetyManager* safety, PowerManager* power,
+                           EventNormalizer* normalizer, MidiInput* midi,
+                           PCADriver* pca, ActuatorEngine* engine)
+{
+    _config     = config;
+    _scheduler  = scheduler;
+    _safety     = safety;
+    _power      = power;
+    _normalizer = normalizer;
+    _midi       = midi;
+    _pca        = pca;
+    _engine     = engine;
+}
+
+bool WebServer::begin() {
+    if (_running) return true;
+
+    setupStaticRoutes();
+    setupAPIRoutes();
+    setupWebSocket();
+
+    _server.begin();
+    _running = true;
+
+    Serial.printf("[WEB] Serveur démarré sur le port %d\n", _port);
+    return true;
+}
+
+void WebServer::stop() {
+    if (!_running) return;
+    _ws.closeAll();
+    _running = false;
+    Serial.println("[WEB] Serveur arrêté");
+}
+
+void WebServer::update() {
+    if (!_running) return;
+
+    _ws.cleanupClients();
+
+    uint32_t now = millis();
+    if (now - _last_ws_broadcast_ms >= WEB_WS_BROADCAST_MS) {
+        _last_ws_broadcast_ms = now;
+        if (_ws.count() > 0) {
+            broadcastStatus();
+        }
+    }
+}
+
+bool WebServer::isRunning() const { return _running; }
+
+uint8_t WebServer::getClientCount() const { return _ws.count(); }
+
+// ============================================================================
+// Routes statiques — Pages HTML
+// ============================================================================
+
+void WebServer::setupStaticRoutes() {
+    // Page principale (SPA)
+    _server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send_P(200, "text/html", WEB_UI_HTML);
+    });
+
+    // Favicon (204 No Content pour éviter les erreurs 404)
+    _server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+
+    // 404
+    _server.onNotFound([](AsyncWebServerRequest* request) {
+        request->send(404, "application/json", "{\"error\":\"not found\"}");
+    });
+}
+
+// ============================================================================
+// Routes API REST
+// ============================================================================
+
+void WebServer::setupAPIRoutes() {
+    // --- GET endpoints ---
+
+    _server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetStatus(req);
+    });
+
+    _server.on("/api/instruments", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetInstruments(req);
+    });
+
+    _server.on("/api/actuators", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetActuators(req);
+    });
+
+    _server.on("/api/buses", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetBuses(req);
+    });
+
+    _server.on("/api/wifi", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetWiFi(req);
+    });
+
+    _server.on("/api/midi", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetMidi(req);
+    });
+
+    _server.on("/api/routing", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetRouting(req);
+    });
+
+    _server.on("/api/power", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetPower(req);
+    });
+
+    _server.on("/api/safety", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetSafety(req);
+    });
+
+    // --- POST endpoints (avec body JSON) ---
+
+    // Sauvegarde config sur flash
+    _server.on("/api/config/save", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostSave(req);
+    });
+
+    // Reset config par défaut
+    _server.on("/api/config/defaults", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostDefaults(req);
+    });
+
+    // Scan I²C
+    _server.on("/api/scan/i2c", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostScanI2C(req);
+    });
+
+    // Instrument CRUD
+    auto* instrHandler = new AsyncCallbackJsonWebHandler("/api/instrument",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostInstrument(req, (uint8_t*)body.c_str(), body.length());
+        });
+    instrHandler->setMethod(HTTP_POST | HTTP_PUT);
+    _server.addHandler(instrHandler);
+
+    _server.on("/api/instrument", HTTP_DELETE, [this](AsyncWebServerRequest* req) {
+        handleDeleteInstrument(req);
+    });
+
+    // Actuator CRUD
+    auto* actHandler = new AsyncCallbackJsonWebHandler("/api/actuator",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostActuator(req, (uint8_t*)body.c_str(), body.length());
+        });
+    actHandler->setMethod(HTTP_POST | HTTP_PUT);
+    _server.addHandler(actHandler);
+
+    _server.on("/api/actuator", HTTP_DELETE, [this](AsyncWebServerRequest* req) {
+        handleDeleteActuator(req);
+    });
+
+    // WiFi config
+    auto* wifiHandler = new AsyncCallbackJsonWebHandler("/api/wifi",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostWiFi(req, (uint8_t*)body.c_str(), body.length());
+        });
+    wifiHandler->setMethod(HTTP_POST);
+    _server.addHandler(wifiHandler);
+
+    // MIDI config
+    auto* midiHandler = new AsyncCallbackJsonWebHandler("/api/midi",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostMidi(req, (uint8_t*)body.c_str(), body.length());
+        });
+    midiHandler->setMethod(HTTP_POST);
+    _server.addHandler(midiHandler);
+
+    // MIDI routing
+    auto* routingHandler = new AsyncCallbackJsonWebHandler("/api/routing",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostRouting(req, (uint8_t*)body.c_str(), body.length());
+        });
+    routingHandler->setMethod(HTTP_POST);
+    _server.addHandler(routingHandler);
+
+    // Power budget
+    auto* powerHandler = new AsyncCallbackJsonWebHandler("/api/power/budget",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostPowerBudget(req, (uint8_t*)body.c_str(), body.length());
+        });
+    powerHandler->setMethod(HTTP_POST);
+    _server.addHandler(powerHandler);
+
+    // Safety config
+    auto* safetyHandler = new AsyncCallbackJsonWebHandler("/api/safety",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostSafety(req, (uint8_t*)body.c_str(), body.length());
+        });
+    safetyHandler->setMethod(HTTP_POST);
+    _server.addHandler(safetyHandler);
+
+    // Test actuator
+    auto* testHandler = new AsyncCallbackJsonWebHandler("/api/test/actuator",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostTestActuator(req, (uint8_t*)body.c_str(), body.length());
+        });
+    testHandler->setMethod(HTTP_POST);
+    _server.addHandler(testHandler);
+
+    // Kill switch
+    auto* killHandler = new AsyncCallbackJsonWebHandler("/api/killswitch",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostKillSwitch(req, (uint8_t*)body.c_str(), body.length());
+        });
+    killHandler->setMethod(HTTP_POST);
+    _server.addHandler(killHandler);
+}
+
+// ============================================================================
+// GET handlers
+// ============================================================================
+
+void WebServer::handleGetStatus(AsyncWebServerRequest* request) {
+    String json;
+    buildStatusJSON(json);
+    request->send(200, "application/json", json);
+}
+
+void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<2048> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    InstrumentConfig* instruments = _config->getInstruments();
+    uint8_t count = _config->getInstrumentCount();
+
+    for (uint8_t i = 0; i < count; i++) {
+        JsonObject obj = arr.createNestedObject();
+        obj["index"]   = i;
+        obj["name"]    = instruments[i].name;
+        obj["channel"] = instruments[i].midi_channel;
+        obj["bus_id"]  = instruments[i].bus_id;
+        obj["actuator_count"] = instruments[i].actuator_count;
+        obj["latency_ms"]     = instruments[i].default_latency_ms;
+        obj["auto_cal"]       = instruments[i].auto_calibration;
+        obj["enabled"]        = instruments[i].enabled;
+
+        JsonArray acts = obj.createNestedArray("actuators");
+        for (uint8_t j = 0; j < instruments[i].actuator_count; j++) {
+            JsonObject a = acts.createNestedObject();
+            a["id"]   = instruments[i].actuator_ids[j];
+            a["note"] = instruments[i].midi_notes[j];
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<4096> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    ActuatorConfig* actuators = _config->getActuators();
+    uint8_t count = _config->getActuatorCount();
+
+    for (uint8_t i = 0; i < count; i++) {
+        JsonObject obj = arr.createNestedObject();
+        obj["id"]       = actuators[i].id;
+        obj["type"]     = actuators[i].type;
+        obj["bus_id"]   = actuators[i].bus_id;
+        obj["pca_addr"] = actuators[i].pca_address;
+        obj["pca_ch"]   = actuators[i].pca_channel;
+        obj["behavior"] = actuators[i].behavior;
+        obj["enabled"]  = actuators[i].enabled;
+        obj["latency_ms"] = actuators[i].latency_ms;
+
+        // Paramètres servo
+        if (actuators[i].type == ACT_SERVO) {
+            obj["angle_init"] = actuators[i].angle_initial;
+            obj["amplitude"]  = actuators[i].amplitude;
+            obj["speed_ms"]   = actuators[i].speed_ms;
+            obj["angle_b"]    = actuators[i].angle_b;
+        }
+        // Paramètres solénoïde
+        else {
+            obj["pulse_ms"]    = actuators[i].pulse_ms;
+            obj["pwm_initial"] = actuators[i].pwm_initial;
+            obj["pwm_hold"]    = actuators[i].pwm_hold;
+            obj["ramp_ms"]     = actuators[i].ramp_ms;
+        }
+
+        // État runtime
+        JsonObject state = obj.createNestedObject("state");
+        state["active"]   = actuators[i].state.active;
+        state["position"] = actuators[i].state.current_position;
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetBuses(AsyncWebServerRequest* request) {
+    if (!_pca) { request->send(500); return; }
+
+    StaticJsonDocument<512> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    for (uint8_t b = 0; b < 2; b++) {
+        BusConfig& bus = _pca->getBusConfig(b);
+        JsonObject obj = arr.createNestedObject();
+        obj["id"]        = bus.id;
+        obj["sda"]       = bus.sda_pin;
+        obj["scl"]       = bus.scl_pin;
+        obj["oe"]        = bus.oe_pin;
+        obj["freq_i2c"]  = bus.i2c_frequency;
+        obj["freq_pwm"]  = bus.pwm_frequency;
+        obj["enabled"]   = bus.enabled;
+        obj["pca_count"] = bus.pca_count;
+
+        JsonArray addrs = obj.createNestedArray("pca_addrs");
+        for (uint8_t p = 0; p < bus.pca_count; p++) {
+            addrs.add(bus.pca_addresses[p]);
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetWiFi(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    WiFiConfig* wifi = _config->getWiFiConfig();
+    doc["ssid"]        = wifi->ssid;
+    doc["hostname"]    = wifi->hostname;
+    doc["enabled"]     = wifi->enabled;
+    doc["ap_fallback"] = wifi->ap_fallback;
+    doc["connected"]   = WiFi.isConnected();
+    doc["ip"]          = WiFi.localIP().toString();
+    doc["rssi"]        = WiFi.RSSI();
+    // Ne pas exposer le mot de passe
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetMidi(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    MidiInputConfig* midi = _config->getMidiInputConfig();
+    doc["serial_enabled"]   = midi->serial_enabled;
+    doc["udp_enabled"]      = midi->udp_enabled;
+    doc["rtp_enabled"]      = midi->rtp_enabled;
+    doc["udp_port"]         = midi->udp_port;
+    doc["rtp_port"]         = midi->rtp_port;
+    doc["jitter_buffer_ms"] = midi->jitter_buffer_ms;
+    doc["serial_rx_pin"]    = midi->serial_rx_pin;
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<4096> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    MidiRoutingConfig* routings = _config->getRoutingConfigs();
+    uint8_t count = _config->getRoutingCount();
+
+    for (uint8_t i = 0; i < count; i++) {
+        JsonObject obj = arr.createNestedObject();
+        obj["instrument"] = routings[i].instrument_index;
+
+        JsonArray notes = obj.createNestedArray("notes");
+        for (uint8_t n = 0; n < routings[i].note_map_count; n++) {
+            JsonObject nm = notes.createNestedObject();
+            nm["note"]     = routings[i].note_map[n].midi_note;
+            nm["actuator"] = routings[i].note_map[n].actuator_id;
+            nm["enabled"]  = routings[i].note_map[n].enabled;
+        }
+
+        JsonArray ccs = obj.createNestedArray("ccs");
+        for (uint8_t c = 0; c < routings[i].cc_map_count; c++) {
+            JsonObject cm = ccs.createNestedObject();
+            cm["cc"]       = routings[i].cc_map[c].cc_number;
+            cm["actuator"] = routings[i].cc_map[c].actuator_id;
+            cm["target"]   = routings[i].cc_map[c].target;
+            cm["min"]      = routings[i].cc_map[c].range_min;
+            cm["max"]      = routings[i].cc_map[c].range_max;
+            cm["enabled"]  = routings[i].cc_map[c].enabled;
+        }
+
+        JsonArray vel = obj.createNestedArray("velocity_curve");
+        for (uint8_t v = 0; v < routings[i].velocity_curve_count; v++) {
+            JsonObject vp = vel.createNestedObject();
+            vp["in"]  = routings[i].velocity_curve[v].input;
+            vp["out"] = routings[i].velocity_curve[v].output;
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetPower(AsyncWebServerRequest* request) {
+    if (!_power) { request->send(500); return; }
+
+    StaticJsonDocument<512> doc;
+    const PowerStats& stats = _power->getStats();
+    const PowerBudget& budget = _power->getBudget();
+
+    JsonObject s = doc.createNestedObject("stats");
+    s["total_ma"]      = stats.total_estimated_ma;
+    s["servo_bus_ma"]  = stats.servo_bus_ma;
+    s["sol_bus_ma"]    = stats.solenoid_bus_ma;
+    s["active_count"]  = stats.global_active_count;
+    s["rejected"]      = stats.total_rejected;
+    s["budget_pct"]    = stats.budget_used_percent;
+    s["degradation"]   = stats.degradation_active;
+    s["exceeded"]      = stats.budget_exceeded;
+
+    JsonObject b = doc.createNestedObject("budget");
+    b["global_max_ma"] = budget.global_max_ma;
+    b["servo_max_ma"]  = budget.servo_bus_max_ma;
+    b["sol_max_ma"]    = budget.solenoid_bus_max_ma;
+    b["max_polyphony"] = budget.global_max_polyphony;
+    b["smart_reject"]  = budget.smart_rejection;
+
+    JsonArray poly = b.createNestedArray("inst_polyphony");
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+        poly.add(budget.instrument_max_polyphony[i]);
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
+    if (!_safety) { request->send(500); return; }
+
+    StaticJsonDocument<512> doc;
+    const SafetyState& state = _safety->getGlobalState();
+
+    doc["total_current_ma"]  = state.total_estimated_current_ma;
+    doc["active_count"]      = state.active_actuator_count;
+    doc["kill_switch"]       = state.kill_switch_active;
+    doc["degradation"]       = state.degradation_active;
+    doc["over_current"]      = state.over_current;
+
+    // Config actuelle
+    JsonObject cfg = doc.createNestedObject("config");
+    cfg["max_duty_pct"]    = SAFETY_MAX_DUTY_CYCLE;
+    cfg["max_freq_hz"]     = SAFETY_MAX_FREQ_HZ;
+    cfg["watchdog_ms"]     = SAFETY_WATCHDOG_MS;
+    cfg["max_polyphony"]   = SAFETY_MAX_POLYPHONY;
+    cfg["max_current_ma"]  = SAFETY_MAX_TOTAL_CURRENT_MA;
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+// ============================================================================
+// POST handlers — Configuration écriture
+// ============================================================================
+
+void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
+                                     uint8_t* data, size_t len) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    InstrumentConfig inst = {};
+    strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
+    inst.midi_channel      = doc["channel"] | 0;
+    inst.bus_id            = doc["bus_id"] | 0;
+    inst.default_latency_ms = doc["latency_ms"] | 10;
+    inst.auto_calibration  = doc["auto_cal"] | false;
+    inst.enabled           = doc["enabled"] | true;
+    inst.actuator_count    = 0;
+
+    // Mappings actuator→note
+    JsonArray acts = doc["actuators"];
+    if (!acts.isNull()) {
+        for (JsonObject a : acts) {
+            if (inst.actuator_count >= PCA_CHANNELS) break;
+            inst.actuator_ids[inst.actuator_count] = a["id"] | 0;
+            inst.midi_notes[inst.actuator_count]   = a["note"] | MIDI_NOTE_UNMAPPED;
+            inst.actuator_count++;
+        }
+    }
+
+    if (_config->addInstrument(inst)) {
+        _normalizer->reloadConfig();
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(400, "application/json",
+                      "{\"error\":\"max instruments reached\"}");
+    }
+}
+
+void WebServer::handlePostActuator(AsyncWebServerRequest* request,
+                                   uint8_t* data, size_t len) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    ActuatorConfig act = {};
+    act.id           = doc["id"] | 0;
+    act.type         = (ActuatorType)(uint8_t)(doc["type"] | 0);
+    act.bus_id       = doc["bus_id"] | 0;
+    act.pca_address  = doc["pca_addr"] | PCA_BASE_ADDRESS;
+    act.pca_channel  = doc["pca_ch"] | 0;
+    act.behavior     = doc["behavior"] | 0;
+    act.enabled      = doc["enabled"] | true;
+    act.latency_ms   = doc["latency_ms"] | 10;
+
+    // Paramètres servo
+    act.angle_initial = doc["angle_init"] | 90;
+    act.amplitude     = doc["amplitude"] | 45;
+    act.speed_ms      = doc["speed_ms"] | 150;
+    act.angle_b       = doc["angle_b"] | 120;
+
+    // Paramètres solénoïde
+    act.pulse_ms      = doc["pulse_ms"] | 20;
+    act.pwm_initial   = doc["pwm_initial"] | 4095;
+    act.pwm_hold      = doc["pwm_hold"] | 2048;
+    act.ramp_ms       = doc["ramp_ms"] | 50;
+
+    if (_config->addActuator(act)) {
+        // Initialiser l'actionneur dans le moteur et le scheduler
+        ActuatorConfig* actuators = _config->getActuators();
+        uint8_t count = _config->getActuatorCount();
+        for (uint8_t i = 0; i < count; i++) {
+            if (actuators[i].id == act.id) {
+                _engine->initActuator(actuators[i]);
+                _scheduler->registerActuator(&actuators[i]);
+                break;
+            }
+        }
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(400, "application/json",
+                      "{\"error\":\"max actuators reached\"}");
+    }
+}
+
+void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
+                               uint8_t* data, size_t len) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    WiFiConfig wifi = {};
+    strlcpy(wifi.ssid, doc["ssid"] | "", sizeof(wifi.ssid));
+    strlcpy(wifi.password, doc["password"] | "", sizeof(wifi.password));
+    strlcpy(wifi.hostname, doc["hostname"] | WIFI_DEFAULT_HOSTNAME,
+            sizeof(wifi.hostname));
+    wifi.enabled     = doc["enabled"] | true;
+    wifi.ap_fallback = doc["ap_fallback"] | true;
+
+    _config->setWiFiConfig(wifi);
+    request->send(200, "application/json",
+                  "{\"ok\":true,\"note\":\"redémarrer pour appliquer WiFi\"}");
+}
+
+void WebServer::handlePostMidi(AsyncWebServerRequest* request,
+                               uint8_t* data, size_t len) {
+    if (!_config) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    MidiInputConfig midi = {};
+    midi.serial_enabled   = doc["serial_enabled"] | true;
+    midi.udp_enabled      = doc["udp_enabled"] | true;
+    midi.rtp_enabled      = doc["rtp_enabled"] | true;
+    midi.udp_port         = doc["udp_port"] | MIDI_UDP_PORT;
+    midi.rtp_port         = doc["rtp_port"] | MIDI_RTP_PORT;
+    midi.jitter_buffer_ms = doc["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
+    midi.serial_rx_pin    = doc["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+
+    _config->setMidiInputConfig(midi);
+
+    // Appliquer le jitter buffer immédiatement
+    if (_midi) {
+        _midi->setJitterDelay(midi.jitter_buffer_ms);
+        _midi->enableSerial(midi.serial_enabled);
+        _midi->enableUDP(midi.udp_enabled);
+        _midi->enableRTP(midi.rtp_enabled);
+    }
+
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handlePostRouting(AsyncWebServerRequest* request,
+                                  uint8_t* data, size_t len) {
+    if (!_config || !_normalizer) { request->send(500); return; }
+
+    StaticJsonDocument<2048> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    uint8_t inst_idx = doc["instrument"] | 0;
+
+    // Notes
+    JsonArray notes = doc["notes"];
+    if (!notes.isNull()) {
+        // Supprimer les anciens mappings
+        MidiRoutingConfig* routing = _config->getRoutingConfigs();
+        if (inst_idx < _config->getRoutingCount()) {
+            routing[inst_idx].note_map_count = 0;
+        }
+        for (JsonObject nm : notes) {
+            NoteMapping mapping = {};
+            mapping.midi_note         = nm["note"] | 0;
+            mapping.actuator_id       = nm["actuator"] | 0;
+            mapping.behavior_override = nm["behavior"] | 0xFF;
+            mapping.enabled           = nm["enabled"] | true;
+            _normalizer->addNoteMapping(inst_idx, mapping);
+        }
+    }
+
+    // CCs
+    JsonArray ccs = doc["ccs"];
+    if (!ccs.isNull()) {
+        MidiRoutingConfig* routing = _config->getRoutingConfigs();
+        if (inst_idx < _config->getRoutingCount()) {
+            routing[inst_idx].cc_map_count = 0;
+        }
+        for (JsonObject cm : ccs) {
+            CCMapping mapping = {};
+            mapping.cc_number   = cm["cc"] | 0;
+            mapping.actuator_id = cm["actuator"] | 0;
+            mapping.target      = (CCTarget)(uint8_t)(cm["target"] | 0);
+            mapping.range_min   = cm["min"] | 0;
+            mapping.range_max   = cm["max"] | 127;
+            mapping.enabled     = cm["enabled"] | true;
+            _normalizer->addCCMapping(inst_idx, mapping);
+        }
+    }
+
+    // Velocity curve
+    JsonArray vel = doc["velocity_curve"];
+    if (!vel.isNull()) {
+        VelocityCurvePoint points[VELOCITY_CURVE_POINTS];
+        uint8_t count = 0;
+        for (JsonObject vp : vel) {
+            if (count >= VELOCITY_CURVE_POINTS) break;
+            points[count].input  = vp["in"] | 0;
+            points[count].output = vp["out"] | 0;
+            count++;
+        }
+        _normalizer->setVelocityCurve(inst_idx, points, count);
+    }
+
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
+                                      uint8_t* data, size_t len) {
+    if (!_power) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    if (doc.containsKey("global_max_ma"))
+        _power->setGlobalMaxMA(doc["global_max_ma"]);
+    if (doc.containsKey("servo_max_ma"))
+        _power->setServoBusMaxMA(doc["servo_max_ma"]);
+    if (doc.containsKey("sol_max_ma"))
+        _power->setSolenoidBusMaxMA(doc["sol_max_ma"]);
+    if (doc.containsKey("max_polyphony"))
+        _power->setGlobalMaxPolyphony(doc["max_polyphony"]);
+
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handlePostSafety(AsyncWebServerRequest* request,
+                                 uint8_t* data, size_t len) {
+    if (!_safety) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    if (doc.containsKey("max_duty_pct"))
+        _safety->setMaxDutyCycle(doc["max_duty_pct"]);
+    if (doc.containsKey("max_freq_hz"))
+        _safety->setMaxFrequency(doc["max_freq_hz"]);
+    if (doc.containsKey("watchdog_ms"))
+        _safety->setWatchdogTimeout(doc["watchdog_ms"]);
+    if (doc.containsKey("max_polyphony"))
+        _safety->setMaxPolyphony(doc["max_polyphony"]);
+    if (doc.containsKey("max_current_ma"))
+        _safety->setMaxTotalCurrent(doc["max_current_ma"]);
+
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ============================================================================
+// POST handlers — Actions
+// ============================================================================
+
+void WebServer::handlePostSave(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    if (_config->save()) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(500, "application/json",
+                      "{\"error\":\"save failed\"}");
+    }
+}
+
+void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    _config->loadDefaults();
+    if (_normalizer) _normalizer->reloadConfig();
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
+                                       uint8_t* data, size_t len) {
+    if (!_scheduler || !_config) { request->send(500); return; }
+
+    StaticJsonDocument<128> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    uint8_t act_id   = doc["id"] | 0;
+    uint8_t velocity = doc["velocity"] | 100;
+    bool note_on     = doc["note_on"] | true;
+    uint16_t delay_ms = doc["delay_ms"] | 0;
+
+    SchedulerEvent evt = {};
+    evt.trigger_time_us = (uint32_t)esp_timer_get_time() + (delay_ms * 1000UL);
+    evt.actuator_id = act_id;
+    evt.action      = note_on ? ACTION_NOTE_ON : ACTION_NOTE_OFF;
+    evt.velocity    = velocity;
+    evt.priority    = 0;
+
+    if (_scheduler->pushEvent(evt)) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(500, "application/json",
+                      "{\"error\":\"scheduler queue full\"}");
+    }
+}
+
+void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
+                                     uint8_t* data, size_t len) {
+    if (!_safety) { request->send(500); return; }
+
+    StaticJsonDocument<64> doc;
+    DeserializationError err = deserializeJson(doc, data, len);
+    if (err) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    bool activate = doc["active"] | false;
+    if (activate) {
+        _safety->activateKillSwitch();
+    } else {
+        _safety->deactivateKillSwitch();
+    }
+
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
+    if (!_pca) { request->send(500); return; }
+
+    StaticJsonDocument<256> doc;
+    JsonArray arr = doc.to<JsonArray>();
+
+    for (uint8_t b = 0; b < 2; b++) {
+        uint8_t found = _pca->scanBus(b);
+        JsonObject obj = arr.createNestedObject();
+        obj["bus"] = b;
+        obj["pca_count"] = found;
+
+        BusConfig& bus = _pca->getBusConfig(b);
+        JsonArray addrs = obj.createNestedArray("addresses");
+        for (uint8_t p = 0; p < bus.pca_count; p++) {
+            char hex[5];
+            snprintf(hex, sizeof(hex), "0x%02X", bus.pca_addresses[p]);
+            addrs.add(hex);
+        }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+// ============================================================================
+// DELETE handlers
+// ============================================================================
+
+void WebServer::handleDeleteInstrument(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    if (!request->hasParam("index")) {
+        request->send(400, "application/json",
+                      "{\"error\":\"missing index param\"}");
+        return;
+    }
+
+    uint8_t index = request->getParam("index")->value().toInt();
+    InstrumentConfig* instruments = _config->getInstruments();
+    uint8_t count = _config->getInstrumentCount();
+
+    if (index >= count) {
+        request->send(404, "application/json",
+                      "{\"error\":\"instrument not found\"}");
+        return;
+    }
+
+    // Décaler les instruments suivants
+    for (uint8_t i = index; i < count - 1; i++) {
+        instruments[i] = instruments[i + 1];
+    }
+    // Réduire le compteur (on ne peut pas directement, il faut reload)
+    // Pour le moment, désactiver le dernier
+    instruments[count - 1] = {};
+
+    if (_normalizer) _normalizer->reloadConfig();
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
+    if (!_config) { request->send(500); return; }
+
+    if (!request->hasParam("id")) {
+        request->send(400, "application/json",
+                      "{\"error\":\"missing id param\"}");
+        return;
+    }
+
+    uint8_t id = request->getParam("id")->value().toInt();
+    ActuatorConfig* actuators = _config->getActuators();
+    uint8_t count = _config->getActuatorCount();
+
+    bool found = false;
+    for (uint8_t i = 0; i < count; i++) {
+        if (actuators[i].id == id) {
+            // Désactiver l'actionneur et remettre au repos
+            actuators[i].enabled = false;
+            if (_engine) _engine->resetActuator(actuators[i]);
+            found = true;
+            break;
+        }
+    }
+
+    if (found) {
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(404, "application/json",
+                      "{\"error\":\"actuator not found\"}");
+    }
+}
+
+// ============================================================================
+// WebSocket
+// ============================================================================
+
+void WebServer::setupWebSocket() {
+    _ws.onEvent([this](AsyncWebSocket* server, AsyncWebSocketClient* client,
+                       AwsEventType type, void* arg, uint8_t* data, size_t len) {
+        onWebSocketEvent(server, client, type, arg, data, len);
+    });
+    _server.addHandler(&_ws);
+}
+
+void WebServer::onWebSocketEvent(AsyncWebSocket* server,
+                                 AsyncWebSocketClient* client,
+                                 AwsEventType type, void* arg,
+                                 uint8_t* data, size_t len) {
+    switch (type) {
+        case WS_EVT_CONNECT:
+            Serial.printf("[WEB] WS client #%u connecté depuis %s\n",
+                          client->id(), client->remoteIP().toString().c_str());
+            break;
+        case WS_EVT_DISCONNECT:
+            Serial.printf("[WEB] WS client #%u déconnecté\n", client->id());
+            break;
+        case WS_EVT_DATA: {
+            // Commandes WebSocket entrantes (futur : piano virtuel test)
+            AwsFrameInfo* info = (AwsFrameInfo*)arg;
+            if (info->final && info->index == 0 && info->len == len
+                && info->opcode == WS_TEXT)
+            {
+                data[len] = 0;
+                StaticJsonDocument<128> doc;
+                DeserializationError err = deserializeJson(doc, (char*)data);
+                if (!err) {
+                    const char* cmd = doc["cmd"];
+                    if (cmd && strcmp(cmd, "test") == 0) {
+                        // Test actionneur rapide via WS
+                        uint8_t act_id   = doc["id"] | 0;
+                        uint8_t velocity = doc["vel"] | 100;
+                        if (_scheduler) {
+                            SchedulerEvent evt = {};
+                            evt.trigger_time_us = (uint32_t)esp_timer_get_time();
+                            evt.actuator_id = act_id;
+                            evt.action = ACTION_NOTE_ON;
+                            evt.velocity = velocity;
+                            evt.priority = 0;
+                            _scheduler->pushEvent(evt);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case WS_EVT_PONG:
+        case WS_EVT_ERROR:
+            break;
+    }
+}
+
+void WebServer::broadcastStatus() {
+    String json;
+    buildStatusJSON(json);
+    _ws.textAll(json);
+}
+
+// ============================================================================
+// Helpers JSON
+// ============================================================================
+
+void WebServer::buildStatusJSON(String& output) {
+    StaticJsonDocument<1024> doc;
+
+    doc["uptime_s"] = millis() / 1000;
+    doc["heap"]     = ESP.getFreeHeap();
+
+    // Scheduler
+    if (_scheduler) {
+        JsonObject sched = doc.createNestedObject("scheduler");
+        sched["queued"]    = _scheduler->getQueuedEventCount();
+        sched["processed"] = _scheduler->getProcessedCount();
+        sched["running"]   = _scheduler->isRunning();
+    }
+
+    // MIDI
+    if (_midi) {
+        JsonObject midi = doc.createNestedObject("midi");
+        midi["received"]  = _midi->getReceivedCount();
+        midi["buffered"]  = _midi->getBufferedCount();
+        midi["dropped"]   = _midi->getDroppedCount();
+    }
+
+    // Normalizer
+    if (_normalizer) {
+        JsonObject norm = doc.createNestedObject("normalizer");
+        norm["routed"]    = _normalizer->getRoutedCount();
+        norm["unmapped"]  = _normalizer->getUnmappedCount();
+        norm["pwr_rejected"] = _normalizer->getPowerRejectedCount();
+    }
+
+    // Safety
+    if (_safety) {
+        JsonObject safe = doc.createNestedObject("safety");
+        const SafetyState& ss = _safety->getGlobalState();
+        safe["current_ma"]  = ss.total_estimated_current_ma;
+        safe["active"]      = ss.active_actuator_count;
+        safe["kill_switch"] = ss.kill_switch_active;
+        safe["degradation"] = ss.degradation_active;
+        safe["over_current"] = ss.over_current;
+    }
+
+    // Power
+    if (_power) {
+        JsonObject pwr = doc.createNestedObject("power");
+        const PowerStats& ps = _power->getStats();
+        pwr["total_ma"]    = ps.total_estimated_ma;
+        pwr["servo_ma"]    = ps.servo_bus_ma;
+        pwr["sol_ma"]      = ps.solenoid_bus_ma;
+        pwr["budget_pct"]  = ps.budget_used_percent;
+        pwr["degradation"] = ps.degradation_active;
+    }
+
+    // Actuators actifs (résumé compact)
+    if (_config) {
+        JsonArray acts = doc.createNestedArray("active_actuators");
+        ActuatorConfig* actuators = _config->getActuators();
+        uint8_t count = _config->getActuatorCount();
+        for (uint8_t i = 0; i < count; i++) {
+            if (actuators[i].state.active) {
+                JsonObject a = acts.createNestedObject();
+                a["id"]  = actuators[i].id;
+                a["pos"] = actuators[i].state.current_position;
+            }
+        }
+    }
+
+    // WiFi
+    JsonObject wifi = doc.createNestedObject("wifi");
+    wifi["connected"] = WiFi.isConnected();
+    wifi["rssi"]      = WiFi.RSSI();
+
+    serializeJson(doc, output);
+}
+
+void WebServer::buildActuatorJSON(const ActuatorConfig& act, String& output) {
+    StaticJsonDocument<256> doc;
+    doc["id"]       = act.id;
+    doc["type"]     = act.type;
+    doc["bus_id"]   = act.bus_id;
+    doc["enabled"]  = act.enabled;
+    doc["active"]   = act.state.active;
+    doc["position"] = act.state.current_position;
+    serializeJson(doc, output);
+}
+
+void WebServer::buildInstrumentJSON(const InstrumentConfig& inst, String& output) {
+    StaticJsonDocument<256> doc;
+    doc["name"]    = inst.name;
+    doc["channel"] = inst.midi_channel;
+    doc["enabled"] = inst.enabled;
+    doc["count"]   = inst.actuator_count;
+    serializeJson(doc, output);
+}
+
+void WebServer::buildBusJSON(const BusConfig& bus, String& output) {
+    StaticJsonDocument<128> doc;
+    doc["id"]      = bus.id;
+    doc["enabled"] = bus.enabled;
+    doc["pca_count"] = bus.pca_count;
+    serializeJson(doc, output);
+}

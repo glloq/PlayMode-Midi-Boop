@@ -106,8 +106,13 @@
 // --- Série ---
 #define SERIAL_BAUD_RATE         115200
 
+// --- Web Server (Phase 6) ---
+#define WEB_SERVER_PORT          80      // Port HTTP du serveur web
+#define WEB_WS_BROADCAST_MS      200     // Intervalle broadcast WebSocket stats (ms)
+#define WEB_MAX_WS_CLIENTS       4       // Max clients WebSocket simultanés
+
 // --- Config fichier ---
 #define CONFIG_FILE_PATH         "/config.json"
-#define CONFIG_VERSION           3       // v3 : ajout power manager
+#define CONFIG_VERSION           4       // v4 : ajout web server
 
 #endif // CONFIG_H

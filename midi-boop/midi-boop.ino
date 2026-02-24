@@ -28,6 +28,7 @@
 #include "power_manager.h"
 #include "midi_input.h"
 #include "event_normalizer.h"
+#include "web_server.h"
 
 // --- Objets globaux (Phase 1) ---
 PCADriver      pcaDriver;
@@ -42,6 +43,9 @@ MidiInput     midiInput;
 // --- Objets globaux (Phase 5) ---
 PowerManager   powerManager;
 EventNormalizer eventNormalizer(scheduler, configManager);
+
+// --- Objets globaux (Phase 6) ---
+WebServer webServer;
 
 // --- Mode test (décommenter pour activer le test harness sans MIDI) ---
 // #define ENABLE_TEST_HARNESS
@@ -59,7 +63,7 @@ void setup() {
     delay(1000);  // Attendre la stabilisation du port série
 
     Serial.println("========================================");
-    Serial.println("  PlayMode Midi B\u221ep v0.5");
+    Serial.println("  PlayMode Midi B\u221ep v0.6");
     Serial.println("  No-Code MIDI Controller");
     Serial.println("========================================");
     Serial.printf("  Core actuel : %d\n", xPortGetCoreID());
@@ -139,8 +143,20 @@ void setup() {
     eventNormalizer.setPowerManager(&powerManager);
     eventNormalizer.begin();
 
+    // 10. Démarrer le serveur Web (Phase 6)
+    Serial.println("\n[INIT] Web Server...");
+    webServer.setModules(&configManager, &scheduler, &safetyManager,
+                         &powerManager, &eventNormalizer, &midiInput,
+                         &pcaDriver, &actuatorEngine);
+    if (!webServer.begin()) {
+        Serial.println("[INIT] ERREUR : Web Server");
+    } else {
+        Serial.printf("[INIT] Web UI accessible sur http://%s:%d\n",
+                      WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
+    }
+
     Serial.println("\n========================================");
-    Serial.println("  Initialisation terminée — Phase 5");
+    Serial.println("  Initialisation terminée — Phase 6");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
     Serial.println("========================================\n");
 
@@ -152,7 +168,7 @@ void setup() {
 }
 
 // ============================================================================
-// LOOP — Core 0 : Pipeline MIDI complet + Power Manager
+// LOOP — Core 0 : Pipeline MIDI + Power Manager + Web Server
 // ============================================================================
 void loop() {
     // 1. Lire les entrées MIDI et remplir le jitter buffer
@@ -168,13 +184,15 @@ void loop() {
     {
         ActuatorConfig* actuators = configManager.getActuators();
         uint8_t count = configManager.getActuatorCount();
-        // Construire un tableau de pointeurs pour le power manager
         static ActuatorConfig* act_ptrs[MAX_ACTUATORS];
         for (uint8_t i = 0; i < count; i++) act_ptrs[i] = &actuators[i];
         powerManager.update(act_ptrs, count);
     }
 
-    // 4. Affichage périodique de l'état (toutes les 5 secondes)
+    // 4. Mise à jour du serveur Web (WebSocket broadcast)
+    webServer.update();
+
+    // 5. Affichage périodique de l'état (toutes les 5 secondes)
     static uint32_t last_status = 0;
     uint32_t now = millis();
 
@@ -187,7 +205,7 @@ void loop() {
                       "MIDI: %d reçus, %d routés, %d unmapped, %d power-rejected | "
                       "Safety: %dmA, %d actifs%s | "
                       "Power: %umA/%umA (%u%%) srv=%umA sol=%umA%s | "
-                      "Heap: %d\n",
+                      "Web: %d clients | Heap: %d\n",
                       scheduler.getQueuedEventCount(),
                       scheduler.getProcessedCount(),
                       midiInput.getReceivedCount(),
@@ -204,6 +222,7 @@ void loop() {
                       pwr.servo_bus_ma,
                       pwr.solenoid_bus_ma,
                       pwr.degradation_active ? " [DEGRAD]" : "",
+                      webServer.getClientCount(),
                       ESP.getFreeHeap());
     }
 
