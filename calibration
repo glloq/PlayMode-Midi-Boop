@@ -1,0 +1,239 @@
+1️⃣ Objectifs principaux de l’interface de calibration
+
+Permettre l’ajout ou modification d’un instrument avec un ou plusieurs actionneurs
+
+Tester chaque actionneur individuellement selon le type de comportement choisi
+
+Ajuster les paramètres temps / amplitude / vitesse / PWM
+
+Visualiser l’action en temps réel
+
+Sauvegarder un profil instrument complet pour réutilisation
+
+2️⃣ Comportements et paramètres
+2.1 Servomoteurs
+Comportement	Description	Paramètres à calibrer	Test / Feedback UI
+Frappe	Déplacement A → A+X → retour	Angle initial (A), amplitude (X), vitesse / durée	Bouton “Note On”, slider angle, indicateur visuel
+Alterné	A → B → A → B	Angle A, Angle B, vitesse	Bouton “Note On” pour chaque alternance, couleur différente selon état
+Gratter corde	A → ±X alterné à chaque note	Angle A, amplitude X, vitesse	Bouton “Note On”, switch sens alterné, indicateur direction
+Touche	A → A ± δ sur note Off	Angle A, delta ouverture	Slider delta, bouton “Note On/Off”, visualisation retour automatique
+
+UI obligatoire :
+
+Slider pour angle initial et amplitude
+
+Bouton test “Note On / Note Off”
+
+Visualisation graphique de l’angle
+
+Historique latence mesurée (si micro connecté)
+
+2.2 Solénoïdes
+Comportement	Description	Paramètres à calibrer	Test / Feedback UI
+Frappe	Activation 5–50 ms selon vélocité	Durée ms, vélocité scaling	Slider durée, bouton test, feedback LED ou animation
+Hit-and-Hold	Activation PWM puis réduction jusqu’à Note Off	PWM initial, PWM minimum, montée/descente, durée hold	Slider PWM, durée, graphique de la courbe, bouton test
+
+UI obligatoire :
+
+Visualisation temporelle de la pulse (graphique “impulsion”)
+
+Slider pour durée / PWM
+
+Bouton test individuel
+
+Feedback visuel de l’état (LED, couleur ou mini animation)
+
+3️⃣ Structure proposée de l’interface de calibration
+3.1 Layout général
+
+Sélection de l’instrument
+
+Dropdown des instruments existants
+
+Bouton “Créer nouvel instrument”
+
+Liste des actionneurs de l’instrument
+
+Chaque actionneur affiché avec :
+
+Nom / ID
+
+Type (servo / solénoïde)
+
+Bus I²C et OE associé
+
+Comportement sélectionné (frappe, alterné, etc.)
+
+Paramètres et sliders dynamiques
+
+Affichage automatique selon type et comportement
+
+Sliders :
+
+Servo : angle initial, amplitude, vitesse
+
+Solénoïde : durée, PWM, courbe hold
+
+Test et visualisation
+
+Bouton “Test Note” → simule la note sur l’actionneur
+
+Mini graphique ou animation :
+
+Servo : rotation en temps réel
+
+Solénoïde : pulse / hold visuel
+
+Option “Test sur toutes notes / CC assignés”
+
+Calibration automatique (si micro INMP441)
+
+Bouton “Calibrer” :
+
+Mesure latence réelle
+
+Ajuste automatiquement attack_ms ou retard dans scheduler
+
+Feedback visuel (graphique latence)
+
+Sauvegarde
+
+Bouton “Enregistrer profil”
+
+Stockage JSON : actionneur, comportement, paramètres, latence
+
+---
+
+# Workflow complet de création d’un instrument
+
+
+
+## 1️⃣ Sélection / Création de l’instrument
+
+1. L’utilisateur ouvre **“Instruments”** dans l’UI.
+2. Choix :
+
+   * Sélection d’un instrument existant pour modification
+   * **Création d’un nouvel instrument** (nom + canal MIDI)
+3. Sauvegarde du nom et canal MIDI pour le mapping futur.
+
+---
+
+## 2️⃣ Sélection du bus I²C et du PCA9685
+
+1. Choisir **bus I²C** à utiliser (0 ou 1) ou laisser “auto” → détection PCA.
+2. L’UI scanne automatiquement les **PCA9685 détectés** sur le bus :
+
+   * Adresse I²C
+   * Bus associé
+   * OE pin associé
+3. L’utilisateur sélectionne le **PCA correspondant** pour chaque actionneur de l’instrument.
+4. Chaque actionneur est lié à :
+
+   * **Bus I²C**
+   * **Adresse PCA9685**
+   * **Numéro de canal PCA** (0–15)
+5. Affichage visuel : grille des PCA avec tous les canaux disponibles et libres.
+
+---
+
+## 3️⃣ Sélection du type d’actionneur et comportement
+
+* **Type** : Servo ou Solénoïde
+* **Comportement** : Frappe / Alterné / Gratter / Touche / Hit-and-Hold
+* Paramètres dynamiques :
+
+  * Servo : angle initial, amplitude, vitesse
+  * Solénoïde : PWM, durée, courbe hold
+* Feedback immédiat : mini-animation ou valeur numérique en temps réel
+
+---
+
+## 4️⃣ Attribution des pins (si nécessaire)
+
+* Pour servos alimentés via PCA → pas de pin spécifique
+* Pour solénoïdes via MOSFET ou alimentation externe → pin GPIO pour enable / OE
+* OE pin par bus → automatiquement assigné ou choisi
+* L’UI propose sélection ou override de pin si besoin
+
+---
+
+## 5️⃣ Mapping MIDI
+
+1. Pour chaque actionneur :
+
+   * **Note MIDI** → actionneur
+   * Ou **CC MIDI** → servo (pour modulation continue)
+2. Vérification automatique : éviter conflits de note / CC
+3. Affichage piano virtuel :
+
+   * Notes assignées visibles
+   * Test “Note On / Note Off” directement sur piano
+4. Pour multi-instruments :
+
+   * Chaque instrument gère son propre canal MIDI
+   * Possibilité de voir piano multi-instrument simultané
+
+---
+
+## 6️⃣ Test et calibration
+
+1. Bouton “Test Actionneur” :
+
+   * Applique le comportement choisi avec paramètres actuels
+   * Visualisation angle / pulse / PWM
+2. Bouton “Auto-Calibrer” (si micro INMP441 connecté) :
+
+   * Mesure latence réelle
+   * Ajuste `attack_ms` / profil de l’actionneur
+3. Option de **copier profil** vers d’autres actionneurs similaires
+
+---
+
+## 7️⃣ Sauvegarde du profil
+
+* Stockage complet JSON :
+
+  * Instrument : nom, canal MIDI, bus I²C
+  * Actionneurs : type, PCA addr, canal PCA, pin OE (si applicable)
+  * Comportement choisi
+  * Paramètres (angle, amplitude, vitesse, PWM, durée)
+  * Latence calibrée
+* Ce profil est réutilisable pour :
+
+  * Réinitialisation rapide
+  * Duplication pour instruments similaires
+  * Export / partage entre utilisateurs
+
+---
+
+## 8️⃣ Vue d’ensemble UI après création
+
+* Tableau actionneurs avec :
+
+  * Nom / type
+  * Bus / PCA / canal / OE
+  * Comportement
+  * Note MIDI / CC
+  * Paramètres dynamiques
+* Piano virtuel associé au canal MIDI pour tests
+* Feedback temps réel pour chaque note / CC
+
+---
+
+### ✅ Résumé
+
+**Ordre de création d’un instrument :**
+
+1. Créer ou sélectionner un instrument → nom + canal MIDI
+2. Choisir bus I²C + PCA9685 + canal PCA
+3. Sélectionner type d’actionneur et comportement
+4. Assigner pin GPIO si besoin (OE / MOSFET)
+5. Mapper note MIDI ou CC
+6. Ajuster paramètres (angle, PWM, vitesse, durée)
+7. Tester actionneur → auto-calibration optionnelle
+8. Sauvegarder profil complet JSON
+
+> Ce workflow garantit **modularité**, **adaptabilité à tout type d’actionneur** et **compatibilité multi-instruments** tout en offrant **feedback visuel et tests sécurisés** avant d’envoyer les signaux PWM.
+
+
