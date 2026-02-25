@@ -1351,7 +1351,9 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
                 obj["timestamp_ms"]  = res->timestamp_ms;
             } else {
                 obj["measured_ms"]   = nullptr;
+                obj["samples_taken"] = 0;
                 obj["success"]       = nullptr;
+                obj["timestamp_ms"]  = 0;
             }
         }
     }

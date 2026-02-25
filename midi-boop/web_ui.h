@@ -1445,7 +1445,11 @@ async function saveInstrument() {
   await api('/api/instrument', 'POST', data);
   closeModal('modal-instrument');
   editingInstrumentIdx = -1;
+  instruments = [];  // Force refresh
+  routing = await api('/api/routing') || [];
   loadHomeInstruments();
+  loadInstrumentSelects();
+  buildPiano();
 }
 
 async function deleteInstrument(idx) {
@@ -2558,9 +2562,18 @@ function wizPrev() {
 }
 
 async function wizNext() {
+  // Per-step validation before advancing
+  if (wizStep === 1) {
+    const name = document.getElementById('wiz-name').value.trim();
+    if (!name) { toast('Veuillez entrer un nom pour l\'instrument', 'error'); return; }
+  }
+  if (wizStep === 3) {
+    const count = parseInt(document.getElementById('wiz-count').value);
+    if (isNaN(count) || count < 1 || count > 32) { toast('Nombre d\'actionneurs invalide (1–32)', 'error'); return; }
+  }
   if (wizStep < 4) { wizStep++; wizShowStep(); return; }
   // Step 4 → Create everything
-  const name = document.getElementById('wiz-name').value || 'Instrument';
+  const name = document.getElementById('wiz-name').value.trim() || 'Instrument';
   const channel = parseInt(document.getElementById('wiz-channel').value);
   const type = parseInt(document.getElementById('wiz-type').value);
   const behavior = parseInt(document.getElementById('wiz-behavior').value);
