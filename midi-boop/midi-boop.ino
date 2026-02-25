@@ -157,8 +157,24 @@ void setup() {
             logger.log(LOG_WARN, CAT_SYSTEM, "WiFi non disponible (AP fallback)");
         }
     } else {
-        Serial.println("[INIT] WiFi désactivé");
-        logger.log(LOG_INFO, CAT_SYSTEM, "WiFi désactivé");
+        // WiFi désactivé en config : démarrer quand même un AP de configuration
+        // afin que l'interface web reste toujours accessible pour reconfigurer.
+        Serial.println("[INIT] WiFi désactivé — démarrage AP de configuration");
+        WiFiConfig apCfg = {};
+        apCfg.enabled    = true;
+        apCfg.ap_fallback = true;
+        apCfg.ssid[0]   = '\0';   // SSID vide → aller directement en mode AP
+        strlcpy(apCfg.hostname,
+                wifiCfg->hostname[0] ? wifiCfg->hostname : WIFI_DEFAULT_HOSTNAME,
+                sizeof(apCfg.hostname));
+        if (wifiManager.begin(apCfg) && wifiManager.isAP()) {
+            Serial.printf("[INIT] AP config : http://%s\n",
+                          wifiManager.getIP().toString().c_str());
+            logger.log(LOG_INFO, CAT_SYSTEM, "AP config http://%s",
+                       wifiManager.getIP().toString().c_str());
+        } else {
+            logger.log(LOG_WARN, CAT_SYSTEM, "WiFi désactivé et AP non disponible");
+        }
     }
 
     // 8. Configurer le jitter buffer et démarrer les transports MIDI

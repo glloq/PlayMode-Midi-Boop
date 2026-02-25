@@ -193,11 +193,11 @@ void ConfigManager::loadDefaults() {
     _routing_count = 0;
     _version = CONFIG_VERSION;
 
-    // WiFi défauts
-    strlcpy(_wifi_config.ssid, "MidiBoop", sizeof(_wifi_config.ssid));
-    strlcpy(_wifi_config.password, "midiboop", sizeof(_wifi_config.password));
+    // WiFi défauts — AP activé d'emblée pour premier accès sans configuration
+    strlcpy(_wifi_config.ssid, "", sizeof(_wifi_config.ssid));
+    strlcpy(_wifi_config.password, "", sizeof(_wifi_config.password));
     strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
-    _wifi_config.enabled = false;
+    _wifi_config.enabled = true;
     _wifi_config.ap_fallback = true;
 
     // MIDI Input défauts
