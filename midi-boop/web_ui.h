@@ -208,11 +208,16 @@ tr:hover td{background:var(--bg2)}
 .mic-status.no{background:#f851491a;border:1px solid #f8514933;color:var(--red)}
 
 /* Wizard steps */
-.wiz-steps{display:flex;gap:4px;margin-bottom:16px}
+.wiz-steps{display:flex;gap:4px;margin-bottom:16px;align-items:flex-start}
+.wiz-step-item{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1}
 .wiz-dot{width:28px;height:28px;border-radius:50%;background:var(--bg3);color:var(--fg2);
   display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
 .wiz-dot.active{background:var(--accent);color:#fff}
 .wiz-dot.done{background:var(--green);color:#fff}
+.wiz-step-label{font-size:10px;color:var(--fg2);text-align:center;white-space:nowrap}
+.wiz-step-item.active .wiz-step-label{color:var(--accent);font-weight:600}
+.wiz-connector{flex:1;height:2px;background:var(--bg3);align-self:center;margin-top:13px;min-width:12px}
+.wiz-connector.done{background:var(--green)}
 .wiz-panel{min-height:120px}
 
 /* Inline note input in actuator table */
@@ -220,6 +225,24 @@ tr:hover td{background:var(--bg2)}
   padding:2px 6px;border-radius:4px;font-size:12px;text-align:center}
 .note-input:focus{border-color:var(--accent);outline:none}
 .note-label{font-size:11px;color:var(--fg2);margin-left:4px}
+
+/* Expert collapsible sections */
+.expert-section{margin:12px 0}
+.expert-toggle{background:none;border:1px dashed var(--border);color:var(--fg2);padding:8px 12px;
+  border-radius:6px;cursor:pointer;font-size:12px;width:100%;text-align:left;
+  display:flex;align-items:center;gap:6px;transition:all .15s}
+.expert-toggle:hover{color:var(--fg);background:var(--bg3)}
+.expert-toggle::before{content:'\25B6';font-size:10px;transition:transform .2s;display:inline-block}
+.expert-toggle.open::before{transform:rotate(90deg)}
+.expert-body{display:none;padding:12px 0 0}
+.expert-body.open{display:block}
+
+/* Wizard note table */
+.wiz-note-table{max-height:200px;overflow-y:auto;border:1px solid var(--border);
+  border-radius:var(--radius);margin:8px 0}
+.wiz-note-table table{margin:0}
+.wiz-note-table td{padding:4px 8px;font-size:12px}
+.wiz-note-table th{padding:4px 8px;position:sticky;top:0;z-index:1}
 </style>
 </head>
 <body>
@@ -525,7 +548,10 @@ tr:hover td{background:var(--bg2)}
   </div>
   <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
 
-  <div class="section-title" style="margin-top:24px">Transport MIDI</div>
+  <div class="expert-section" style="margin-top:24px">
+    <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Transport MIDI &amp; Bus I&sup2;C (avanc&eacute;)</button>
+    <div class="expert-body">
+  <div class="section-title">Transport MIDI</div>
   <div class="cards" style="margin-bottom:16px">
     <div class="card">
       <h3>Serial MIDI</h3>
@@ -560,6 +586,8 @@ tr:hover td{background:var(--bg2)}
   </table>
   </div>
   <button class="btn" onclick="scanI2C()">Scanner bus I²C</button>
+    </div>
+  </div>
 
   <div class="section-title" style="margin-top:24px">Configuration</div>
   <div class="btn-row">
@@ -639,16 +667,20 @@ tr:hover td{background:var(--bg2)}
         <div class="help">Adresse I&sup2;C de la carte PWM (16 canaux chacune)</div>
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Canal PCA (0-15)</label>
-        <input type="number" id="ma-ch" min="0" max="15" value="0">
-        <div class="help">Sortie PWM sur la carte (auto-incr&eacute;ment&eacute;)</div>
-      </div>
-      <div class="form-group">
-        <label>Latence (ms)</label>
-        <input type="number" id="ma-latency" min="0" max="500" value="10">
-        <div class="help">D&eacute;lai de compensation m&eacute;canique</div>
+    <div class="form-group">
+      <label>Canal PCA (0-15)</label>
+      <input type="number" id="ma-ch" min="0" max="15" value="0">
+      <div class="help">Sortie PWM sur la carte (auto-incr&eacute;ment&eacute;)</div>
+    </div>
+
+    <div class="expert-section">
+      <button type="button" class="expert-toggle" onclick="toggleExpert(this)">R&eacute;glages avanc&eacute;s</button>
+      <div class="expert-body">
+        <div class="form-group">
+          <label>Latence (ms)</label>
+          <input type="number" id="ma-latency" min="0" max="500" value="10">
+          <div class="help">D&eacute;lai de compensation m&eacute;canique (d&eacute;faut : 10ms)</div>
+        </div>
       </div>
     </div>
 
@@ -674,16 +706,19 @@ tr:hover td{background:var(--bg2)}
           <div class="help">Course du mouvement en degr&eacute;s</div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Dur&eacute;e du mouvement (ms)</label>
-          <input type="number" id="ma-speed" min="10" max="2000" value="150">
-          <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
-        </div>
-        <div class="form-group">
-          <label>Angle B - position altern&eacute;e (&deg;)</label>
-          <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
-          <div class="help">2e position pour le mode Altern&eacute;</div>
+      <div class="form-group">
+        <label>Dur&eacute;e du mouvement (ms)</label>
+        <input type="number" id="ma-speed" min="10" max="2000" value="150">
+        <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
+      </div>
+      <div class="expert-section">
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Mode altern&eacute; (avanc&eacute;)</button>
+        <div class="expert-body">
+          <div class="form-group">
+            <label>Angle B - position altern&eacute;e (&deg;)</label>
+            <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
+            <div class="help">2e position pour le mode Altern&eacute;</div>
+          </div>
         </div>
       </div>
       <!-- Angle visual preview -->
@@ -712,16 +747,21 @@ tr:hover td{background:var(--bg2)}
           <div class="help">Puissance initiale de frappe. 4095 = maximum</div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>PWM de maintien (0-4095)</label>
-          <input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048">
-          <div class="help">Puissance r&eacute;duite apr&egrave;s la frappe (mode Hit-and-Hold)</div>
-        </div>
-        <div class="form-group">
-          <label>Rampe de transition (ms)</label>
-          <input type="number" id="ma-ramp" min="10" max="500" value="50">
-          <div class="help">Dur&eacute;e du passage attaque &rarr; maintien</div>
+      <div class="expert-section">
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Hit-and-Hold (avanc&eacute;)</button>
+        <div class="expert-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>PWM de maintien (0-4095)</label>
+              <input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048">
+              <div class="help">Puissance r&eacute;duite apr&egrave;s la frappe</div>
+            </div>
+            <div class="form-group">
+              <label>Rampe de transition (ms)</label>
+              <input type="number" id="ma-ramp" min="10" max="500" value="50">
+              <div class="help">Dur&eacute;e du passage attaque &rarr; maintien</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -737,11 +777,14 @@ tr:hover td{background:var(--bg2)}
 <div class="modal-overlay" id="modal-wizard">
   <div class="modal" style="max-width:550px">
     <h2>Assistant de cr&eacute;ation d'instrument</h2>
-    <div class="wiz-steps">
-      <div class="wiz-dot active" id="wiz-dot-1">1</div>
-      <div class="wiz-dot" id="wiz-dot-2">2</div>
-      <div class="wiz-dot" id="wiz-dot-3">3</div>
-      <div class="wiz-dot" id="wiz-dot-4">4</div>
+    <div class="wiz-steps" id="wiz-steps">
+      <div class="wiz-step-item active" id="wiz-item-1"><div class="wiz-dot active" id="wiz-dot-1">1</div><div class="wiz-step-label">Identit&eacute;</div></div>
+      <div class="wiz-connector" id="wiz-conn-1"></div>
+      <div class="wiz-step-item" id="wiz-item-2"><div class="wiz-dot" id="wiz-dot-2">2</div><div class="wiz-step-label">Type</div></div>
+      <div class="wiz-connector" id="wiz-conn-2"></div>
+      <div class="wiz-step-item" id="wiz-item-3"><div class="wiz-dot" id="wiz-dot-3">3</div><div class="wiz-step-label">Notes</div></div>
+      <div class="wiz-connector" id="wiz-conn-3"></div>
+      <div class="wiz-step-item" id="wiz-item-4"><div class="wiz-dot" id="wiz-dot-4">4</div><div class="wiz-step-label">Cr&eacute;ation</div></div>
     </div>
 
     <!-- Step 1: Identity -->
@@ -776,34 +819,49 @@ tr:hover td{background:var(--bg2)}
       </div>
     </div>
 
-    <!-- Step 3: Count + notes -->
+    <!-- Step 3: Notes + PCA -->
     <div id="wiz-step-3" class="wiz-panel" style="display:none">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Configuration</div>
-      <div class="form-row">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Attribution des notes MIDI</div>
+      <div class="form-row tri">
         <div class="form-group">
-          <label>Nombre d'actionneurs</label>
-          <input type="number" id="wiz-count" min="1" max="32" value="8">
+          <label>Actionneurs</label>
+          <input type="number" id="wiz-count" min="1" max="32" value="8" oninput="wizBuildNoteTable()">
         </div>
         <div class="form-group">
-          <label>Note MIDI de d&eacute;part</label>
-          <input type="number" id="wiz-start-note" min="0" max="127" value="48">
-          <div class="help">C3=48, C4=60. Notes cons&eacute;cutives</div>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Carte PCA de d&eacute;part</label>
-          <select id="wiz-pca">
-            <option value="64">0x40 (carte 1)</option>
-            <option value="65">0x41 (carte 2)</option>
-            <option value="66">0x42 (carte 3)</option>
-            <option value="67">0x43 (carte 4)</option>
+          <label>Gamme</label>
+          <select id="wiz-scale" onchange="wizBuildNoteTable()">
+            <option value="chromatic">Chromatique (demi-tons)</option>
+            <option value="major">Majeur (do r&eacute; mi fa sol la si)</option>
+            <option value="pentatonic">Pentatonique (5 notes)</option>
           </select>
         </div>
         <div class="form-group">
-          <label>Canal PCA de d&eacute;part</label>
-          <input type="number" id="wiz-start-ch" min="0" max="15" value="0">
-          <div class="help">Les canaux s'incr&eacute;mentent automatiquement</div>
+          <label>Note de d&eacute;part</label>
+          <input type="number" id="wiz-start-note" min="0" max="127" value="48" oninput="wizBuildNoteTable()">
+          <div class="help">C3=48, C4=60</div>
+        </div>
+      </div>
+      <div class="help" style="margin-bottom:4px">Modifiez chaque note individuellement si n&eacute;cessaire :</div>
+      <div class="wiz-note-table" id="wiz-note-table"></div>
+      <div class="expert-section">
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">R&eacute;glages PCA avanc&eacute;s</button>
+        <div class="expert-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Carte PCA de d&eacute;part</label>
+              <select id="wiz-pca">
+                <option value="64">0x40 (carte 1)</option>
+                <option value="65">0x41 (carte 2)</option>
+                <option value="66">0x42 (carte 3)</option>
+                <option value="67">0x43 (carte 4)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Canal PCA de d&eacute;part</label>
+              <input type="number" id="wiz-start-ch" min="0" max="15" value="0">
+              <div class="help">Auto-incr&eacute;ment&eacute;</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1078,6 +1136,11 @@ const SERVO_BEHAVIORS = ['Frappe','Alterné','Gratter','Touche'];
 const SOL_BEHAVIORS = ['Frappe','Hit-and-Hold'];
 const CC_TARGETS = ['Position','Amplitude','Vitesse','PWM Hold'];
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const SCALES = {
+  chromatic:{intervals:[0,1,2,3,4,5,6,7,8,9,10,11]},
+  major:{intervals:[0,2,4,5,7,9,11]},
+  pentatonic:{intervals:[0,2,4,7,9]}
+};
 
 // Log Manager (Phase 9)
 let logCache = [];
@@ -1770,7 +1833,7 @@ function pianoNoteOff(note) {
 }
 
 function updatePianoActive(activeActuators) {
-  if (currentPage !== 'piano') return;
+  if (currentPage !== 'home') return;
 
   // Reset all active states
   document.querySelectorAll('.piano .active').forEach(k => k.classList.remove('active'));
@@ -2337,6 +2400,15 @@ async function loadDashboardLog() {
 }
 
 // ============================================================================
+// Expert collapsible toggle
+// ============================================================================
+function toggleExpert(btn) {
+  btn.classList.toggle('open');
+  const body = btn.nextElementSibling;
+  if (body) body.classList.toggle('open');
+}
+
+// ============================================================================
 // Instrument Wizard
 // ============================================================================
 let wizStep = 1;
@@ -2349,6 +2421,8 @@ function openWizard() {
   wizUpdateBehaviors();
   document.getElementById('wiz-count').value = '8';
   document.getElementById('wiz-start-note').value = '48';
+  document.getElementById('wiz-scale').value = 'chromatic';
+  document.getElementById('wiz-note-table').innerHTML = '';
   document.getElementById('wiz-pca').value = '64';
   // Auto-detect next free PCA channel
   let startCh = 0;
@@ -2380,11 +2454,61 @@ function wizUpdateBehaviors() {
   }
 }
 
+function wizBuildNoteTable() {
+  const count = Math.min(parseInt(document.getElementById('wiz-count').value) || 8, 32);
+  const startNote = parseInt(document.getElementById('wiz-start-note').value) || 48;
+  const scaleKey = document.getElementById('wiz-scale').value;
+  const container = document.getElementById('wiz-note-table');
+  if (!container) return;
+
+  const scale = SCALES[scaleKey];
+  let notes = [];
+  if (scale) {
+    const iv = scale.intervals;
+    let idx = 0, octave = 0;
+    for (let i = 0; i < count; i++) {
+      if (idx >= iv.length) { idx = 0; octave++; }
+      notes.push(Math.min(startNote + octave * 12 + iv[idx], 127));
+      idx++;
+    }
+  } else {
+    for (let i = 0; i < count; i++) notes.push(Math.min(startNote + i, 127));
+  }
+
+  let html = '<table><thead><tr><th style="width:60px">#</th><th style="width:80px">Note</th><th>Nom</th></tr></thead><tbody>';
+  for (let i = 0; i < count; i++) {
+    html += '<tr>';
+    html += '<td>Act ' + i + '</td>';
+    html += '<td><input type="number" min="0" max="127" value="' + notes[i] + '" id="wiz-note-' + i + '" class="note-input" oninput="wizUpdateNoteName(' + i + ')"></td>';
+    html += '<td id="wiz-nname-' + i + '">' + noteName(notes[i]) + '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function wizUpdateNoteName(i) {
+  const input = document.getElementById('wiz-note-' + i);
+  const label = document.getElementById('wiz-nname-' + i);
+  if (input && label) {
+    const n = parseInt(input.value);
+    label.textContent = (n >= 0 && n <= 127) ? noteName(n) : '?';
+  }
+}
+
 function wizShowStep() {
   for (let i = 1; i <= 4; i++) {
     document.getElementById('wiz-step-' + i).style.display = i === wizStep ? 'block' : 'none';
     const dot = document.getElementById('wiz-dot-' + i);
     dot.className = 'wiz-dot' + (i === wizStep ? ' active' : i < wizStep ? ' done' : '');
+    const item = document.getElementById('wiz-item-' + i);
+    if (item) item.className = 'wiz-step-item' + (i === wizStep ? ' active' : '');
+    const conn = document.getElementById('wiz-conn-' + i);
+    if (conn) conn.className = 'wiz-connector' + (i < wizStep ? ' done' : '');
+  }
+  // Build note table when entering step 3 for the first time
+  if (wizStep === 3 && !document.getElementById('wiz-note-table').querySelector('table')) {
+    wizBuildNoteTable();
   }
   document.getElementById('wiz-prev').style.display = wizStep > 1 ? 'inline-flex' : 'none';
   const nextBtn = document.getElementById('wiz-next');
@@ -2404,16 +2528,25 @@ function wizBuildSummary() {
   const type = document.getElementById('wiz-type').value;
   const typeName = type === '0' ? 'Servo-moteur' : 'Solénoïde';
   const behavior = document.getElementById('wiz-behavior').selectedOptions[0]?.textContent || '';
-  const count = document.getElementById('wiz-count').value;
-  const startNote = parseInt(document.getElementById('wiz-start-note').value);
-  const endNote = startNote + parseInt(count) - 1;
+  const count = parseInt(document.getElementById('wiz-count').value);
   const pca = document.getElementById('wiz-pca').selectedOptions[0]?.textContent || '';
   const startCh = document.getElementById('wiz-start-ch').value;
 
+  // Read notes from table
+  let noteNames = [];
+  for (let i = 0; i < count; i++) {
+    const inp = document.getElementById('wiz-note-' + i);
+    if (inp) noteNames.push(noteName(parseInt(inp.value)));
+  }
+  const noteStr = noteNames.length <= 12
+    ? noteNames.join(', ')
+    : noteNames.slice(0, 10).join(', ') + ' ... (+' + (noteNames.length - 10) + ')';
+
   let html = '<strong>' + esc(name) + '</strong> — Canal MIDI ' + ch + '<br>';
   html += 'Type : <strong>' + typeName + '</strong> — ' + behavior + '<br>';
-  html += count + ' actionneurs — Notes ' + noteName(startNote) + ' → ' + noteName(Math.min(endNote, 127)) + '<br>';
-  html += 'PCA : ' + pca + ' — Canaux ' + startCh + ' → ' + (parseInt(startCh) + parseInt(count) - 1) + '<br>';
+  html += count + ' actionneurs<br>';
+  html += 'Notes : ' + noteStr + '<br>';
+  html += 'PCA : ' + pca + ' — Canaux ' + startCh + ' → ' + (parseInt(startCh) + count - 1) + '<br>';
   html += 'Bus : <strong>' + (type === '0' ? 'Bus 0 (Servos)' : 'Bus 1 (Solénoïdes)') + '</strong>';
   document.getElementById('wiz-summary').innerHTML = html;
 }
@@ -2456,13 +2589,14 @@ async function wizNext() {
     if (pcaCh > 15) { pcaCh = 0; pcaAddr = Math.min(pcaAddr + 1, 67); }
   }
 
-  // 3. Create note mappings
+  // 3. Create note mappings (read from editable table)
   instruments = await api('/api/instruments');
   const instIdx = instruments.length > 0 ? instruments[instruments.length - 1].index : 0;
   const notes = [];
   for (let i = 0; i < count; i++) {
-    const note = startNote + i;
-    if (note > 127) break;
+    const noteInput = document.getElementById('wiz-note-' + i);
+    const note = noteInput ? parseInt(noteInput.value) : (startNote + i);
+    if (isNaN(note) || note < 0 || note > 127) continue;
     notes.push({note, actuator: baseId + i, enabled: true});
   }
   await api('/api/routing', 'POST', {instrument: instIdx, notes});
