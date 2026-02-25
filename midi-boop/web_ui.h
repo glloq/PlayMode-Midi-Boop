@@ -175,6 +175,37 @@ tr:hover td{background:var(--bg2)}
   .log-container{max-height:calc(100vh - 120px)}
   .modal{max-height:95vh}
 }
+/* Gear settings dropdown */
+.gear-btn{background:none;border:none;color:var(--fg2);font-size:20px;cursor:pointer;
+  padding:6px 10px;border-radius:6px;transition:all .15s;min-width:44px;min-height:44px;
+  display:flex;align-items:center;justify-content:center}
+.gear-btn:hover{color:var(--fg);background:var(--bg3)}
+.settings-dropdown{display:none;position:absolute;top:100%;right:0;background:var(--bg2);
+  border:1px solid var(--border);border-radius:var(--radius);min-width:200px;
+  box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50;overflow:hidden;margin-top:4px}
+.settings-dropdown.show{display:block}
+.settings-dropdown button{display:block;width:100%;text-align:left;background:none;border:none;
+  color:var(--fg);padding:10px 16px;cursor:pointer;font-size:13px;transition:background .1s;
+  border-bottom:1px solid var(--border)}
+.settings-dropdown button:last-child{border-bottom:none}
+.settings-dropdown button:hover{background:var(--bg3)}
+.settings-dropdown .sdesc{font-size:11px;color:var(--fg2);display:block;margin-top:1px}
+
+/* Help text under form fields */
+.help{font-size:11px;color:var(--fg2);margin-top:2px;line-height:1.3}
+
+/* Angle preview for servo */
+.angle-preview{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px;margin:12px 0;text-align:center}
+.angle-preview svg{display:block;margin:0 auto}
+.angle-info{display:flex;justify-content:space-around;margin-top:8px;font-size:12px;color:var(--fg2)}
+.angle-info span{color:var(--fg);font-weight:600}
+
+/* Mic status indicator */
+.mic-status{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius);
+  margin-bottom:16px;font-size:13px}
+.mic-status.ok{background:#3fb9501a;border:1px solid #3fb95033;color:var(--green)}
+.mic-status.no{background:#f851491a;border:1px solid #f8514933;color:var(--red)}
 </style>
 </head>
 <body>
@@ -188,6 +219,15 @@ tr:hover td{background:var(--bg2)}
     &nbsp;|&nbsp; Heap: <span id="heap">-</span>
     &nbsp;|&nbsp; Uptime: <span id="uptime">-</span>
   </div>
+  <div style="position:relative">
+    <button class="gear-btn" onclick="toggleSettingsMenu()" title="R&eacute;glages syst&egrave;me">&#9881;</button>
+    <div class="settings-dropdown" id="settings-dropdown">
+      <button onclick="showPage('power');closeSettingsMenu()">Power<span class="sdesc">Budget et consommation</span></button>
+      <button onclick="showPage('safety');closeSettingsMenu()">Safety<span class="sdesc">Limites de s&eacute;curit&eacute;</span></button>
+      <button onclick="showPage('logs');closeSettingsMenu()">Logs<span class="sdesc">Journal syst&egrave;me</span></button>
+      <button onclick="showPage('settings');closeSettingsMenu()">Param&egrave;tres<span class="sdesc">WiFi, bus I&sup2;C, config</span></button>
+    </div>
+  </div>
 </div>
 
 <!-- Navigation -->
@@ -197,12 +237,8 @@ tr:hover td{background:var(--bg2)}
   <button onclick="showPage('actuators')">Actionneurs</button>
   <button onclick="showPage('midi')">MIDI / Mapping</button>
   <button onclick="showPage('piano')">Piano</button>
-  <button onclick="showPage('power')">Power</button>
-  <button onclick="showPage('safety')">Safety</button>
   <button onclick="showPage('calibration')">Calibration</button>
   <button onclick="showPage('test')">Test</button>
-  <button onclick="showPage('logs')">Logs</button>
-  <button onclick="showPage('settings')">Paramètres</button>
 </nav>
 
 <!-- ============ DASHBOARD ============ -->
@@ -390,22 +426,26 @@ tr:hover td{background:var(--bg2)}
   <div class="section-title" style="font-size:14px">Modifier le budget</div>
   <div class="form-row tri">
     <div class="form-group">
-      <label>Global max (mA)</label>
+      <label>Budget global max (mA)</label>
       <input type="number" id="pw-global" value="6000">
+      <div class="help">Courant max total pour tous les actionneurs</div>
     </div>
     <div class="form-group">
-      <label>Servo bus max (mA)</label>
+      <label>Bus servos max (mA)</label>
       <input type="number" id="pw-servo" value="3000">
+      <div class="help">Limite courant pour le bus servo-moteurs</div>
     </div>
     <div class="form-group">
-      <label>Solénoïde bus max (mA)</label>
+      <label>Bus sol&eacute;no&iuml;des max (mA)</label>
       <input type="number" id="pw-sol" value="4000">
+      <div class="help">Limite courant pour le bus sol&eacute;no&iuml;des</div>
     </div>
   </div>
   <div class="form-row">
     <div class="form-group">
       <label>Polyphonie max</label>
       <input type="number" id="pw-poly" value="12" min="1" max="32">
+      <div class="help">Nombre max d'actionneurs actifs en m&ecirc;me temps</div>
     </div>
   </div>
   <button class="btn primary" onclick="savePowerBudget()">Appliquer</button>
@@ -445,29 +485,34 @@ tr:hover td{background:var(--bg2)}
     <button class="btn" onclick="toggleKillSwitch(false)">Kill Switch Off</button>
   </div>
 
-  <div class="section-title" style="font-size:14px">Limites de sécurité</div>
+  <div class="section-title" style="font-size:14px">Limites de s&eacute;curit&eacute;</div>
   <div class="form-row tri">
     <div class="form-group">
-      <label>Max duty cycle (%)</label>
+      <label>Duty cycle max (%)</label>
       <input type="number" id="sf-duty" value="80" min="10" max="100">
+      <div class="help">Ratio max activation/repos pour chaque actionneur</div>
     </div>
     <div class="form-group">
-      <label>Max fréquence (Hz)</label>
+      <label>Fr&eacute;quence max (Hz)</label>
       <input type="number" id="sf-freq" value="50" min="1" max="200">
+      <div class="help">Frappes max par seconde par actionneur</div>
     </div>
     <div class="form-group">
-      <label>Watchdog (ms)</label>
+      <label>Watchdog timeout (ms)</label>
       <input type="number" id="sf-watchdog" value="5000" min="1000" max="30000">
+      <div class="help">Coupe les actionneurs si aucun signal pendant ce d&eacute;lai</div>
     </div>
   </div>
   <div class="form-row">
     <div class="form-group">
-      <label>Max polyphonie</label>
+      <label>Polyphonie max</label>
       <input type="number" id="sf-poly" value="12" min="1" max="32">
+      <div class="help">Limite absolue d'actionneurs simultan&eacute;s (s&eacute;curit&eacute;)</div>
     </div>
     <div class="form-group">
-      <label>Max courant (mA)</label>
+      <label>Courant max (mA)</label>
       <input type="number" id="sf-current" value="5000" min="500" max="20000">
+      <div class="help">Seuil de surintensit&eacute; d&eacute;clenchant le kill switch</div>
     </div>
   </div>
   <button class="btn primary" onclick="saveSafetyConfig()">Appliquer</button>
@@ -478,8 +523,9 @@ tr:hover td{background:var(--bg2)}
   <div class="section-title">WiFi</div>
   <div class="form-row">
     <div class="form-group">
-      <label>SSID</label>
-      <input type="text" id="set-ssid" maxlength="32">
+      <label>SSID du r&eacute;seau</label>
+      <input type="text" id="set-ssid" maxlength="32" placeholder="Nom du WiFi">
+      <div class="help">R&eacute;seau WiFi auquel l'ESP32 se connecte</div>
     </div>
     <div class="form-group">
       <label>Mot de passe</label>
@@ -490,6 +536,7 @@ tr:hover td{background:var(--bg2)}
     <div class="form-group">
       <label>Hostname</label>
       <input type="text" id="set-hostname" value="midi-boop" maxlength="31">
+      <div class="help">Nom r&eacute;seau de l'appareil (accessible via hostname.local)</div>
     </div>
     <div class="form-group">
       <label>AP Fallback</label>
@@ -497,6 +544,7 @@ tr:hover td{background:var(--bg2)}
         <option value="1">Oui</option>
         <option value="0">Non</option>
       </select>
+      <div class="help">Cr&eacute;e un point d'acc&egrave;s si le WiFi &eacute;choue</div>
     </div>
   </div>
   <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
@@ -524,14 +572,34 @@ tr:hover td{background:var(--bg2)}
 <div class="modal-overlay" id="modal-instrument">
   <div class="modal">
     <h2 id="modal-inst-title">Nouvel instrument</h2>
-    <div class="form-group"><label>Nom</label><input type="text" id="mi-name" maxlength="31"></div>
-    <div class="form-row">
-      <div class="form-group"><label>Canal MIDI (0-15)</label><input type="number" id="mi-channel" min="0" max="15" value="0"></div>
-      <div class="form-group"><label>Bus I²C</label><select id="mi-bus"><option value="0">Bus 0 (Servos)</option><option value="1">Bus 1 (Solénoïdes)</option></select></div>
+    <div class="form-group">
+      <label>Nom de l'instrument</label>
+      <input type="text" id="mi-name" maxlength="31" placeholder="Ex: Xylophone, Caisse claire...">
+      <div class="help">Nom libre pour identifier cet instrument dans l'interface</div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Latence par défaut (ms)</label><input type="number" id="mi-latency" value="10" min="0" max="500"></div>
-      <div class="form-group"><label>Auto-calibration</label><select id="mi-autocal"><option value="0">Non</option><option value="1">Oui</option></select></div>
+      <div class="form-group">
+        <label>Canal MIDI (0-15)</label>
+        <input type="number" id="mi-channel" min="0" max="15" value="0">
+        <div class="help">Canal sur lequel l'instrument recevra les messages MIDI</div>
+      </div>
+      <div class="form-group">
+        <label>Bus I&sup2;C</label>
+        <select id="mi-bus"><option value="0">Bus 0 (Servos)</option><option value="1">Bus 1 (Sol&eacute;no&iuml;des)</option></select>
+        <div class="help">Bus physique auquel sont connect&eacute;s les actionneurs</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Latence (ms)</label>
+        <input type="number" id="mi-latency" value="10" min="0" max="500">
+        <div class="help">D&eacute;lai de compensation entre r&eacute;ception MIDI et d&eacute;clenchement</div>
+      </div>
+      <div class="form-group">
+        <label>Auto-calibration micro</label>
+        <select id="mi-autocal"><option value="0">Non</option><option value="1">Oui</option></select>
+        <div class="help">Mesure automatique de la latence via microphone I&sup2;S</div>
+      </div>
     </div>
     <div class="btn-row">
       <button class="btn primary" onclick="saveInstrument()">Sauvegarder</button>
@@ -545,41 +613,113 @@ tr:hover td{background:var(--bg2)}
   <div class="modal">
     <h2 id="modal-act-title">Nouvel actionneur</h2>
     <div class="form-row">
-      <div class="form-group"><label>ID</label><input type="number" id="ma-id" min="0" max="31" value="0"></div>
-      <div class="form-group"><label>Type</label><select id="ma-type" onchange="toggleActuatorFields()"><option value="0">Servo</option><option value="1">Solénoïde</option></select></div>
+      <div class="form-group">
+        <label>ID actionneur</label>
+        <input type="number" id="ma-id" min="0" max="31" value="0">
+        <div class="help">Identifiant unique (0-31), attribu&eacute; automatiquement</div>
+      </div>
+      <div class="form-group">
+        <label>Type d'actionneur</label>
+        <select id="ma-type" onchange="toggleActuatorFields()"><option value="0">Servo-moteur</option><option value="1">Sol&eacute;no&iuml;de</option></select>
+        <div class="help">Servo = mouvement rotatif | Sol&eacute;no&iuml;de = frappe lin&eacute;aire</div>
+      </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Bus I²C</label><select id="ma-bus"><option value="0">Bus 0</option><option value="1">Bus 1</option></select></div>
-      <div class="form-group"><label>Adresse PCA</label><select id="ma-pca"><option value="64">0x40</option><option value="65">0x41</option><option value="66">0x42</option><option value="67">0x43</option></select></div>
+      <div class="form-group">
+        <label>Bus I&sup2;C</label>
+        <select id="ma-bus"><option value="0">Bus 0 (Servos)</option><option value="1">Bus 1 (Sol&eacute;no&iuml;des)</option></select>
+        <div class="help">Bus physique : 0 pour servos, 1 pour sol&eacute;no&iuml;des</div>
+      </div>
+      <div class="form-group">
+        <label>Carte PCA9685</label>
+        <select id="ma-pca"><option value="64">0x40 (carte 1)</option><option value="65">0x41 (carte 2)</option><option value="66">0x42 (carte 3)</option><option value="67">0x43 (carte 4)</option></select>
+        <div class="help">Adresse I&sup2;C de la carte PWM (16 canaux chacune)</div>
+      </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Canal PCA (0-15)</label><input type="number" id="ma-ch" min="0" max="15" value="0"></div>
-      <div class="form-group"><label>Latence (ms)</label><input type="number" id="ma-latency" min="0" max="500" value="10"></div>
+      <div class="form-group">
+        <label>Canal PCA (0-15)</label>
+        <input type="number" id="ma-ch" min="0" max="15" value="0">
+        <div class="help">Sortie PWM sur la carte (auto-incr&eacute;ment&eacute;)</div>
+      </div>
+      <div class="form-group">
+        <label>Latence (ms)</label>
+        <input type="number" id="ma-latency" min="0" max="500" value="10">
+        <div class="help">D&eacute;lai de compensation m&eacute;canique</div>
+      </div>
     </div>
 
     <!-- Servo fields -->
     <div id="servo-fields">
-      <div class="form-group"><label>Comportement</label><select id="ma-servo-behavior"><option value="0">Frappe</option><option value="1">Alterné</option><option value="2">Gratter</option><option value="3">Touche</option></select></div>
-      <div class="form-row">
-        <div class="form-group"><label>Angle initial (°)</label><input type="number" id="ma-angle-init" min="0" max="180" value="90"></div>
-        <div class="form-group"><label>Amplitude (°)</label><input type="number" id="ma-amplitude" min="0" max="180" value="45"></div>
+      <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">R&eacute;glages servo</div>
+      </div>
+      <div class="form-group">
+        <label>Mode de jeu</label>
+        <select id="ma-servo-behavior"><option value="0">Frappe (aller-retour rapide)</option><option value="1">Altern&eacute; (bascule A/B)</option><option value="2">Gratter (mouvement continu)</option><option value="3">Touche (maintien appuy&eacute;)</option></select>
+        <div class="help">Frappe : percussion | Altern&eacute; : bascule entre 2 positions | Gratter : va-et-vient | Touche : maintien</div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Vitesse (ms)</label><input type="number" id="ma-speed" min="10" max="2000" value="150"></div>
-        <div class="form-group"><label>Angle B (°)</label><input type="number" id="ma-angle-b" min="0" max="180" value="120"></div>
+        <div class="form-group">
+          <label>Angle de repos (&deg;)</label>
+          <input type="number" id="ma-angle-init" min="0" max="180" value="90" oninput="updateAnglePreview()">
+          <div class="help">Position du bras au repos (0&deg; &agrave; 180&deg;)</div>
+        </div>
+        <div class="form-group">
+          <label>Amplitude (&deg;)</label>
+          <input type="number" id="ma-amplitude" min="0" max="180" value="45" oninput="updateAnglePreview()">
+          <div class="help">Course du mouvement en degr&eacute;s</div>
+        </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Dur&eacute;e du mouvement (ms)</label>
+          <input type="number" id="ma-speed" min="10" max="2000" value="150">
+          <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
+        </div>
+        <div class="form-group">
+          <label>Angle B - position altern&eacute;e (&deg;)</label>
+          <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
+          <div class="help">2e position pour le mode Altern&eacute;</div>
+        </div>
+      </div>
+      <!-- Angle visual preview -->
+      <div class="angle-preview" id="angle-preview"></div>
     </div>
 
     <!-- Solenoid fields -->
     <div id="solenoid-fields" style="display:none">
-      <div class="form-group"><label>Comportement</label><select id="ma-sol-behavior"><option value="0">Frappe</option><option value="1">Hit-and-Hold</option></select></div>
-      <div class="form-row">
-        <div class="form-group"><label>Pulse (ms)</label><input type="number" id="ma-pulse" min="5" max="50" value="20"></div>
-        <div class="form-group"><label>PWM initial</label><input type="number" id="ma-pwm-init" min="0" max="4095" value="4095"></div>
+      <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">R&eacute;glages sol&eacute;no&iuml;de</div>
+      </div>
+      <div class="form-group">
+        <label>Mode de frappe</label>
+        <select id="ma-sol-behavior"><option value="0">Frappe (impulsion courte)</option><option value="1">Hit-and-Hold (frappe puis maintien)</option></select>
+        <div class="help">Frappe : impulsion br&egrave;ve | Hit-and-Hold : frappe forte puis maintien doux</div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>PWM hold</label><input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048"></div>
-        <div class="form-group"><label>Rampe (ms)</label><input type="number" id="ma-ramp" min="10" max="500" value="50"></div>
+        <div class="form-group">
+          <label>Dur&eacute;e d'impulsion (ms)</label>
+          <input type="number" id="ma-pulse" min="5" max="50" value="20">
+          <div class="help">Dur&eacute;e de l'activation (5-50ms). Plus court = frappe s&egrave;che</div>
+        </div>
+        <div class="form-group">
+          <label>PWM d'attaque (0-4095)</label>
+          <input type="number" id="ma-pwm-init" min="0" max="4095" value="4095">
+          <div class="help">Puissance initiale de frappe. 4095 = maximum</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>PWM de maintien (0-4095)</label>
+          <input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048">
+          <div class="help">Puissance r&eacute;duite apr&egrave;s la frappe (mode Hit-and-Hold)</div>
+        </div>
+        <div class="form-group">
+          <label>Rampe de transition (ms)</label>
+          <input type="number" id="ma-ramp" min="10" max="500" value="50">
+          <div class="help">Dur&eacute;e du passage attaque &rarr; maintien</div>
+        </div>
       </div>
     </div>
 
@@ -593,10 +733,8 @@ tr:hover td{background:var(--bg2)}
 <!-- ============ CALIBRATION ============ -->
 <div class="page" id="page-calibration">
   <div class="section-title">Calibration Acoustique</div>
-  <p style="color:var(--fg2);margin-bottom:16px;font-size:13px">
-    Mesure automatique de la latence mécanique de chaque actionneur via microphone I²S (INMP441).
-    Connectez un micro sur WS=GPIO15, SCK=GPIO14, SD=GPIO32 et placez-le près des actionneurs.
-  </p>
+  <div class="mic-status no" id="mic-status">Microphone I&sup2;S non d&eacute;tect&eacute; &mdash; Connectez un INMP441 (WS:15, SCK:14, SD:32)</div>
+  <div id="cal-controls">
 
   <!-- État courant -->
   <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
@@ -664,6 +802,7 @@ tr:hover td{background:var(--bg2)}
     <div class="card"><h3>Retries / actionneur</h3><div class="val" style="font-size:18px">3</div></div>
     <div class="card"><h3>Fenêtre détection</h3><div class="val" style="font-size:18px">350 ms</div></div>
   </div>
+  </div><!-- /cal-controls -->
 </div>
 
 <!-- ============ TEST & MAINTENANCE ============ -->
@@ -840,6 +979,8 @@ let instruments = [];
 let actuators = [];
 let routing = [];
 let pianoNotes = {}; // note -> actuator_id mapping
+let editingInstrumentIdx = -1;
+let editingActuatorId = -1;
 
 const SERVO_BEHAVIORS = ['Frappe','Alterné','Gratter','Touche'];
 const SOL_BEHAVIORS = ['Frappe','Hit-and-Hold'];
@@ -1029,15 +1170,30 @@ function showPage(page) {
   // Load data for specific pages
   if (page === 'instruments') loadInstruments();
   if (page === 'actuators') loadActuators();
-  if (page === 'midi') { loadMidiConfig(); loadInstrumentSelects(); }
+  if (page === 'midi') { loadMidiConfig(); loadInstrumentSelects().then(() => loadRouting()); }
   if (page === 'piano') { loadInstrumentSelects(); buildPiano(); }
   if (page === 'power') loadPower();
   if (page === 'safety') loadSafety();
-  if (page === 'calibration') { loadCalibrateStatus(); loadCalibrateResults(); }
+  if (page === 'calibration') { checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults(); }
   if (page === 'test') { loadTestStatus(); loadTestLog(); populateBurstSelect(); }
   if (page === 'logs') loadLogs();
   if (page === 'settings') { loadWiFiConfig(); loadBuses(); }
 }
+
+// ============================================================================
+// Settings gear menu
+// ============================================================================
+function toggleSettingsMenu() {
+  document.getElementById('settings-dropdown').classList.toggle('show');
+}
+function closeSettingsMenu() {
+  document.getElementById('settings-dropdown').classList.remove('show');
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.gear-btn') && !e.target.closest('.settings-dropdown')) {
+    closeSettingsMenu();
+  }
+});
 
 // ============================================================================
 // API helpers
@@ -1085,19 +1241,34 @@ async function loadInstruments() {
     html += '<td>' + inst.actuator_count + '</td>';
     html += '<td>' + inst.latency_ms + ' ms</td>';
     html += '<td>' + (inst.enabled ? '<span class="badge on">Actif</span>' : '<span class="badge off">Inactif</span>') + '</td>';
-    html += '<td><button class="btn sm" onclick="deleteInstrument(' + inst.index + ')">Suppr</button></td>';
+    html += '<td><button class="btn sm" onclick="editInstrument(' + inst.index + ')">Éditer</button> ';
+    html += '<button class="btn sm" onclick="deleteInstrument(' + inst.index + ')">Suppr</button></td>';
     html += '</tr>';
   }
   tbody.innerHTML = html;
 }
 
 function openInstrumentModal() {
+  editingInstrumentIdx = -1;
   document.getElementById('mi-name').value = '';
-  document.getElementById('mi-channel').value = '0';
+  document.getElementById('mi-channel').value = instruments ? instruments.length : 0;
   document.getElementById('mi-bus').value = '0';
   document.getElementById('mi-latency').value = '10';
   document.getElementById('mi-autocal').value = '0';
   document.getElementById('modal-inst-title').textContent = 'Nouvel instrument';
+  document.getElementById('modal-instrument').classList.add('show');
+}
+
+function editInstrument(idx) {
+  const inst = instruments.find(i => i.index === idx);
+  if (!inst) return;
+  editingInstrumentIdx = idx;
+  document.getElementById('mi-name').value = inst.name;
+  document.getElementById('mi-channel').value = inst.channel;
+  document.getElementById('mi-bus').value = inst.bus_id;
+  document.getElementById('mi-latency').value = inst.latency_ms;
+  document.getElementById('mi-autocal').value = inst.auto_cal ? '1' : '0';
+  document.getElementById('modal-inst-title').textContent = 'Modifier ' + inst.name;
   document.getElementById('modal-instrument').classList.add('show');
 }
 
@@ -1114,8 +1285,10 @@ async function saveInstrument() {
     auto_cal: document.getElementById('mi-autocal').value === '1',
     enabled: true
   };
+  if (editingInstrumentIdx >= 0) data.index = editingInstrumentIdx;
   await api('/api/instrument', 'POST', data);
   closeModal('modal-instrument');
+  editingInstrumentIdx = -1;
   loadInstruments();
 }
 
@@ -1148,7 +1321,8 @@ async function loadActuators() {
     html += '<td>' + (behaviors[act.behavior] || '?') + '</td>';
     html += '<td>' + act.latency_ms + ' ms</td>';
     html += '<td>' + (act.state && act.state.active ? '<span class="badge on">Actif</span>' : '<span class="badge off">Repos</span>') + '</td>';
-    html += '<td><button class="btn sm" onclick="testActuator(' + act.id + ')">Test</button> ';
+    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">Éditer</button> ';
+    html += '<button class="btn sm" onclick="testActuator(' + act.id + ')">Test</button> ';
     html += '<button class="btn sm" onclick="deleteActuator(' + act.id + ')">Suppr</button></td>';
     html += '</tr>';
   }
@@ -1159,14 +1333,76 @@ function toggleActuatorFields() {
   const type = document.getElementById('ma-type').value;
   document.getElementById('servo-fields').style.display = type === '0' ? 'block' : 'none';
   document.getElementById('solenoid-fields').style.display = type === '1' ? 'block' : 'none';
+  // Auto-select bus: servo=bus0, solenoid=bus1
+  if (editingActuatorId < 0) {
+    document.getElementById('ma-bus').value = type === '1' ? '1' : '0';
+  }
+  updateAnglePreview();
 }
 
 function openActuatorModal() {
+  editingActuatorId = -1;
   document.getElementById('ma-id').value = actuators ? actuators.length : 0;
   document.getElementById('ma-type').value = '0';
+  // Auto-increment PCA channel based on existing actuators
+  let nextCh = 0;
+  let pcaAddr = 64; // 0x40
+  if (actuators && actuators.length > 0) {
+    const sorted = [...actuators].sort((a,b) =>
+      a.pca_addr !== b.pca_addr ? a.pca_addr - b.pca_addr : a.pca_ch - b.pca_ch);
+    const last = sorted[sorted.length - 1];
+    nextCh = last.pca_ch + 1;
+    pcaAddr = last.pca_addr;
+    if (nextCh > 15) { nextCh = 0; pcaAddr = Math.min(pcaAddr + 1, 67); }
+  }
+  document.getElementById('ma-ch').value = nextCh;
+  document.getElementById('ma-pca').value = pcaAddr;
+  document.getElementById('ma-latency').value = '10';
+  // Reset servo fields
+  document.getElementById('ma-servo-behavior').value = '0';
+  document.getElementById('ma-angle-init').value = '90';
+  document.getElementById('ma-amplitude').value = '45';
+  document.getElementById('ma-speed').value = '150';
+  document.getElementById('ma-angle-b').value = '120';
+  // Reset solenoid fields
+  document.getElementById('ma-sol-behavior').value = '0';
+  document.getElementById('ma-pulse').value = '20';
+  document.getElementById('ma-pwm-init').value = '4095';
+  document.getElementById('ma-pwm-hold').value = '2048';
+  document.getElementById('ma-ramp').value = '50';
   toggleActuatorFields();
   document.getElementById('modal-act-title').textContent = 'Nouvel actionneur';
   document.getElementById('modal-actuator').classList.add('show');
+  updateAnglePreview();
+}
+
+function editActuator(id) {
+  const act = actuators.find(a => a.id === id);
+  if (!act) return;
+  editingActuatorId = id;
+  document.getElementById('ma-id').value = act.id;
+  document.getElementById('ma-type').value = act.type;
+  document.getElementById('ma-bus').value = act.bus_id;
+  document.getElementById('ma-pca').value = act.pca_addr;
+  document.getElementById('ma-ch').value = act.pca_ch;
+  document.getElementById('ma-latency').value = act.latency_ms;
+  toggleActuatorFields();
+  if (act.type === 0) {
+    document.getElementById('ma-servo-behavior').value = act.behavior || 0;
+    document.getElementById('ma-angle-init').value = act.angle_init !== undefined ? act.angle_init : 90;
+    document.getElementById('ma-amplitude').value = act.amplitude !== undefined ? act.amplitude : 45;
+    document.getElementById('ma-speed').value = act.speed_ms || 150;
+    document.getElementById('ma-angle-b').value = act.angle_b !== undefined ? act.angle_b : 120;
+  } else {
+    document.getElementById('ma-sol-behavior').value = act.behavior || 0;
+    document.getElementById('ma-pulse').value = act.pulse_ms || 20;
+    document.getElementById('ma-pwm-init').value = act.pwm_initial !== undefined ? act.pwm_initial : 4095;
+    document.getElementById('ma-pwm-hold').value = act.pwm_hold !== undefined ? act.pwm_hold : 2048;
+    document.getElementById('ma-ramp').value = act.ramp_ms || 50;
+  }
+  document.getElementById('modal-act-title').textContent = 'Modifier actionneur #' + id;
+  document.getElementById('modal-actuator').classList.add('show');
+  updateAnglePreview();
 }
 
 async function saveActuator() {
@@ -1197,6 +1433,7 @@ async function saveActuator() {
 
   await api('/api/actuator', 'POST', data);
   closeModal('modal-actuator');
+  editingActuatorId = -1;
   loadActuators();
 }
 
@@ -1981,6 +2218,65 @@ async function loadDashboardLog() {
     }
     tbody.innerHTML = html;
   } catch(e) {}
+}
+
+// ============================================================================
+// Servo angle visual preview
+// ============================================================================
+function updateAnglePreview() {
+  const preview = document.getElementById('angle-preview');
+  if (!preview || document.getElementById('servo-fields').style.display === 'none') return;
+  const init = parseInt(document.getElementById('ma-angle-init').value) || 90;
+  const amp = parseInt(document.getElementById('ma-amplitude').value) || 45;
+  const angleB = parseInt(document.getElementById('ma-angle-b').value) || 120;
+  const minA = Math.max(0, init - amp);
+  const maxA = Math.min(180, init + amp);
+  const cx=60,cy=55,r=40;
+  const toX=(deg)=>cx+r*Math.cos((180-deg)*Math.PI/180);
+  const toY=(deg)=>cy-r*Math.sin((180-deg)*Math.PI/180);
+  const x1=toX(minA),y1=toY(minA),x2=toX(maxA),y2=toY(maxA);
+  const xi=toX(init),yi=toY(init),xb=toX(angleB),yb=toY(angleB);
+  const la=(maxA-minA)>180?1:0;
+  let s='<svg width="120" height="70" viewBox="0 0 120 70">';
+  s+='<path d="M '+(cx-r)+' '+cy+' A '+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy+'" fill="none" stroke="var(--bg3)" stroke-width="3"/>';
+  s+='<path d="M '+x1+' '+y1+' A '+r+' '+r+' 0 '+la+' 1 '+x2+' '+y2+'" fill="none" stroke="var(--accent)" stroke-width="3"/>';
+  s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xi+'" y2="'+yi+'" stroke="var(--green)" stroke-width="2"/>';
+  s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xb+'" y2="'+yb+'" stroke="var(--yellow)" stroke-width="1.5" stroke-dasharray="4,3"/>';
+  s+='<circle cx="'+cx+'" cy="'+cy+'" r="3" fill="var(--fg)"/>';
+  s+='<text x="2" y="68" font-size="9" fill="var(--fg2)">180</text>';
+  s+='<text x="104" y="68" font-size="9" fill="var(--fg2)">0</text>';
+  s+='</svg>';
+  s+='<div class="angle-info">';
+  s+='Repos: <span>'+init+'&deg;</span>';
+  s+=' Course: <span>'+minA+'&deg;&rarr;'+maxA+'&deg;</span>';
+  s+=' Alt(B): <span>'+angleB+'&deg;</span>';
+  s+='</div>';
+  preview.innerHTML=s;
+}
+
+// ============================================================================
+// Microphone detection for calibration
+// ============================================================================
+async function checkMicStatus() {
+  const micDiv = document.getElementById('mic-status');
+  const ctrlDiv = document.getElementById('cal-controls');
+  if (!micDiv) return;
+  try {
+    const d = await api('/api/calibrate/status');
+    if (d && d.mic_detected) {
+      micDiv.className = 'mic-status ok';
+      micDiv.innerHTML = '&#9679; Microphone I&sup2;S d&eacute;tect&eacute; &mdash; Pr&ecirc;t pour la calibration';
+      if (ctrlDiv) ctrlDiv.style.display = 'block';
+    } else {
+      micDiv.className = 'mic-status no';
+      micDiv.innerHTML = '&#9679; Microphone I&sup2;S non d&eacute;tect&eacute; &mdash; Connectez un INMP441 (WS:15, SCK:14, SD:32)';
+      if (ctrlDiv) ctrlDiv.style.display = 'none';
+    }
+  } catch(e) {
+    // API may not have mic_detected field yet, show controls anyway
+    micDiv.style.display = 'none';
+    if (ctrlDiv) ctrlDiv.style.display = 'block';
+  }
 }
 
 // ============================================================================
