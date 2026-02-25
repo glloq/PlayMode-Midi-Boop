@@ -1451,7 +1451,9 @@ async function saveInstrument() {
 async function deleteInstrument(idx) {
   if (!confirm('Supprimer cet instrument?')) return;
   await api('/api/instrument?index=' + idx, 'DELETE');
+  instruments = [];  // Force refresh
   loadHomeInstruments();
+  loadInstrumentSelects();
 }
 
 // ============================================================================
@@ -2655,17 +2657,18 @@ async function checkMicStatus() {
   if (!micDiv) return;
   try {
     const d = await api('/api/calibrate/status');
-    if (d && d.mic_detected) {
+    // Bug fix: backend returns 'available' field, not 'mic_detected'
+    if (d && d.available) {
       micDiv.className = 'mic-status ok';
-      micDiv.innerHTML = '&#9679; Microphone I&sup2;S d&eacute;tect&eacute; &mdash; Pr&ecirc;t pour la calibration';
+      micDiv.innerHTML = '&#9679; Calibrateur actif &mdash; Pr&ecirc;t pour la calibration acoustique';
       if (ctrlDiv) ctrlDiv.style.display = 'block';
     } else {
       micDiv.className = 'mic-status no';
-      micDiv.innerHTML = '&#9679; Microphone I&sup2;S non d&eacute;tect&eacute; &mdash; Connectez un INMP441 (WS:15, SCK:14, SD:32)';
+      micDiv.innerHTML = '&#9679; Calibrateur non disponible &mdash; Microphone INMP441 requis (WS:15, SCK:14, SD:32)';
       if (ctrlDiv) ctrlDiv.style.display = 'none';
     }
   } catch(e) {
-    // API may not have mic_detected field yet, show controls anyway
+    // API unavailable, show controls anyway
     micDiv.style.display = 'none';
     if (ctrlDiv) ctrlDiv.style.display = 'block';
   }
