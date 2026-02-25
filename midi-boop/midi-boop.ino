@@ -195,14 +195,17 @@ void setup() {
     midiDispatcher.setPowerManager(&powerManager);
     midiDispatcher.refreshConfig();
 
-    // 11. Démarrer le serveur Web (Phase 6)
+    // 11. Démarrer le serveur Web (Phase 6) — uniquement si WiFi actif
     Serial.println("\n[INIT] Web Server...");
     webServer.setModules(&configManager, &scheduler, &safetyManager,
                          &powerManager, &midiDispatcher, &midiTransport,
                          &pcaDriver, &actuatorEngine);
     webServer.setCalibrator(&calibrator);
     webServer.setTestManager(&testManager);
-    if (!webServer.begin()) {
+    if (!wifiManager.isConnected() && !wifiManager.isAP()) {
+        Serial.println("[INIT] Web Server ignoré (WiFi non actif)");
+        logger.log(LOG_WARN, CAT_SYSTEM, "Web Server non démarré (WiFi désactivé)");
+    } else if (!webServer.begin()) {
         Serial.println("[INIT] ERREUR : Web Server");
         logger.log(LOG_ERROR, CAT_SYSTEM, "Web Server : echec démarrage");
     } else {
