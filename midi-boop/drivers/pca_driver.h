@@ -55,6 +55,7 @@ private:
     BusConfig _buses[2];
     Adafruit_PWMServoDriver* _drivers[PCA_TOTAL_MAX];
     uint8_t _driver_count;
+    uint8_t _bus_driver_start[2];  // Index dans _drivers[] où commence chaque bus
 
     // Retrouve le driver pour un bus + adresse
     Adafruit_PWMServoDriver* getDriver(uint8_t bus_id, uint8_t pca_address);

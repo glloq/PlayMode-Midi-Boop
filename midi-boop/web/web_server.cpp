@@ -743,14 +743,19 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     act.pwm_hold      = doc["pwm_hold"] | 2048;
     act.ramp_ms       = doc["ramp_ms"] | 50;
 
+    uint8_t count_before = _config->getActuatorCount();
     if (_config->addActuator(act)) {
-        // Initialiser l'actionneur dans le moteur et le scheduler
+        bool is_new = (_config->getActuatorCount() > count_before);
         ActuatorConfig* actuators = _config->getActuators();
         uint8_t count = _config->getActuatorCount();
         for (uint8_t i = 0; i < count; i++) {
             if (actuators[i].id == act.id) {
                 _engine->initActuator(actuators[i]);
-                _scheduler->registerActuator(&actuators[i]);
+                // Enregistrer dans le scheduler seulement si c'est un nouvel actionneur
+                // (évite les doublons dans _actuators[] lors d'une mise à jour)
+                if (is_new) {
+                    _scheduler->registerActuator(&actuators[i]);
+                }
                 break;
             }
         }
