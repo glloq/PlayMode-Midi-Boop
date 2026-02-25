@@ -695,6 +695,12 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     }
 
     if (_config->addInstrument(inst)) {
+        // Créer automatiquement une entrée de routage vide pour ce nouvel instrument
+        // (routing_count doit toujours rester == instrument_count)
+        uint8_t newIdx = _config->getInstrumentCount() - 1;
+        MidiRoutingConfig emptyRouting = {};
+        emptyRouting.instrument_index = newIdx;
+        _config->addRoutingConfig(emptyRouting);
         if (_dispatcher) _dispatcher->refreshConfig();
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
@@ -821,14 +827,22 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
     }
 
     uint8_t inst_idx = doc["instrument"] | 0;
-    MidiRoutingConfig* routings = _config->getRoutingConfigs();
-    uint8_t routing_count = _config->getRoutingCount();
 
-    if (inst_idx >= routing_count) {
+    // Valider contre le nombre d'instruments (pas de routages, qui peut être désynchronisé)
+    if (inst_idx >= _config->getInstrumentCount()) {
         request->send(400, "application/json",
                       "{\"error\":\"invalid instrument index\"}");
         return;
     }
+
+    // Si routing_count < inst_idx+1 (désynchronisation), créer les entrées manquantes
+    while (_config->getRoutingCount() <= inst_idx) {
+        MidiRoutingConfig empty = {};
+        empty.instrument_index = _config->getRoutingCount();
+        _config->addRoutingConfig(empty);
+    }
+
+    MidiRoutingConfig* routings = _config->getRoutingConfigs();
 
     MidiRoutingConfig& routing = routings[inst_idx];
 
