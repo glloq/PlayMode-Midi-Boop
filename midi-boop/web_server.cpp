@@ -362,7 +362,7 @@ void WebServer::handleGetStatus(AsyncWebServerRequest* request) {
 void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<2048> doc;
+    DynamicJsonDocument doc(2048);
     JsonArray arr = doc.to<JsonArray>();
 
     InstrumentConfig* instruments = _config->getInstruments();
@@ -395,7 +395,7 @@ void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
 void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<4096> doc;
+    DynamicJsonDocument doc(4096);
     JsonArray arr = doc.to<JsonArray>();
 
     ActuatorConfig* actuators = _config->getActuators();
@@ -476,8 +476,9 @@ void WebServer::handleGetWiFi(AsyncWebServerRequest* request) {
     doc["hostname"]    = wifi->hostname;
     doc["enabled"]     = wifi->enabled;
     doc["ap_fallback"] = wifi->ap_fallback;
-    doc["connected"]   = WiFi.isConnected();
-    doc["ip"]          = WiFi.localIP().toString();
+    doc["connected"]   = (WiFi.status() == WL_CONNECTED);
+    doc["ip"]          = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString()
+                                                          : WiFi.softAPIP().toString();
     doc["rssi"]        = WiFi.RSSI();
     // Ne pas exposer le mot de passe
 
@@ -507,7 +508,7 @@ void WebServer::handleGetMidi(AsyncWebServerRequest* request) {
 void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<4096> doc;
+    DynamicJsonDocument doc(4096);
     JsonArray arr = doc.to<JsonArray>();
 
     MidiRoutingConfig* routings = _config->getRoutingConfigs();
@@ -762,7 +763,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
                                   uint8_t* data, size_t len) {
     if (!_config || !_dispatcher) { request->send(500); return; }
 
-    StaticJsonDocument<2048> doc;
+    DynamicJsonDocument doc(2048);
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -1087,9 +1088,8 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
             if (info->final && info->index == 0 && info->len == len
                 && info->opcode == WS_TEXT)
             {
-                data[len] = 0;
                 StaticJsonDocument<128> doc;
-                DeserializationError err = deserializeJson(doc, (char*)data);
+                DeserializationError err = deserializeJson(doc, (const char*)data, len);
                 if (!err) {
                     const char* cmd = doc["cmd"];
                     if (cmd && strcmp(cmd, "test") == 0) {
@@ -1119,6 +1119,10 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
 void WebServer::broadcastStatus() {
     String json;
     buildStatusJSON(json);
+    if (json.length() == 0) {
+        Serial.println("[WEB] broadcastStatus: JSON vide (heap insuffisant ?)");
+        return;
+    }
     _ws.textAll(json);
 }
 
@@ -1279,7 +1283,7 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
         return;
     }
 
-    StaticJsonDocument<1024> doc;
+    DynamicJsonDocument doc(1024);
     JsonArray arr = doc.to<JsonArray>();
 
     uint8_t count = _calibrator->getResultCount();
@@ -1426,7 +1430,7 @@ void WebServer::handleGetTestLog(AsyncWebServerRequest* request) {
 
     // Limite le nombre d'entrées retournées (max 32 pour économiser la RAM JSON)
     const uint8_t MAX_ENTRIES = 32;
-    StaticJsonDocument<1536> doc;
+    DynamicJsonDocument doc(1536);
     JsonArray arr = doc.to<JsonArray>();
 
     uint8_t count = _testManager->getLogCount();
