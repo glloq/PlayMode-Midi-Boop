@@ -104,9 +104,10 @@ uint8_t WebServer::getClientCount() const { return _ws.count(); }
 // ============================================================================
 
 void WebServer::setupStaticRoutes() {
-    // Page principale (SPA)
+    // Page principale (SPA) — taille explicite pour garantir Content-Length correct
     _server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send_P(200, "text/html", WEB_UI_HTML);
+        request->send_P(200, "text/html; charset=UTF-8", WEB_UI_HTML,
+                        sizeof(WEB_UI_HTML) - 1);
     });
 
     // Favicon (204 No Content pour éviter les erreurs 404)
@@ -114,17 +115,36 @@ void WebServer::setupStaticRoutes() {
         request->send(204);
     });
 
-    // Captive portal : les téléphones testent la connectivité via des URLs
-    // spécifiques (generate_204, hotspot-detect, etc.).
-    // En mode AP, rediriger TOUT vers la page principale.
+    // --- Captive portal probes ---
+    // Android : renvoie 204 → OS détecte le portail et affiche la notification
+    // "Se connecter au réseau" → l'utilisateur ouvre le navigateur complet.
+    _server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+    _server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+    // iOS / macOS
+    _server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    });
+    // Windows NCSI
+    _server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    });
+    _server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    });
+
+    // Fallback : appels API inconnus → 404 JSON ; tout le reste → page principale
     _server.onNotFound([](AsyncWebServerRequest* request) {
-        // Si c'est un appel API, renvoyer 404 JSON
         if (request->url().startsWith("/api/")) {
             request->send(404, "application/json", "{\"error\":\"not found\"}");
             return;
         }
-        // Sinon rediriger vers la page principale (captive portal)
-        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+        // Utilise l'IP correcte selon le mode WiFi courant
+        IPAddress ip = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+        request->redirect("http://" + ip.toString() + "/");
     });
 }
 
