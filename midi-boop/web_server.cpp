@@ -1,6 +1,7 @@
 #include "web_server.h"
 #include "web_ui.h"
 #include "config_manager.h"
+#include <WiFi.h>
 #include "scheduler.h"
 #include "safety_manager.h"
 #include "power_manager.h"
@@ -113,9 +114,17 @@ void WebServer::setupStaticRoutes() {
         request->send(204);
     });
 
-    // 404
+    // Captive portal : les téléphones testent la connectivité via des URLs
+    // spécifiques (generate_204, hotspot-detect, etc.).
+    // En mode AP, rediriger TOUT vers la page principale.
     _server.onNotFound([](AsyncWebServerRequest* request) {
-        request->send(404, "application/json", "{\"error\":\"not found\"}");
+        // Si c'est un appel API, renvoyer 404 JSON
+        if (request->url().startsWith("/api/")) {
+            request->send(404, "application/json", "{\"error\":\"not found\"}");
+            return;
+        }
+        // Sinon rediriger vers la page principale (captive portal)
+        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
     });
 }
 
