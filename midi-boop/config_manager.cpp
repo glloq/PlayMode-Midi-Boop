@@ -241,16 +241,50 @@ uint8_t ConfigManager::getInstrumentCount() const {
 }
 
 bool ConfigManager::addActuator(const ActuatorConfig& actuator) {
+    // Si un actionneur avec le même ID existe, mettre à jour en place
+    for (uint8_t i = 0; i < _actuator_count; i++) {
+        if (_actuators[i].id == actuator.id) {
+            _actuators[i] = actuator;
+            return true;
+        }
+    }
+    // Nouveau slot
     if (_actuator_count >= MAX_ACTUATORS) return false;
     _actuators[_actuator_count] = actuator;
     _actuator_count++;
     return true;
 }
 
+bool ConfigManager::removeActuator(uint8_t id) {
+    for (uint8_t i = 0; i < _actuator_count; i++) {
+        if (_actuators[i].id == id) {
+            // Décaler les actionneurs suivants
+            for (uint8_t j = i; j < _actuator_count - 1; j++) {
+                _actuators[j] = _actuators[j + 1];
+            }
+            _actuators[_actuator_count - 1] = {};
+            _actuator_count--;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ConfigManager::addInstrument(const InstrumentConfig& instrument) {
     if (_instrument_count >= MAX_INSTRUMENTS) return false;
     _instruments[_instrument_count] = instrument;
     _instrument_count++;
+    return true;
+}
+
+bool ConfigManager::removeInstrument(uint8_t index) {
+    if (index >= _instrument_count) return false;
+    // Décaler les instruments suivants
+    for (uint8_t i = index; i < _instrument_count - 1; i++) {
+        _instruments[i] = _instruments[i + 1];
+    }
+    _instruments[_instrument_count - 1] = {};
+    _instrument_count--;
     return true;
 }
 

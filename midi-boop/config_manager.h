@@ -40,16 +40,22 @@ public:
     ActuatorConfig* getActuators();
     uint8_t getActuatorCount() const;
 
-    // Ajoute un actionneur
+    // Ajoute ou met à jour un actionneur (update si même ID existe)
     bool addActuator(const ActuatorConfig& actuator);
+
+    // Supprime un actionneur par ID (décrémente le compteur)
+    bool removeActuator(uint8_t id);
 
     // --- Accesseurs instruments ---
 
     InstrumentConfig* getInstruments();
     uint8_t getInstrumentCount() const;
 
-    // Ajoute un instrument
+    // Ajoute un instrument (crée toujours un nouveau slot)
     bool addInstrument(const InstrumentConfig& instrument);
+
+    // Supprime un instrument par index (décrémente le compteur)
+    bool removeInstrument(uint8_t index);
 
     // --- WiFi + MIDI ---
 

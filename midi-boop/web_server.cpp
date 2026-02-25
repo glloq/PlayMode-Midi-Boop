@@ -657,12 +657,12 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
 
     InstrumentConfig inst = {};
     strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
-    inst.midi_channel      = doc["channel"] | 0;
-    inst.bus_id            = doc["bus_id"] | 0;
+    inst.midi_channel       = doc["channel"] | 0;
+    inst.bus_id             = doc["bus_id"] | 0;
     inst.default_latency_ms = doc["latency_ms"] | 10;
-    inst.auto_calibration  = doc["auto_cal"] | false;
-    inst.enabled           = doc["enabled"] | true;
-    inst.actuator_count    = 0;
+    inst.auto_calibration   = doc["auto_cal"] | false;
+    inst.enabled            = doc["enabled"] | true;
+    inst.actuator_count     = 0;
 
     // Mappings actuator→note
     JsonArray acts = doc["actuators"];
@@ -672,6 +672,25 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
             inst.actuator_ids[inst.actuator_count] = a["id"] | 0;
             inst.midi_notes[inst.actuator_count]   = a["note"] | MIDI_NOTE_UNMAPPED;
             inst.actuator_count++;
+        }
+    }
+
+    // Si un index est fourni → mise à jour de l'instrument existant
+    if (doc.containsKey("index")) {
+        uint8_t idx = (uint8_t)(doc["index"].as<int>());
+        InstrumentConfig* instruments = _config->getInstruments();
+        uint8_t count = _config->getInstrumentCount();
+        if (idx < count) {
+            // Préserver les associations actionneurs/notes si non fournies
+            if (acts.isNull()) {
+                inst.actuator_count = instruments[idx].actuator_count;
+                memcpy(inst.actuator_ids, instruments[idx].actuator_ids, sizeof(inst.actuator_ids));
+                memcpy(inst.midi_notes, instruments[idx].midi_notes, sizeof(inst.midi_notes));
+            }
+            instruments[idx] = inst;
+            if (_dispatcher) _dispatcher->refreshConfig();
+            request->send(200, "application/json", "{\"ok\":true}");
+            return;
         }
     }
 
@@ -1044,16 +1063,13 @@ void WebServer::handleDeleteInstrument(AsyncWebServerRequest* request) {
         return;
     }
 
-    // Décaler les instruments suivants
-    for (uint8_t i = index; i < count - 1; i++) {
-        instruments[i] = instruments[i + 1];
+    if (_config->removeInstrument(index)) {
+        if (_dispatcher) _dispatcher->refreshConfig();
+        request->send(200, "application/json", "{\"ok\":true}");
+    } else {
+        request->send(404, "application/json",
+                      "{\"error\":\"instrument not found\"}");
     }
-    // Réduire le compteur (on ne peut pas directement, il faut reload)
-    // Pour le moment, désactiver le dernier
-    instruments[count - 1] = {};
-
-    if (_dispatcher) _dispatcher->refreshConfig();
-    request->send(200, "application/json", "{\"ok\":true}");
 }
 
 void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
@@ -1066,21 +1082,18 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
     }
 
     uint8_t id = request->getParam("id")->value().toInt();
+
+    // Remettre l'actionneur au repos avant suppression
     ActuatorConfig* actuators = _config->getActuators();
     uint8_t count = _config->getActuatorCount();
-
-    bool found = false;
     for (uint8_t i = 0; i < count; i++) {
         if (actuators[i].id == id) {
-            // Désactiver l'actionneur et remettre au repos
-            actuators[i].enabled = false;
             if (_engine) _engine->resetActuator(actuators[i]);
-            found = true;
             break;
         }
     }
 
-    if (found) {
+    if (_config->removeActuator(id)) {
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(404, "application/json",
@@ -1338,7 +1351,9 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
                 obj["timestamp_ms"]  = res->timestamp_ms;
             } else {
                 obj["measured_ms"]   = nullptr;
+                obj["samples_taken"] = 0;
                 obj["success"]       = nullptr;
+                obj["timestamp_ms"]  = 0;
             }
         }
     }

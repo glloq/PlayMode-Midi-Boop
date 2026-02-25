@@ -1445,13 +1445,19 @@ async function saveInstrument() {
   await api('/api/instrument', 'POST', data);
   closeModal('modal-instrument');
   editingInstrumentIdx = -1;
+  instruments = [];  // Force refresh
+  routing = await api('/api/routing') || [];
   loadHomeInstruments();
+  loadInstrumentSelects();
+  buildPiano();
 }
 
 async function deleteInstrument(idx) {
   if (!confirm('Supprimer cet instrument?')) return;
   await api('/api/instrument?index=' + idx, 'DELETE');
+  instruments = [];  // Force refresh
   loadHomeInstruments();
+  loadInstrumentSelects();
 }
 
 // ============================================================================
@@ -2556,9 +2562,18 @@ function wizPrev() {
 }
 
 async function wizNext() {
+  // Per-step validation before advancing
+  if (wizStep === 1) {
+    const name = document.getElementById('wiz-name').value.trim();
+    if (!name) { toast('Veuillez entrer un nom pour l\'instrument', 'error'); return; }
+  }
+  if (wizStep === 3) {
+    const count = parseInt(document.getElementById('wiz-count').value);
+    if (isNaN(count) || count < 1 || count > 32) { toast('Nombre d\'actionneurs invalide (1–32)', 'error'); return; }
+  }
   if (wizStep < 4) { wizStep++; wizShowStep(); return; }
   // Step 4 → Create everything
-  const name = document.getElementById('wiz-name').value || 'Instrument';
+  const name = document.getElementById('wiz-name').value.trim() || 'Instrument';
   const channel = parseInt(document.getElementById('wiz-channel').value);
   const type = parseInt(document.getElementById('wiz-type').value);
   const behavior = parseInt(document.getElementById('wiz-behavior').value);
@@ -2655,17 +2670,18 @@ async function checkMicStatus() {
   if (!micDiv) return;
   try {
     const d = await api('/api/calibrate/status');
-    if (d && d.mic_detected) {
+    // Bug fix: backend returns 'available' field, not 'mic_detected'
+    if (d && d.available) {
       micDiv.className = 'mic-status ok';
-      micDiv.innerHTML = '&#9679; Microphone I&sup2;S d&eacute;tect&eacute; &mdash; Pr&ecirc;t pour la calibration';
+      micDiv.innerHTML = '&#9679; Calibrateur actif &mdash; Pr&ecirc;t pour la calibration acoustique';
       if (ctrlDiv) ctrlDiv.style.display = 'block';
     } else {
       micDiv.className = 'mic-status no';
-      micDiv.innerHTML = '&#9679; Microphone I&sup2;S non d&eacute;tect&eacute; &mdash; Connectez un INMP441 (WS:15, SCK:14, SD:32)';
+      micDiv.innerHTML = '&#9679; Calibrateur non disponible &mdash; Microphone INMP441 requis (WS:15, SCK:14, SD:32)';
       if (ctrlDiv) ctrlDiv.style.display = 'none';
     }
   } catch(e) {
-    // API may not have mic_detected field yet, show controls anyway
+    // API unavailable, show controls anyway
     micDiv.style.display = 'none';
     if (ctrlDiv) ctrlDiv.style.display = 'block';
   }
