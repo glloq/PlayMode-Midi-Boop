@@ -206,6 +206,43 @@ tr:hover td{background:var(--bg2)}
   margin-bottom:16px;font-size:13px}
 .mic-status.ok{background:#3fb9501a;border:1px solid #3fb95033;color:var(--green)}
 .mic-status.no{background:#f851491a;border:1px solid #f8514933;color:var(--red)}
+
+/* Wizard steps */
+.wiz-steps{display:flex;gap:4px;margin-bottom:16px;align-items:flex-start}
+.wiz-step-item{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1}
+.wiz-dot{width:28px;height:28px;border-radius:50%;background:var(--bg3);color:var(--fg2);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+.wiz-dot.active{background:var(--accent);color:#fff}
+.wiz-dot.done{background:var(--green);color:#fff}
+.wiz-step-label{font-size:10px;color:var(--fg2);text-align:center;white-space:nowrap}
+.wiz-step-item.active .wiz-step-label{color:var(--accent);font-weight:600}
+.wiz-connector{flex:1;height:2px;background:var(--bg3);align-self:center;margin-top:13px;min-width:12px}
+.wiz-connector.done{background:var(--green)}
+.wiz-panel{min-height:120px}
+
+/* Inline note input in actuator table */
+.note-input{width:56px;background:var(--bg);border:1px solid var(--border);color:var(--fg);
+  padding:2px 6px;border-radius:4px;font-size:12px;text-align:center}
+.note-input:focus{border-color:var(--accent);outline:none}
+.note-label{font-size:11px;color:var(--fg2);margin-left:4px}
+
+/* Expert collapsible sections */
+.expert-section{margin:12px 0}
+.expert-toggle{background:none;border:1px dashed var(--border);color:var(--fg2);padding:8px 12px;
+  border-radius:6px;cursor:pointer;font-size:12px;width:100%;text-align:left;
+  display:flex;align-items:center;gap:6px;transition:all .15s}
+.expert-toggle:hover{color:var(--fg);background:var(--bg3)}
+.expert-toggle::before{content:'\25B6';font-size:10px;transition:transform .2s;display:inline-block}
+.expert-toggle.open::before{transform:rotate(90deg)}
+.expert-body{display:none;padding:12px 0 0}
+.expert-body.open{display:block}
+
+/* Wizard note table */
+.wiz-note-table{max-height:200px;overflow-y:auto;border:1px solid var(--border);
+  border-radius:var(--radius);margin:8px 0}
+.wiz-note-table table{margin:0}
+.wiz-note-table td{padding:4px 8px;font-size:12px}
+.wiz-note-table th{padding:4px 8px;position:sticky;top:0;z-index:1}
 </style>
 </head>
 <body>
@@ -222,29 +259,55 @@ tr:hover td{background:var(--bg2)}
   <div style="position:relative">
     <button class="gear-btn" onclick="toggleSettingsMenu()" title="R&eacute;glages syst&egrave;me">&#9881;</button>
     <div class="settings-dropdown" id="settings-dropdown">
+      <button onclick="showPage('dashboard');closeSettingsMenu()">Dashboard<span class="sdesc">Monitoring temps r&eacute;el</span></button>
       <button onclick="showPage('power');closeSettingsMenu()">Power<span class="sdesc">Budget et consommation</span></button>
       <button onclick="showPage('safety');closeSettingsMenu()">Safety<span class="sdesc">Limites de s&eacute;curit&eacute;</span></button>
       <button onclick="showPage('logs');closeSettingsMenu()">Logs<span class="sdesc">Journal syst&egrave;me</span></button>
-      <button onclick="showPage('settings');closeSettingsMenu()">Param&egrave;tres<span class="sdesc">WiFi, bus I&sup2;C, config</span></button>
+      <button onclick="showPage('settings');closeSettingsMenu()">Param&egrave;tres<span class="sdesc">WiFi, MIDI, bus I&sup2;C, config</span></button>
     </div>
   </div>
 </div>
 
 <!-- Navigation -->
 <nav>
-  <button class="active" onclick="showPage('dashboard')">Dashboard</button>
-  <button onclick="showPage('instruments')">Instruments</button>
+  <button class="active" onclick="showPage('home')">Accueil</button>
   <button onclick="showPage('actuators')">Actionneurs</button>
-  <button onclick="showPage('midi')">MIDI / Mapping</button>
-  <button onclick="showPage('piano')">Piano</button>
+  <button onclick="showPage('cc')">CC Mapping</button>
   <button onclick="showPage('calibration')">Calibration</button>
   <button onclick="showPage('test')">Test</button>
 </nav>
 
-<!-- ============ DASHBOARD ============ -->
-<div class="page active" id="page-dashboard">
+<!-- ============ HOME (Instruments + Piano) ============ -->
+<div class="page active" id="page-home">
   <div id="alert-zone"></div>
 
+  <div class="section-title"><span>Mes instruments</span>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary sm" onclick="openWizard()">+ Assistant</button>
+      <button class="btn sm" onclick="openInstrumentModal()">+ Manuel</button>
+    </div>
+  </div>
+  <div class="table-responsive">
+  <table>
+    <thead><tr><th>Nom</th><th>Canal</th><th>Type</th><th>Actionneurs</th><th>&Eacute;tat</th><th>Actions</th></tr></thead>
+    <tbody id="home-instruments-table"><tr><td colspan="6" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+  </table>
+  </div>
+
+  <div class="section-title" style="margin-top:12px"><span>Piano virtuel</span>
+    <select id="home-piano-instrument" onchange="updatePianoMapping()" class="form-select"></select>
+  </div>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Cliquer sur une touche pour tester. Les touches bleues sont mapp&eacute;es.</p>
+  <div class="piano-container">
+    <div class="piano" id="piano-keys"></div>
+  </div>
+  <div style="margin-top:8px">
+    <div id="piano-active" style="color:var(--fg2);font-size:13px">Notes actives : aucune</div>
+  </div>
+</div>
+
+<!-- ============ DASHBOARD ============ -->
+<div class="page" id="page-dashboard">
   <div class="cards">
     <div class="card">
       <h3>MIDI Reçus</h3>
@@ -306,19 +369,6 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
-<!-- ============ INSTRUMENTS ============ -->
-<div class="page" id="page-instruments">
-  <div class="section-title"><span>Instruments</span>
-    <button class="btn primary sm" onclick="openInstrumentModal()">+ Ajouter</button>
-  </div>
-  <div class="table-responsive">
-  <table>
-    <thead><tr><th>Nom</th><th>Canal</th><th>Bus</th><th>Actionneurs</th><th>Latence</th><th>État</th><th>Actions</th></tr></thead>
-    <tbody id="instruments-table"><tr><td colspan="7" style="color:var(--fg2)">Chargement...</td></tr></tbody>
-  </table>
-  </div>
-</div>
-
 <!-- ============ ACTUATORS ============ -->
 <div class="page" id="page-actuators">
   <div class="section-title"><span>Actionneurs</span>
@@ -326,74 +376,23 @@ tr:hover td{background:var(--bg2)}
   </div>
   <div class="table-responsive">
   <table>
-    <thead><tr><th>ID</th><th>Type</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>Latence</th><th>État</th><th>Actions</th></tr></thead>
+    <thead><tr><th>ID</th><th>Type</th><th>Note MIDI</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>&Eacute;tat</th><th>Actions</th></tr></thead>
     <tbody id="actuators-table"><tr><td colspan="9" style="color:var(--fg2)">Chargement...</td></tr></tbody>
   </table>
   </div>
 </div>
 
-<!-- ============ MIDI / MAPPING ============ -->
-<div class="page" id="page-midi">
-  <div class="section-title">Configuration MIDI</div>
-  <div class="cards" style="margin-bottom:20px">
-    <div class="card">
-      <h3>Serial MIDI</h3>
-      <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">GPIO <span id="midi-rx-pin">4</span> @ 31250 baud</div>
-    </div>
-    <div class="card">
-      <h3>UDP MIDI</h3>
-      <label><input type="checkbox" id="midi-udp" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Port: <span id="midi-udp-port">5004</span></div>
-    </div>
-    <div class="card">
-      <h3>RTP-MIDI</h3>
-      <label><input type="checkbox" id="midi-rtp" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Port: <span id="midi-rtp-port">5004</span></div>
-    </div>
-    <div class="card">
-      <h3>Jitter Buffer</h3>
-      <div class="val"><span id="midi-jitter-val">30</span><span class="unit">ms</span></div>
-      <input type="range" id="midi-jitter" min="10" max="80" value="30" style="width:100%;margin-top:8px"
-        oninput="document.getElementById('midi-jitter-val').textContent=this.value"
-        onchange="updateMidiConfig()">
-    </div>
+<!-- ============ CC MAPPING ============ -->
+<div class="page" id="page-cc">
+  <div class="section-title"><span>Control Changes (CC)</span>
+    <select id="cc-instrument" onchange="loadCCRouting()" class="form-select"></select>
   </div>
-
-  <div class="section-title"><span>Mapping MIDI</span>
-    <select id="mapping-instrument" onchange="loadRouting()" class="form-select">
-    </select>
-  </div>
-  <div class="section-title" style="font-size:14px">Notes</div>
-  <div class="table-responsive">
-  <table>
-    <thead><tr><th>Note MIDI</th><th>Actionneur</th><th>Actif</th><th>Actions</th></tr></thead>
-    <tbody id="mapping-notes-table"><tr><td colspan="4" style="color:var(--fg2)">Sélectionner un instrument</td></tr></tbody>
-  </table>
-  </div>
-
-  <div class="section-title" style="font-size:14px">Control Changes</div>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Les CC permettent de contr&ocirc;ler en continu un param&egrave;tre d'un actionneur (position, amplitude, vitesse...).</p>
   <div class="table-responsive">
   <table>
     <thead><tr><th>CC#</th><th>Actionneur</th><th>Cible</th><th>Min</th><th>Max</th><th>Actif</th></tr></thead>
-    <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">Sélectionner un instrument</td></tr></tbody>
+    <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
   </table>
-  </div>
-</div>
-
-<!-- ============ PIANO ============ -->
-<div class="page" id="page-piano">
-  <div class="section-title"><span>Piano virtuel</span>
-    <select id="piano-instrument" onchange="updatePianoMapping()" class="form-select">
-    </select>
-  </div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Cliquer sur une touche pour tester l'actionneur correspondant. Les touches bleues sont mappées.</p>
-  <div class="piano-container">
-    <div class="piano" id="piano-keys"></div>
-  </div>
-  <div style="margin-top:16px">
-    <div class="section-title" style="font-size:14px">Notes actives</div>
-    <div id="piano-active" style="color:var(--fg2);font-size:13px">Aucune</div>
   </div>
 </div>
 
@@ -549,7 +548,37 @@ tr:hover td{background:var(--bg2)}
   </div>
   <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
 
-  <div class="section-title" style="margin-top:24px">Bus I²C</div>
+  <div class="expert-section" style="margin-top:24px">
+    <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Transport MIDI &amp; Bus I&sup2;C (avanc&eacute;)</button>
+    <div class="expert-body">
+  <div class="section-title">Transport MIDI</div>
+  <div class="cards" style="margin-bottom:16px">
+    <div class="card">
+      <h3>Serial MIDI</h3>
+      <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Actif</label>
+      <div class="sub">GPIO <span id="midi-rx-pin">4</span> @ 31250 baud</div>
+    </div>
+    <div class="card">
+      <h3>UDP MIDI</h3>
+      <label><input type="checkbox" id="midi-udp" onchange="updateMidiConfig()"> Actif</label>
+      <div class="sub">Port: <span id="midi-udp-port">5004</span></div>
+    </div>
+    <div class="card">
+      <h3>RTP-MIDI</h3>
+      <label><input type="checkbox" id="midi-rtp" onchange="updateMidiConfig()"> Actif</label>
+      <div class="sub">Port: <span id="midi-rtp-port">5004</span></div>
+    </div>
+    <div class="card">
+      <h3>Jitter Buffer</h3>
+      <div class="val"><span id="midi-jitter-val">30</span><span class="unit">ms</span></div>
+      <input type="range" id="midi-jitter" min="10" max="80" value="30" style="width:100%;margin-top:8px"
+        oninput="document.getElementById('midi-jitter-val').textContent=this.value"
+        onchange="updateMidiConfig()">
+      <div class="help">Tampon anti-gigue pour le r&eacute;seau</div>
+    </div>
+  </div>
+
+  <div class="section-title" style="margin-top:24px">Bus I&sup2;C</div>
   <div class="table-responsive">
   <table>
     <thead><tr><th>Bus</th><th>SDA</th><th>SCL</th><th>OE</th><th>Freq I²C</th><th>Freq PWM</th><th>PCA détectés</th><th>Actions</th></tr></thead>
@@ -557,6 +586,8 @@ tr:hover td{background:var(--bg2)}
   </table>
   </div>
   <button class="btn" onclick="scanI2C()">Scanner bus I²C</button>
+    </div>
+  </div>
 
   <div class="section-title" style="margin-top:24px">Configuration</div>
   <div class="btn-row">
@@ -636,16 +667,20 @@ tr:hover td{background:var(--bg2)}
         <div class="help">Adresse I&sup2;C de la carte PWM (16 canaux chacune)</div>
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Canal PCA (0-15)</label>
-        <input type="number" id="ma-ch" min="0" max="15" value="0">
-        <div class="help">Sortie PWM sur la carte (auto-incr&eacute;ment&eacute;)</div>
-      </div>
-      <div class="form-group">
-        <label>Latence (ms)</label>
-        <input type="number" id="ma-latency" min="0" max="500" value="10">
-        <div class="help">D&eacute;lai de compensation m&eacute;canique</div>
+    <div class="form-group">
+      <label>Canal PCA (0-15)</label>
+      <input type="number" id="ma-ch" min="0" max="15" value="0">
+      <div class="help">Sortie PWM sur la carte (auto-incr&eacute;ment&eacute;)</div>
+    </div>
+
+    <div class="expert-section">
+      <button type="button" class="expert-toggle" onclick="toggleExpert(this)">R&eacute;glages avanc&eacute;s</button>
+      <div class="expert-body">
+        <div class="form-group">
+          <label>Latence (ms)</label>
+          <input type="number" id="ma-latency" min="0" max="500" value="10">
+          <div class="help">D&eacute;lai de compensation m&eacute;canique (d&eacute;faut : 10ms)</div>
+        </div>
       </div>
     </div>
 
@@ -671,16 +706,19 @@ tr:hover td{background:var(--bg2)}
           <div class="help">Course du mouvement en degr&eacute;s</div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Dur&eacute;e du mouvement (ms)</label>
-          <input type="number" id="ma-speed" min="10" max="2000" value="150">
-          <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
-        </div>
-        <div class="form-group">
-          <label>Angle B - position altern&eacute;e (&deg;)</label>
-          <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
-          <div class="help">2e position pour le mode Altern&eacute;</div>
+      <div class="form-group">
+        <label>Dur&eacute;e du mouvement (ms)</label>
+        <input type="number" id="ma-speed" min="10" max="2000" value="150">
+        <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
+      </div>
+      <div class="expert-section">
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Mode altern&eacute; (avanc&eacute;)</button>
+        <div class="expert-body">
+          <div class="form-group">
+            <label>Angle B - position altern&eacute;e (&deg;)</label>
+            <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
+            <div class="help">2e position pour le mode Altern&eacute;</div>
+          </div>
         </div>
       </div>
       <!-- Angle visual preview -->
@@ -709,16 +747,21 @@ tr:hover td{background:var(--bg2)}
           <div class="help">Puissance initiale de frappe. 4095 = maximum</div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>PWM de maintien (0-4095)</label>
-          <input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048">
-          <div class="help">Puissance r&eacute;duite apr&egrave;s la frappe (mode Hit-and-Hold)</div>
-        </div>
-        <div class="form-group">
-          <label>Rampe de transition (ms)</label>
-          <input type="number" id="ma-ramp" min="10" max="500" value="50">
-          <div class="help">Dur&eacute;e du passage attaque &rarr; maintien</div>
+      <div class="expert-section">
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Hit-and-Hold (avanc&eacute;)</button>
+        <div class="expert-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>PWM de maintien (0-4095)</label>
+              <input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048">
+              <div class="help">Puissance r&eacute;duite apr&egrave;s la frappe</div>
+            </div>
+            <div class="form-group">
+              <label>Rampe de transition (ms)</label>
+              <input type="number" id="ma-ramp" min="10" max="500" value="50">
+              <div class="help">Dur&eacute;e du passage attaque &rarr; maintien</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -726,6 +769,113 @@ tr:hover td{background:var(--bg2)}
     <div class="btn-row">
       <button class="btn primary" onclick="saveActuator()">Sauvegarder</button>
       <button class="btn" onclick="closeModal('modal-actuator')">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- Wizard Instrument -->
+<div class="modal-overlay" id="modal-wizard">
+  <div class="modal" style="max-width:550px">
+    <h2>Assistant de cr&eacute;ation d'instrument</h2>
+    <div class="wiz-steps" id="wiz-steps">
+      <div class="wiz-step-item active" id="wiz-item-1"><div class="wiz-dot active" id="wiz-dot-1">1</div><div class="wiz-step-label">Identit&eacute;</div></div>
+      <div class="wiz-connector" id="wiz-conn-1"></div>
+      <div class="wiz-step-item" id="wiz-item-2"><div class="wiz-dot" id="wiz-dot-2">2</div><div class="wiz-step-label">Type</div></div>
+      <div class="wiz-connector" id="wiz-conn-2"></div>
+      <div class="wiz-step-item" id="wiz-item-3"><div class="wiz-dot" id="wiz-dot-3">3</div><div class="wiz-step-label">Notes</div></div>
+      <div class="wiz-connector" id="wiz-conn-3"></div>
+      <div class="wiz-step-item" id="wiz-item-4"><div class="wiz-dot" id="wiz-dot-4">4</div><div class="wiz-step-label">Cr&eacute;ation</div></div>
+    </div>
+
+    <!-- Step 1: Identity -->
+    <div id="wiz-step-1" class="wiz-panel">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Identit&eacute; de l'instrument</div>
+      <div class="form-group">
+        <label>Nom</label>
+        <input type="text" id="wiz-name" maxlength="31" placeholder="Ex: Xylophone, Caisse claire...">
+      </div>
+      <div class="form-group">
+        <label>Canal MIDI (0-15)</label>
+        <input type="number" id="wiz-channel" min="0" max="15" value="0">
+        <div class="help">Chaque instrument doit &ecirc;tre sur un canal diff&eacute;rent</div>
+      </div>
+    </div>
+
+    <!-- Step 2: Actuator type -->
+    <div id="wiz-step-2" class="wiz-panel" style="display:none">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Type d'actionneurs</div>
+      <div class="form-group">
+        <label>Type</label>
+        <select id="wiz-type" onchange="wizUpdateBehaviors()">
+          <option value="0">Servo-moteur (mouvement rotatif)</option>
+          <option value="1">Sol&eacute;no&iuml;de (frappe lin&eacute;aire)</option>
+        </select>
+        <div class="help">Tous les actionneurs utiliseront ce type</div>
+      </div>
+      <div class="form-group">
+        <label>Mode de jeu</label>
+        <select id="wiz-behavior"></select>
+        <div class="help">Comportement par d&eacute;faut pour tous les actionneurs</div>
+      </div>
+    </div>
+
+    <!-- Step 3: Notes + PCA -->
+    <div id="wiz-step-3" class="wiz-panel" style="display:none">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Attribution des notes MIDI</div>
+      <div class="form-row tri">
+        <div class="form-group">
+          <label>Actionneurs</label>
+          <input type="number" id="wiz-count" min="1" max="32" value="8" oninput="wizBuildNoteTable()">
+        </div>
+        <div class="form-group">
+          <label>Gamme</label>
+          <select id="wiz-scale" onchange="wizBuildNoteTable()">
+            <option value="chromatic">Chromatique (demi-tons)</option>
+            <option value="major">Majeur (do r&eacute; mi fa sol la si)</option>
+            <option value="pentatonic">Pentatonique (5 notes)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Note de d&eacute;part</label>
+          <input type="number" id="wiz-start-note" min="0" max="127" value="48" oninput="wizBuildNoteTable()">
+          <div class="help">C3=48, C4=60</div>
+        </div>
+      </div>
+      <div class="help" style="margin-bottom:4px">Modifiez chaque note individuellement si n&eacute;cessaire :</div>
+      <div class="wiz-note-table" id="wiz-note-table"></div>
+      <div class="expert-section">
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">R&eacute;glages PCA avanc&eacute;s</button>
+        <div class="expert-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Carte PCA de d&eacute;part</label>
+              <select id="wiz-pca">
+                <option value="64">0x40 (carte 1)</option>
+                <option value="65">0x41 (carte 2)</option>
+                <option value="66">0x42 (carte 3)</option>
+                <option value="67">0x43 (carte 4)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Canal PCA de d&eacute;part</label>
+              <input type="number" id="wiz-start-ch" min="0" max="15" value="0">
+              <div class="help">Auto-incr&eacute;ment&eacute;</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Review -->
+    <div id="wiz-step-4" class="wiz-panel" style="display:none">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">R&eacute;sum&eacute;</div>
+      <div id="wiz-summary" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-size:13px;line-height:1.8"></div>
+    </div>
+
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn" id="wiz-prev" onclick="wizPrev()" style="display:none">&larr; Pr&eacute;c&eacute;dent</button>
+      <button class="btn primary" id="wiz-next" onclick="wizNext()">Suivant &rarr;</button>
+      <button class="btn" onclick="closeModal('modal-wizard')">Annuler</button>
     </div>
   </div>
 </div>
@@ -974,7 +1124,7 @@ tr:hover td{background:var(--bg2)}
 // ============================================================================
 let ws = null;
 let wsConnected = false;
-let currentPage = 'dashboard';
+let currentPage = 'home';
 let instruments = [];
 let actuators = [];
 let routing = [];
@@ -986,6 +1136,11 @@ const SERVO_BEHAVIORS = ['Frappe','Alterné','Gratter','Touche'];
 const SOL_BEHAVIORS = ['Frappe','Hit-and-Hold'];
 const CC_TARGETS = ['Position','Amplitude','Vitesse','PWM Hold'];
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const SCALES = {
+  chromatic:{intervals:[0,1,2,3,4,5,6,7,8,9,10,11]},
+  major:{intervals:[0,2,4,5,7,9,11]},
+  pentatonic:{intervals:[0,2,4,7,9]}
+};
 
 // Log Manager (Phase 9)
 let logCache = [];
@@ -1168,16 +1323,16 @@ function showPage(page) {
   });
 
   // Load data for specific pages
-  if (page === 'instruments') loadInstruments();
-  if (page === 'actuators') loadActuators();
-  if (page === 'midi') { loadMidiConfig(); loadInstrumentSelects().then(() => loadRouting()); }
-  if (page === 'piano') { loadInstrumentSelects(); buildPiano(); }
+  if (page === 'home') { loadHomeInstruments(); loadInstrumentSelects(); buildPiano(); }
+  if (page === 'actuators') { loadActuatorsWithNotes(); }
+  if (page === 'cc') { loadInstrumentSelects(); loadCCRouting(); }
+  if (page === 'dashboard') loadDashboardLog();
   if (page === 'power') loadPower();
   if (page === 'safety') loadSafety();
   if (page === 'calibration') { checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults(); }
   if (page === 'test') { loadTestStatus(); loadTestLog(); populateBurstSelect(); }
   if (page === 'logs') loadLogs();
-  if (page === 'settings') { loadWiFiConfig(); loadBuses(); }
+  if (page === 'settings') { loadWiFiConfig(); loadMidiConfig(); loadBuses(); }
 }
 
 // ============================================================================
@@ -1223,23 +1378,24 @@ function formatUptime(s) {
 }
 
 // ============================================================================
-// Instruments
+// Instruments (Home page)
 // ============================================================================
-async function loadInstruments() {
+async function loadHomeInstruments() {
   instruments = await api('/api/instruments');
-  const tbody = document.getElementById('instruments-table');
+  const tbody = document.getElementById('home-instruments-table');
+  if (!tbody) return;
   if (!instruments || instruments.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--fg2)">Aucun instrument configuré</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">Aucun instrument &mdash; utilisez l\'assistant pour commencer</td></tr>';
     return;
   }
   let html = '';
   for (const inst of instruments) {
+    const busType = inst.bus_id === 0 ? 'Servos' : 'Solénoïdes';
     html += '<tr>';
     html += '<td><strong>' + esc(inst.name) + '</strong></td>';
-    html += '<td>' + inst.channel + '</td>';
-    html += '<td>Bus ' + inst.bus_id + '</td>';
-    html += '<td>' + inst.actuator_count + '</td>';
-    html += '<td>' + inst.latency_ms + ' ms</td>';
+    html += '<td>Ch. ' + inst.channel + '</td>';
+    html += '<td>' + busType + '</td>';
+    html += '<td>' + (inst.actuator_count || 0) + '</td>';
     html += '<td>' + (inst.enabled ? '<span class="badge on">Actif</span>' : '<span class="badge off">Inactif</span>') + '</td>';
     html += '<td><button class="btn sm" onclick="editInstrument(' + inst.index + ')">Éditer</button> ';
     html += '<button class="btn sm" onclick="deleteInstrument(' + inst.index + ')">Suppr</button></td>';
@@ -1289,37 +1445,65 @@ async function saveInstrument() {
   await api('/api/instrument', 'POST', data);
   closeModal('modal-instrument');
   editingInstrumentIdx = -1;
-  loadInstruments();
+  loadHomeInstruments();
 }
 
 async function deleteInstrument(idx) {
   if (!confirm('Supprimer cet instrument?')) return;
   await api('/api/instrument?index=' + idx, 'DELETE');
-  loadInstruments();
+  loadHomeInstruments();
 }
 
 // ============================================================================
-// Actuators
+// Actuators (with MIDI note display)
 // ============================================================================
 async function loadActuators() {
   actuators = await api('/api/actuators');
+}
+
+function buildActNoteMap() {
+  // Build reverse map: actuator_id -> {note, instIdx}
+  const map = {};
+  if (routing) {
+    for (const r of routing) {
+      if (r.notes) {
+        for (const nm of r.notes) {
+          if (nm.enabled) map[nm.actuator] = {note: nm.note, inst: r.instrument};
+        }
+      }
+    }
+  }
+  return map;
+}
+
+async function loadActuatorsWithNotes() {
+  await loadActuators();
+  if (!routing || routing.length === 0) {
+    routing = await api('/api/routing') || [];
+  }
+  const noteMap = buildActNoteMap();
   const tbody = document.getElementById('actuators-table');
   if (!actuators || actuators.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--fg2)">Aucun actionneur configuré</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--fg2)">Aucun actionneur configur&eacute;</td></tr>';
     return;
   }
   let html = '';
   for (const act of actuators) {
     const isServo = act.type === 0;
     const behaviors = isServo ? SERVO_BEHAVIORS : SOL_BEHAVIORS;
+    const nm = noteMap[act.id];
+    const noteStr = nm ? noteName(nm.note) + ' (' + nm.note + ')' : '';
     html += '<tr>';
     html += '<td>' + act.id + '</td>';
-    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Solénoïde</span>') + '</td>';
+    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Sol&eacute;no&iuml;de</span>') + '</td>';
+    html += '<td><input class="note-input" type="number" min="0" max="127" value="' + (nm ? nm.note : '') + '" placeholder="-" '
+      + 'onchange="setActuatorNote(' + act.id + ',this.value)">';
+    if (nm) html += '<span class="note-label">' + noteName(nm.note) + '</span>';
+    html += '</td>';
     html += '<td>Bus ' + act.bus_id + '</td>';
     html += '<td>0x' + act.pca_addr.toString(16).toUpperCase() + '</td>';
     html += '<td>' + act.pca_ch + '</td>';
     html += '<td>' + (behaviors[act.behavior] || '?') + '</td>';
-    html += '<td>' + act.latency_ms + ' ms</td>';
     html += '<td>' + (act.state && act.state.active ? '<span class="badge on">Actif</span>' : '<span class="badge off">Repos</span>') + '</td>';
     html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">Éditer</button> ';
     html += '<button class="btn sm" onclick="testActuator(' + act.id + ')">Test</button> ';
@@ -1327,6 +1511,28 @@ async function loadActuators() {
     html += '</tr>';
   }
   tbody.innerHTML = html;
+}
+
+async function setActuatorNote(actId, noteVal) {
+  const note = parseInt(noteVal);
+  if (isNaN(note) || note < 0 || note > 127) return;
+  // Find which instrument this actuator belongs to (use first, or 0)
+  let instIdx = 0;
+  if (routing) {
+    for (const r of routing) {
+      if (r.notes && r.notes.find(n => n.actuator === actId)) {
+        instIdx = r.instrument;
+        break;
+      }
+    }
+  }
+  // Get current routing for this instrument
+  const r = routing ? routing.find(x => x.instrument === instIdx) : null;
+  let notes = r && r.notes ? r.notes.filter(n => n.actuator !== actId) : [];
+  notes.push({note: note, actuator: actId, enabled: true});
+  await api('/api/routing', 'POST', {instrument: instIdx, notes: notes});
+  routing = await api('/api/routing') || [];
+  loadActuatorsWithNotes();
 }
 
 function toggleActuatorFields() {
@@ -1434,11 +1640,10 @@ async function saveActuator() {
   await api('/api/actuator', 'POST', data);
   closeModal('modal-actuator');
   editingActuatorId = -1;
-  loadActuators();
+  loadActuatorsWithNotes();
 }
 
 async function testActuator(id) {
-  // Note ON puis Note OFF après 500ms
   await api('/api/test/actuator', 'POST', {id: id, velocity: 100, note_on: true});
   setTimeout(() => {
     api('/api/test/actuator', 'POST', {id: id, velocity: 0, note_on: false});
@@ -1448,7 +1653,7 @@ async function testActuator(id) {
 async function deleteActuator(id) {
   if (!confirm('Désactiver cet actionneur?')) return;
   await api('/api/actuator?id=' + id, 'DELETE');
-  loadActuators();
+  loadActuatorsWithNotes();
 }
 
 // ============================================================================
@@ -1480,7 +1685,7 @@ async function loadInstrumentSelects() {
   if (!instruments || instruments.length === 0) {
     instruments = await api('/api/instruments');
   }
-  const selects = ['mapping-instrument', 'piano-instrument'];
+  const selects = ['home-piano-instrument', 'cc-instrument'];
   for (const sid of selects) {
     const sel = document.getElementById(sid);
     if (!sel) continue;
@@ -1499,32 +1704,16 @@ async function loadInstrumentSelects() {
 }
 
 // ============================================================================
-// Routing / Mapping
+// CC Routing (Control Changes only)
 // ============================================================================
-async function loadRouting() {
+async function loadCCRouting() {
   routing = await api('/api/routing');
-  const instIdx = parseInt(document.getElementById('mapping-instrument').value);
+  const sel = document.getElementById('cc-instrument');
+  const instIdx = parseInt(sel ? sel.value : '0');
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
 
-  // Notes table
-  const ntbody = document.getElementById('mapping-notes-table');
-  if (!r || !r.notes || r.notes.length === 0) {
-    ntbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg2)">Aucun mapping note</td></tr>';
-  } else {
-    let html = '';
-    for (const nm of r.notes) {
-      html += '<tr>';
-      html += '<td>' + noteName(nm.note) + ' (' + nm.note + ')</td>';
-      html += '<td>Actionneur #' + nm.actuator + '</td>';
-      html += '<td>' + (nm.enabled ? '<span class="badge on">Oui</span>' : '<span class="badge off">Non</span>') + '</td>';
-      html += '<td><button class="btn sm" onclick="removeNoteMapping(' + instIdx + ',' + nm.note + ')">Suppr</button></td>';
-      html += '</tr>';
-    }
-    ntbody.innerHTML = html;
-  }
-
-  // CC table
   const ctbody = document.getElementById('mapping-cc-table');
+  if (!ctbody) return;
   if (!r || !r.ccs || r.ccs.length === 0) {
     ctbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">Aucun mapping CC</td></tr>';
   } else {
@@ -1542,17 +1731,7 @@ async function loadRouting() {
     ctbody.innerHTML = html;
   }
 
-  // Update piano mapping cache
   updatePianoMapping();
-}
-
-async function removeNoteMapping(instIdx, note) {
-  // Reload routing without this note
-  const r = routing ? routing.find(x => x.instrument === instIdx) : null;
-  if (!r) return;
-  const notes = r.notes.filter(n => n.note !== note);
-  await api('/api/routing', 'POST', { instrument: instIdx, notes: notes });
-  loadRouting();
 }
 
 // ============================================================================
@@ -1613,7 +1792,7 @@ function buildPiano() {
 
 function updatePianoMapping() {
   pianoNotes = {};
-  const instIdx = parseInt(document.getElementById('piano-instrument')?.value || '0');
+  const instIdx = parseInt(document.getElementById('home-piano-instrument')?.value || '0');
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
   if (r && r.notes) {
     for (const nm of r.notes) {
@@ -1654,7 +1833,7 @@ function pianoNoteOff(note) {
 }
 
 function updatePianoActive(activeActuators) {
-  if (currentPage !== 'piano') return;
+  if (currentPage !== 'home') return;
 
   // Reset all active states
   document.querySelectorAll('.piano .active').forEach(k => k.classList.remove('active'));
@@ -2221,6 +2400,219 @@ async function loadDashboardLog() {
 }
 
 // ============================================================================
+// Expert collapsible toggle
+// ============================================================================
+function toggleExpert(btn) {
+  btn.classList.toggle('open');
+  const body = btn.nextElementSibling;
+  if (body) body.classList.toggle('open');
+}
+
+// ============================================================================
+// Instrument Wizard
+// ============================================================================
+let wizStep = 1;
+
+function openWizard() {
+  wizStep = 1;
+  document.getElementById('wiz-name').value = '';
+  document.getElementById('wiz-channel').value = instruments ? instruments.length : 0;
+  document.getElementById('wiz-type').value = '0';
+  wizUpdateBehaviors();
+  document.getElementById('wiz-count').value = '8';
+  document.getElementById('wiz-start-note').value = '48';
+  document.getElementById('wiz-scale').value = 'chromatic';
+  document.getElementById('wiz-note-table').innerHTML = '';
+  document.getElementById('wiz-pca').value = '64';
+  // Auto-detect next free PCA channel
+  let startCh = 0;
+  if (actuators && actuators.length > 0) {
+    const sorted = [...actuators].sort((a,b) =>
+      a.pca_addr !== b.pca_addr ? a.pca_addr - b.pca_addr : a.pca_ch - b.pca_ch);
+    const last = sorted[sorted.length - 1];
+    startCh = last.pca_ch + 1;
+    if (startCh > 15) { startCh = 0; }
+    document.getElementById('wiz-pca').value = last.pca_addr;
+  }
+  document.getElementById('wiz-start-ch').value = startCh;
+  wizShowStep();
+  document.getElementById('modal-wizard').classList.add('show');
+}
+
+function wizUpdateBehaviors() {
+  const type = document.getElementById('wiz-type').value;
+  const sel = document.getElementById('wiz-behavior');
+  sel.innerHTML = '';
+  const behaviors = type === '0'
+    ? [{v:0,t:'Frappe (aller-retour rapide)'},{v:1,t:'Alterné (bascule A/B)'},{v:2,t:'Gratter (mouvement continu)'},{v:3,t:'Touche (maintien appuyé)'}]
+    : [{v:0,t:'Frappe (impulsion courte)'},{v:1,t:'Hit-and-Hold (frappe puis maintien)'}];
+  for (const b of behaviors) {
+    const opt = document.createElement('option');
+    opt.value = b.v;
+    opt.textContent = b.t;
+    sel.appendChild(opt);
+  }
+}
+
+function wizBuildNoteTable() {
+  const count = Math.min(parseInt(document.getElementById('wiz-count').value) || 8, 32);
+  const startNote = parseInt(document.getElementById('wiz-start-note').value) || 48;
+  const scaleKey = document.getElementById('wiz-scale').value;
+  const container = document.getElementById('wiz-note-table');
+  if (!container) return;
+
+  const scale = SCALES[scaleKey];
+  let notes = [];
+  if (scale) {
+    const iv = scale.intervals;
+    let idx = 0, octave = 0;
+    for (let i = 0; i < count; i++) {
+      if (idx >= iv.length) { idx = 0; octave++; }
+      notes.push(Math.min(startNote + octave * 12 + iv[idx], 127));
+      idx++;
+    }
+  } else {
+    for (let i = 0; i < count; i++) notes.push(Math.min(startNote + i, 127));
+  }
+
+  let html = '<table><thead><tr><th style="width:60px">#</th><th style="width:80px">Note</th><th>Nom</th></tr></thead><tbody>';
+  for (let i = 0; i < count; i++) {
+    html += '<tr>';
+    html += '<td>Act ' + i + '</td>';
+    html += '<td><input type="number" min="0" max="127" value="' + notes[i] + '" id="wiz-note-' + i + '" class="note-input" oninput="wizUpdateNoteName(' + i + ')"></td>';
+    html += '<td id="wiz-nname-' + i + '">' + noteName(notes[i]) + '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function wizUpdateNoteName(i) {
+  const input = document.getElementById('wiz-note-' + i);
+  const label = document.getElementById('wiz-nname-' + i);
+  if (input && label) {
+    const n = parseInt(input.value);
+    label.textContent = (n >= 0 && n <= 127) ? noteName(n) : '?';
+  }
+}
+
+function wizShowStep() {
+  for (let i = 1; i <= 4; i++) {
+    document.getElementById('wiz-step-' + i).style.display = i === wizStep ? 'block' : 'none';
+    const dot = document.getElementById('wiz-dot-' + i);
+    dot.className = 'wiz-dot' + (i === wizStep ? ' active' : i < wizStep ? ' done' : '');
+    const item = document.getElementById('wiz-item-' + i);
+    if (item) item.className = 'wiz-step-item' + (i === wizStep ? ' active' : '');
+    const conn = document.getElementById('wiz-conn-' + i);
+    if (conn) conn.className = 'wiz-connector' + (i < wizStep ? ' done' : '');
+  }
+  // Build note table when entering step 3 for the first time
+  if (wizStep === 3 && !document.getElementById('wiz-note-table').querySelector('table')) {
+    wizBuildNoteTable();
+  }
+  document.getElementById('wiz-prev').style.display = wizStep > 1 ? 'inline-flex' : 'none';
+  const nextBtn = document.getElementById('wiz-next');
+  if (wizStep === 4) {
+    nextBtn.textContent = 'Créer';
+    nextBtn.className = 'btn primary';
+    wizBuildSummary();
+  } else {
+    nextBtn.textContent = 'Suivant →';
+    nextBtn.className = 'btn primary';
+  }
+}
+
+function wizBuildSummary() {
+  const name = document.getElementById('wiz-name').value || 'Instrument';
+  const ch = document.getElementById('wiz-channel').value;
+  const type = document.getElementById('wiz-type').value;
+  const typeName = type === '0' ? 'Servo-moteur' : 'Solénoïde';
+  const behavior = document.getElementById('wiz-behavior').selectedOptions[0]?.textContent || '';
+  const count = parseInt(document.getElementById('wiz-count').value);
+  const pca = document.getElementById('wiz-pca').selectedOptions[0]?.textContent || '';
+  const startCh = document.getElementById('wiz-start-ch').value;
+
+  // Read notes from table
+  let noteNames = [];
+  for (let i = 0; i < count; i++) {
+    const inp = document.getElementById('wiz-note-' + i);
+    if (inp) noteNames.push(noteName(parseInt(inp.value)));
+  }
+  const noteStr = noteNames.length <= 12
+    ? noteNames.join(', ')
+    : noteNames.slice(0, 10).join(', ') + ' ... (+' + (noteNames.length - 10) + ')';
+
+  let html = '<strong>' + esc(name) + '</strong> — Canal MIDI ' + ch + '<br>';
+  html += 'Type : <strong>' + typeName + '</strong> — ' + behavior + '<br>';
+  html += count + ' actionneurs<br>';
+  html += 'Notes : ' + noteStr + '<br>';
+  html += 'PCA : ' + pca + ' — Canaux ' + startCh + ' → ' + (parseInt(startCh) + count - 1) + '<br>';
+  html += 'Bus : <strong>' + (type === '0' ? 'Bus 0 (Servos)' : 'Bus 1 (Solénoïdes)') + '</strong>';
+  document.getElementById('wiz-summary').innerHTML = html;
+}
+
+function wizPrev() {
+  if (wizStep > 1) { wizStep--; wizShowStep(); }
+}
+
+async function wizNext() {
+  if (wizStep < 4) { wizStep++; wizShowStep(); return; }
+  // Step 4 → Create everything
+  const name = document.getElementById('wiz-name').value || 'Instrument';
+  const channel = parseInt(document.getElementById('wiz-channel').value);
+  const type = parseInt(document.getElementById('wiz-type').value);
+  const behavior = parseInt(document.getElementById('wiz-behavior').value);
+  const count = parseInt(document.getElementById('wiz-count').value);
+  const startNote = parseInt(document.getElementById('wiz-start-note').value);
+  let pcaAddr = parseInt(document.getElementById('wiz-pca').value);
+  let pcaCh = parseInt(document.getElementById('wiz-start-ch').value);
+  const busId = type === 0 ? 0 : 1;
+
+  // 1. Create instrument
+  const instData = {name, channel, bus_id: busId, latency_ms: 10, auto_cal: false, enabled: true};
+  await api('/api/instrument', 'POST', instData);
+
+  // 2. Create actuators
+  const baseId = actuators ? actuators.length : 0;
+  for (let i = 0; i < count; i++) {
+    const actData = {
+      id: baseId + i, type, bus_id: busId, pca_addr: pcaAddr, pca_ch: pcaCh,
+      latency_ms: 10, behavior, enabled: true
+    };
+    if (type === 0) {
+      actData.angle_init = 90; actData.amplitude = 45; actData.speed_ms = 150; actData.angle_b = 120;
+    } else {
+      actData.pulse_ms = 20; actData.pwm_initial = 4095; actData.pwm_hold = 2048; actData.ramp_ms = 50;
+    }
+    await api('/api/actuator', 'POST', actData);
+    pcaCh++;
+    if (pcaCh > 15) { pcaCh = 0; pcaAddr = Math.min(pcaAddr + 1, 67); }
+  }
+
+  // 3. Create note mappings (read from editable table)
+  instruments = await api('/api/instruments');
+  const instIdx = instruments.length > 0 ? instruments[instruments.length - 1].index : 0;
+  const notes = [];
+  for (let i = 0; i < count; i++) {
+    const noteInput = document.getElementById('wiz-note-' + i);
+    const note = noteInput ? parseInt(noteInput.value) : (startNote + i);
+    if (isNaN(note) || note < 0 || note > 127) continue;
+    notes.push({note, actuator: baseId + i, enabled: true});
+  }
+  await api('/api/routing', 'POST', {instrument: instIdx, notes});
+
+  closeModal('modal-wizard');
+  toast(name + ' créé avec ' + count + ' actionneurs', 'ok');
+
+  // Refresh everything
+  await loadActuators();
+  routing = await api('/api/routing') || [];
+  loadHomeInstruments();
+  loadInstrumentSelects();
+  buildPiano();
+}
+
+// ============================================================================
 // Servo angle visual preview
 // ============================================================================
 function updateAnglePreview() {
@@ -2284,10 +2676,17 @@ async function checkMicStatus() {
 // ============================================================================
 window.addEventListener('load', () => {
   connectWS();
-  // Preload data
-  loadActuators().then(() => { loadInstrumentSelects(); populateBurstSelect(); });
-  api('/api/routing').then(r => { routing = r || []; });
-  loadDashboardLog();
+  // Preload data then show home page
+  loadActuators().then(() => {
+    loadInstrumentSelects();
+    populateBurstSelect();
+    api('/api/routing').then(r => {
+      routing = r || [];
+      // Show home page with instruments + piano
+      loadHomeInstruments();
+      buildPiano();
+    });
+  });
 });
 </script>
 </body>
