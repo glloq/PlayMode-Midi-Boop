@@ -106,7 +106,8 @@ uint8_t WebServer::getClientCount() const { return _ws.count(); }
 void WebServer::setupStaticRoutes() {
     // Page principale (SPA) — taille explicite pour garantir Content-Length correct
     _server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send_P(200, "text/html; charset=UTF-8", WEB_UI_HTML,
+        request->send_P(200, "text/html; charset=UTF-8",
+                        reinterpret_cast<const uint8_t*>(WEB_UI_HTML),
                         sizeof(WEB_UI_HTML) - 1);
     });
 
