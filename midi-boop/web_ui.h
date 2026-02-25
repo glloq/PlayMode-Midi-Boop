@@ -1407,7 +1407,7 @@ async function loadHomeInstruments() {
 function openInstrumentModal() {
   editingInstrumentIdx = -1;
   document.getElementById('mi-name').value = '';
-  document.getElementById('mi-channel').value = instruments ? instruments.length : 0;
+  document.getElementById('mi-channel').value = Math.min(instruments ? instruments.length : 0, 15);
   document.getElementById('mi-bus').value = '0';
   document.getElementById('mi-latency').value = '10';
   document.getElementById('mi-autocal').value = '0';
@@ -1456,8 +1456,10 @@ async function deleteInstrument(idx) {
   if (!confirm('Supprimer cet instrument?')) return;
   await api('/api/instrument?index=' + idx, 'DELETE');
   instruments = [];  // Force refresh
+  routing = await api('/api/routing') || [];
   loadHomeInstruments();
   loadInstrumentSelects();
+  buildPiano();
 }
 
 // ============================================================================
@@ -2587,8 +2589,10 @@ async function wizNext() {
   const instData = {name, channel, bus_id: busId, latency_ms: 10, auto_cal: false, enabled: true};
   await api('/api/instrument', 'POST', instData);
 
-  // 2. Create actuators
-  const baseId = actuators ? actuators.length : 0;
+  // 2. Create actuators — baseId = max(existing IDs) + 1 pour garantir l'unicité
+  const baseId = (actuators && actuators.length > 0)
+    ? Math.max(...actuators.map(a => a.id)) + 1
+    : 0;
   for (let i = 0; i < count; i++) {
     const actData = {
       id: baseId + i, type, bus_id: busId, pca_addr: pcaAddr, pca_ch: pcaCh,

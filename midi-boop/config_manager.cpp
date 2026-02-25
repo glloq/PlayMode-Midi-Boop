@@ -285,6 +285,17 @@ bool ConfigManager::removeInstrument(uint8_t index) {
     }
     _instruments[_instrument_count - 1] = {};
     _instrument_count--;
+
+    // Décaler les routages correspondants et mettre à jour les instrument_index
+    if (index < _routing_count) {
+        for (uint8_t i = index; i < _routing_count - 1; i++) {
+            _routing_configs[i] = _routing_configs[i + 1];
+            _routing_configs[i].instrument_index = i;
+        }
+        _routing_configs[_routing_count - 1] = {};
+        _routing_count--;
+    }
+
     return true;
 }
 
