@@ -188,8 +188,11 @@ void Scheduler::processReadyEvents() {
 
     uint32_t now_us = (uint32_t)esp_timer_get_time();
 
-    // Traiter tous les événements dont le timestamp est passé
-    while (_event_count > 0 && _event_buffer[0].trigger_time_us <= now_us) {
+    // Traiter tous les événements dont le timestamp est passé.
+    // Utilise la soustraction signée pour gérer correctement le débordement uint32_t
+    // (après ~71 min, esp_timer_get_time() tronqué à uint32 repasse à 0).
+    while (_event_count > 0 &&
+           (int32_t)(now_us - _event_buffer[0].trigger_time_us) >= 0) {
         SchedulerEvent& event = _event_buffer[0];
 
         // Trouver l'actionneur cible

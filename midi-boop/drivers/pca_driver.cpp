@@ -6,6 +6,8 @@
 
 PCADriver::PCADriver() : _driver_count(0) {
     memset(_drivers, 0, sizeof(_drivers));
+    _bus_driver_start[0] = 0;
+    _bus_driver_start[1] = 0;
 
     // Configuration bus 0 — Servos
     _buses[0].id = 0;
@@ -76,6 +78,9 @@ uint8_t PCADriver::scanBus(uint8_t bus_id) {
 
     TwoWire& wire = getWire(bus_id);
     _buses[bus_id].pca_count = 0;
+
+    // Mémoriser l'index de départ dans _drivers[] pour ce bus
+    _bus_driver_start[bus_id] = _driver_count;
 
     // Scanner les adresses PCA9685 possibles (0x40 à 0x43 pour 4 PCA)
     for (uint8_t i = 0; i < PCA_MAX_PER_BUS; i++) {
@@ -187,21 +192,17 @@ bool PCADriver::isPCAPresent(uint8_t bus_id, uint8_t address) {
 }
 
 Adafruit_PWMServoDriver* PCADriver::getDriver(uint8_t bus_id, uint8_t pca_address) {
-    // Parcourir tous les drivers pour trouver le bon
-    for (uint8_t i = 0; i < _driver_count; i++) {
-        // On compare par adresse — le driver stocke l'adresse internement
-        // On doit retrouver le driver correspondant au bus + adresse
-        // Pour simplifier, on utilise l'index calculé
-        uint8_t idx = bus_id * PCA_MAX_PER_BUS;
-        for (uint8_t j = 0; j < _buses[bus_id].pca_count; j++) {
-            if (_buses[bus_id].pca_addresses[j] == pca_address) {
-                uint8_t driver_idx = idx + j;
-                if (driver_idx < _driver_count) {
-                    return _drivers[driver_idx];
-                }
+    if (bus_id > 1) return nullptr;
+    // Les drivers de ce bus sont stockés à partir de _bus_driver_start[bus_id]
+    // dans l'ordre de découverte par scanBus() — même ordre que pca_addresses[].
+    uint8_t base = _bus_driver_start[bus_id];
+    for (uint8_t j = 0; j < _buses[bus_id].pca_count; j++) {
+        if (_buses[bus_id].pca_addresses[j] == pca_address) {
+            uint8_t driver_idx = base + j;
+            if (driver_idx < _driver_count) {
+                return _drivers[driver_idx];
             }
         }
-        break; // On n'a besoin que d'un tour
     }
     return nullptr;
 }
