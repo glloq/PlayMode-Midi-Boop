@@ -63,6 +63,62 @@ Calibrator calibrator(scheduler, configManager);
 // --- Objets globaux (Phase 8) ---
 TestManager testManager(scheduler, configManager);
 
+// --- LED Status ---
+enum LedState { LED_OFF, LED_BOOT, LED_AP, LED_STA, LED_ERROR };
+static LedState ledState = LED_BOOT;
+static uint32_t ledLastToggle = 0;
+static bool     ledOn = false;
+
+void ledInit() {
+    pinMode(LED_STATUS_PIN, OUTPUT);
+    digitalWrite(LED_STATUS_PIN, HIGH);
+    ledOn = true;
+}
+
+void ledSet(LedState state) {
+    ledState = state;
+}
+
+void ledUpdate() {
+    uint32_t now = millis();
+    switch (ledState) {
+        case LED_OFF:
+            if (ledOn) { digitalWrite(LED_STATUS_PIN, LOW); ledOn = false; }
+            break;
+        case LED_BOOT:
+            // Clignotement rapide 100ms
+            if (now - ledLastToggle >= 100) {
+                ledLastToggle = now;
+                ledOn = !ledOn;
+                digitalWrite(LED_STATUS_PIN, ledOn ? HIGH : LOW);
+            }
+            break;
+        case LED_AP:
+            // Clignotement lent 500ms (mode AP, en attente de config)
+            if (now - ledLastToggle >= 500) {
+                ledLastToggle = now;
+                ledOn = !ledOn;
+                digitalWrite(LED_STATUS_PIN, ledOn ? HIGH : LOW);
+            }
+            break;
+        case LED_STA:
+            // Allumé fixe (connecté en STA)
+            if (!ledOn) { digitalWrite(LED_STATUS_PIN, HIGH); ledOn = true; }
+            break;
+        case LED_ERROR:
+            // Double flash rapide toutes les 2s
+            {
+                uint32_t phase = now % 2000;
+                bool on = (phase < 100) || (phase >= 200 && phase < 300);
+                if (on != ledOn) {
+                    ledOn = on;
+                    digitalWrite(LED_STATUS_PIN, ledOn ? HIGH : LOW);
+                }
+            }
+            break;
+    }
+}
+
 // --- Mode test (décommenter pour activer le test harness sans MIDI) ---
 // #define ENABLE_TEST_HARNESS
 
@@ -75,6 +131,9 @@ void runTestSequence();
 // SETUP — Initialisation
 // ============================================================================
 void setup() {
+    // LED : clignotement rapide pendant le boot
+    ledInit();
+
     Serial.begin(SERIAL_BAUD_RATE);
     delay(1000);  // Attendre la stabilisation du port série
 
@@ -144,36 +203,41 @@ void setup() {
         logger.log(LOG_INFO, CAT_SCHED, "Scheduler démarré sur Core 1");
     }
 
-    // 7. Initialiser le WiFi Manager
+    // 7. Initialiser le WiFi — TOUJOURS démarrer au moins en AP
     Serial.println("\n[INIT] WiFi Manager...");
-    WiFiConfig* wifiCfg = configManager.getWiFiConfig();
-    if (wifiCfg->enabled) {
-        if (wifiManager.begin(*wifiCfg)) {
-            Serial.printf("[INIT] WiFi connecté : %s\n", wifiManager.getIP().toString().c_str());
-            logger.log(LOG_INFO, CAT_SYSTEM, "WiFi connecté : %s",
-                       wifiManager.getIP().toString().c_str());
-        } else {
-            Serial.println("[INIT] ATTENTION : WiFi non disponible");
-            logger.log(LOG_WARN, CAT_SYSTEM, "WiFi non disponible (AP fallback)");
+    {
+        WiFiConfig* wifiCfg = configManager.getWiFiConfig();
+
+        // Forcer enabled + ap_fallback pour garantir l'accès web
+        wifiCfg->enabled     = true;
+        wifiCfg->ap_fallback = true;
+        if (wifiCfg->hostname[0] == '\0') {
+            strlcpy(wifiCfg->hostname, WIFI_DEFAULT_HOSTNAME, sizeof(wifiCfg->hostname));
         }
-    } else {
-        // WiFi désactivé en config : démarrer quand même un AP de configuration
-        // afin que l'interface web reste toujours accessible pour reconfigurer.
-        Serial.println("[INIT] WiFi désactivé — démarrage AP de configuration");
-        WiFiConfig apCfg = {};
-        apCfg.enabled    = true;
-        apCfg.ap_fallback = true;
-        apCfg.ssid[0]   = '\0';   // SSID vide → aller directement en mode AP
-        strlcpy(apCfg.hostname,
-                wifiCfg->hostname[0] ? wifiCfg->hostname : WIFI_DEFAULT_HOSTNAME,
-                sizeof(apCfg.hostname));
-        if (wifiManager.begin(apCfg) && wifiManager.isAP()) {
-            Serial.printf("[INIT] AP config : http://%s\n",
-                          wifiManager.getIP().toString().c_str());
-            logger.log(LOG_INFO, CAT_SYSTEM, "AP config http://%s",
-                       wifiManager.getIP().toString().c_str());
+        // Nettoyer l'ancien SSID par défaut "MidiBoop" (placeholder, pas un vrai réseau)
+        if (strcmp(wifiCfg->ssid, "MidiBoop") == 0) {
+            wifiCfg->ssid[0] = '\0';
+            Serial.println("[INIT] SSID placeholder détecté — passage direct en AP");
+        }
+
+        if (wifiManager.begin(*wifiCfg)) {
+            if (wifiManager.isAP()) {
+                Serial.printf("[INIT] Mode AP : http://%s\n",
+                              wifiManager.getIP().toString().c_str());
+                logger.log(LOG_INFO, CAT_SYSTEM, "Mode AP : http://%s",
+                           wifiManager.getIP().toString().c_str());
+                ledSet(LED_AP);
+            } else {
+                Serial.printf("[INIT] WiFi connecté : %s\n",
+                              wifiManager.getIP().toString().c_str());
+                logger.log(LOG_INFO, CAT_SYSTEM, "WiFi STA : %s",
+                           wifiManager.getIP().toString().c_str());
+                ledSet(LED_STA);
+            }
         } else {
-            logger.log(LOG_WARN, CAT_SYSTEM, "WiFi désactivé et AP non disponible");
+            Serial.println("[INIT] ERREUR : WiFi non disponible");
+            logger.log(LOG_ERROR, CAT_SYSTEM, "WiFi non disponible");
+            ledSet(LED_ERROR);
         }
     }
 
@@ -243,6 +307,7 @@ void setup() {
     Serial.println("\n========================================");
     Serial.println("  Initialisation terminée — Phase 9");
     Serial.printf("  Heap libre : %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("  Mode : %s\n", wifiManager.isAP() ? "AP (hotspot)" : "STA (WiFi)");
     Serial.println("========================================\n");
 
     logger.log(LOG_INFO, CAT_SYSTEM, "Init terminée — heap libre: %d bytes",
@@ -258,7 +323,10 @@ void setup() {
 // LOOP — Core 0 : Pipeline MIDI + Power Manager + Web Server
 // ============================================================================
 void loop() {
-    // 1. Maintenance WiFi (reconnexion si nécessaire)
+    // 0. LED status
+    ledUpdate();
+
+    // 1. Maintenance WiFi (reconnexion + DNS captive portal en AP)
     wifiManager.maintain();
 
     // 2. Lire les entrées MIDI (remplit le jitter buffer)
@@ -305,8 +373,10 @@ void loop() {
             if (cur_wifi) {
                 logger.log(LOG_INFO, CAT_SYSTEM, "WiFi reconnecté : %s",
                            WiFi.localIP().toString().c_str());
+                ledSet(LED_STA);
             } else {
                 logger.log(LOG_WARN, CAT_SYSTEM, "WiFi déconnecté");
+                if (wifiManager.isAP()) ledSet(LED_AP);
             }
             last_wifi = cur_wifi;
         }

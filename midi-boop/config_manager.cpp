@@ -455,10 +455,10 @@ void ConfigManager::serializeWiFi(const WiFiConfig& wifi, JsonObject& obj) {
 }
 
 void ConfigManager::deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj) {
-    strlcpy(wifi.ssid, obj["ssid"] | "MidiBoop", sizeof(wifi.ssid));
-    strlcpy(wifi.password, obj["password"] | "midiboop", sizeof(wifi.password));
+    strlcpy(wifi.ssid, obj["ssid"] | "", sizeof(wifi.ssid));
+    strlcpy(wifi.password, obj["password"] | "", sizeof(wifi.password));
     strlcpy(wifi.hostname, obj["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(wifi.hostname));
-    wifi.enabled = obj["enabled"] | false;
+    wifi.enabled = obj["enabled"] | true;
     wifi.ap_fallback = obj["ap_fallback"] | WIFI_AP_FALLBACK;
 }
 

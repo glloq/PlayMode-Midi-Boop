@@ -101,6 +101,9 @@
 // --- MIDI Note Mapping ---
 #define MIDI_NOTE_UNMAPPED       0xFF    // Valeur sentinelle pour note non mappée
 
+// --- LED Status ---
+#define LED_STATUS_PIN          2       // GPIO 2 — LED intégrée ESP32
+
 // --- Série ---
 #define SERIAL_BAUD_RATE        115200
 

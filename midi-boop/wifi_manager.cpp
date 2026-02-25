@@ -19,16 +19,18 @@ bool WiFiManager::begin(const WiFiConfig& config, uint32_t timeout_ms) {
         return false;
     }
 
-    // Tenter la connexion en mode STA
+    // Tenter la connexion en mode STA uniquement si un SSID est configuré
     if (strlen(_config.ssid) > 0) {
         if (connectSTA(timeout_ms)) {
             startMDNS();
             return true;
         }
+    } else {
+        Serial.println("[WIFI] Aucun SSID configuré — passage en mode AP");
     }
 
-    // Fallback en mode AP
-    if (_config.ap_fallback) {
+    // Fallback en mode AP (ou AP direct si pas de SSID)
+    if (_config.ap_fallback || strlen(_config.ssid) == 0) {
         if (startAP()) {
             startMDNS();
             return true;
@@ -55,7 +57,13 @@ IPAddress WiFiManager::getIP() const {
 }
 
 void WiFiManager::maintain() {
-    if (_ap_mode || !_config.enabled) {
+    // En mode AP : traiter les requêtes DNS captive portal
+    if (_ap_mode) {
+        _dns.processNextRequest();
+        return;
+    }
+
+    if (!_config.enabled) {
         return;
     }
 
@@ -85,6 +93,9 @@ int8_t WiFiManager::getRSSI() const {
 }
 
 void WiFiManager::stop() {
+    if (_ap_mode) {
+        _dns.stop();
+    }
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     _connected = false;
@@ -122,7 +133,7 @@ bool WiFiManager::connectSTA(uint32_t timeout_ms) {
 }
 
 // ============================================================================
-// Mode AP (fallback)
+// Mode AP (fallback) + Captive Portal DNS
 // ============================================================================
 bool WiFiManager::startAP() {
     Serial.printf("[WIFI] Démarrage AP '%s'...\n", _config.hostname);
@@ -133,7 +144,13 @@ bool WiFiManager::startAP() {
     if (result) {
         _ap_mode = true;
         _connected = false;
-        Serial.printf("[WIFI] AP démarré — IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+        // Démarrer serveur DNS : redirige TOUTES les requêtes DNS vers l'IP AP.
+        // Cela force les téléphones à ouvrir le portail captif automatiquement.
+        _dns.start(53, "*", WiFi.softAPIP());
+
+        Serial.printf("[WIFI] AP démarré — IP: %s  (DNS captive portal actif)\n",
+                      WiFi.softAPIP().toString().c_str());
     } else {
         Serial.println("[WIFI] Échec démarrage AP");
     }

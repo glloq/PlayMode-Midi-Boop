@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <DNSServer.h>
 #include "config.h"
 #include "midi_types.h"
 
@@ -44,6 +45,7 @@ private:
     bool _connected;
     bool _ap_mode;
     uint32_t _last_reconnect_attempt;
+    DNSServer _dns;
 
     bool connectSTA(uint32_t timeout_ms);
     bool startAP();
