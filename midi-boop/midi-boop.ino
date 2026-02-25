@@ -226,9 +226,9 @@ void setup() {
         logger.log(LOG_ERROR, CAT_SYSTEM, "Web Server : echec démarrage");
     } else {
         Serial.printf("[INIT] Web UI accessible sur http://%s:%d\n",
-                      WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
+                      wifiManager.getIP().toString().c_str(), WEB_SERVER_PORT);
         logger.log(LOG_INFO, CAT_SYSTEM, "Web UI sur http://%s:%d",
-                   WiFi.localIP().toString().c_str(), WEB_SERVER_PORT);
+                   wifiManager.getIP().toString().c_str(), WEB_SERVER_PORT);
     }
 
     // 12. Initialiser le Calibrateur Acoustique (Phase 7)
