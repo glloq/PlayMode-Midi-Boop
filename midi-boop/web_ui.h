@@ -512,47 +512,8 @@ tr:hover td{background:var(--bg2)}
   </div>
   <div id="log-count-info" style="color:var(--fg2);font-size:12px;margin-top:6px;text-align:right"></div>
 
-  <!-- Config -->
-  <div class="section-title" style="margin-top:24px">Configuration</div>
-  <div class="btn-row">
-    <button class="btn primary" onclick="saveConfig()">Sauvegarder sur flash</button>
-    <button class="btn danger" onclick="if(confirm('Remettre les d&eacute;fauts?'))resetDefaults()">R&eacute;initialiser</button>
-  </div>
-  <div class="sub" style="margin-top:8px">Version config: <span id="set-version">-</span></div>
-</div>
-
-<!-- ============ MIDI (Transports + WiFi + Routage) ============ -->
-<div class="page" id="page-midi">
-  <div class="section-title">Transports MIDI</div>
-  <div class="cards" style="margin-bottom:16px">
-    <div class="card">
-      <h3>Serial MIDI</h3>
-      <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">GPIO <span id="midi-rx-pin">4</span> @ 31250 baud</div>
-    </div>
-    <div class="card">
-      <h3>UDP MIDI</h3>
-      <label><input type="checkbox" id="midi-udp" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Port: <span id="midi-udp-port">5004</span></div>
-    </div>
-    <div class="card">
-      <h3>RTP-MIDI</h3>
-      <label><input type="checkbox" id="midi-rtp" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Port: <span id="midi-rtp-port">5004</span></div>
-    </div>
-    <div class="card">
-      <h3>Jitter Buffer</h3>
-      <div class="val"><span id="midi-jitter-val">30</span><span class="unit">ms</span></div>
-      <input type="range" id="midi-jitter" min="10" max="80" value="30" style="width:100%;margin-top:8px"
-        oninput="document.getElementById('midi-jitter-val').textContent=this.value"
-        onchange="updateMidiConfig()">
-      <div class="help">Tampon anti-gigue pour le r&eacute;seau</div>
-    </div>
-  </div>
-
-  <!-- WiFi (n&eacute;cessaire pour MIDI r&eacute;seau) -->
+  <!-- WiFi -->
   <div class="section-title" style="margin-top:24px">Connexion WiFi</div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">N&eacute;cessaire pour le MIDI via UDP et RTP-MIDI.</p>
   <div class="form-row">
     <div class="form-group">
       <label>SSID du r&eacute;seau</label>
@@ -579,7 +540,7 @@ tr:hover td{background:var(--bg2)}
   </div>
   <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
 
-  <!-- Bus I&sup2;C (section avanc&eacute;e) -->
+  <!-- Bus I&sup2;C -->
   <div class="section-collapse" style="margin-top:24px">
     <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
       <span>Bus I&sup2;C (avanc&eacute;)</span>
@@ -594,6 +555,63 @@ tr:hover td{background:var(--bg2)}
       <button class="btn" onclick="scanI2C()">Scanner bus I&sup2;C</button>
     </div>
   </div>
+
+  <!-- Config -->
+  <div class="section-title" style="margin-top:24px">Configuration</div>
+  <div class="btn-row">
+    <button class="btn primary" onclick="saveConfig()">Sauvegarder sur flash</button>
+    <button class="btn danger" onclick="if(confirm('Remettre les d&eacute;fauts?'))resetDefaults()">R&eacute;initialiser</button>
+  </div>
+  <div class="sub" style="margin-top:8px">Version config: <span id="set-version">-</span></div>
+</div>
+
+<!-- ============ MIDI (Entr&eacute;es MIDI + Messages re&ccedil;us) ============ -->
+<div class="page" id="page-midi">
+  <div class="section-title">Entr&eacute;es MIDI</div>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Choisissez comment Midi B&infin;p re&ccedil;oit les messages MIDI. Plusieurs entr&eacute;es peuvent &ecirc;tre actives en m&ecirc;me temps.</p>
+  <div class="cards" style="margin-bottom:16px">
+    <div class="card">
+      <h3>C&acirc;ble MIDI (DIN / TRS)</h3>
+      <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Actif</label>
+      <div class="sub">Connexion filaire classique via prise MIDI 5 broches ou jack TRS.</div>
+      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">GPIO <span id="midi-rx-pin">4</span> &mdash; 31250 baud</div>
+    </div>
+    <div class="card">
+      <h3>WiFi &mdash; envoi direct (UDP)</h3>
+      <label><input type="checkbox" id="midi-udp" onchange="updateMidiConfig()"> Actif</label>
+      <div class="sub">Envoyer des messages MIDI depuis un logiciel vers l'IP de Midi B&infin;p. Simple mais sans synchronisation.</div>
+      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-udp-port">5004</span> &mdash; N&eacute;cessite WiFi</div>
+    </div>
+    <div class="card">
+      <h3>WiFi &mdash; Apple / RTP-MIDI</h3>
+      <label><input type="checkbox" id="midi-rtp" onchange="updateMidiConfig()"> Actif</label>
+      <div class="sub">Compatible macOS, iOS, rtpMIDI (Windows). Appara&icirc;t automatiquement dans les logiciels MIDI. Synchronis&eacute;.</div>
+      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-rtp-port">5004</span> &mdash; N&eacute;cessite WiFi</div>
+    </div>
+    <div class="card">
+      <h3>Jitter Buffer</h3>
+      <div class="val"><span id="midi-jitter-val">30</span><span class="unit">ms</span></div>
+      <input type="range" id="midi-jitter" min="10" max="80" value="30" style="width:100%;margin-top:8px"
+        oninput="document.getElementById('midi-jitter-val').textContent=this.value"
+        onchange="updateMidiConfig()">
+      <div class="help">Tampon anti-gigue pour le MIDI r&eacute;seau (UDP / RTP). Augmentez si les notes arrivent dans le d&eacute;sordre.</div>
+    </div>
+  </div>
+
+  <!-- Derniers messages MIDI re&ccedil;us -->
+  <div class="section-title" style="margin-top:24px"><span>Messages MIDI re&ccedil;us</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;color:var(--fg2)"><input type="checkbox" id="midi-log-pause"> Pause</label>
+      <button class="btn sm" onclick="clearMidiLog()">Effacer</button>
+    </div>
+  </div>
+  <div class="table-responsive" style="max-height:320px;overflow-y:auto" id="midi-log-scroll">
+  <table>
+    <thead><tr><th style="width:70px">Temps</th><th>Source</th><th>Canal</th><th>Type</th><th>Donn&eacute;es</th><th>Rout&eacute;</th></tr></thead>
+    <tbody id="midi-log-table"><tr><td colspan="6" style="color:var(--fg2)">En attente de messages MIDI...</td></tr></tbody>
+  </table>
+  </div>
+  <div id="midi-log-count" style="color:var(--fg2);font-size:11px;margin-top:4px;text-align:right"></div>
 </div>
 
 <!-- (Config is now in the unified Settings page) -->
@@ -1062,6 +1080,9 @@ function connectWS() {
     try {
       const d = JSON.parse(evt.data);
       updateDashboard(d);
+      // MIDI messages received via WebSocket
+      if (d.midi_msg) pushMidiLog(d.midi_msg);
+      if (d.midi_msgs) for (const m of d.midi_msgs) pushMidiLog(m);
       // Refresh logs si nouvelles entrées détectées
       if (d.log_count !== undefined && d.log_count !== logLastCount) {
         logLastCount = d.log_count;
@@ -1205,13 +1226,13 @@ function showPage(page) {
   if (page === 'instrument') {
     loadHomeInstruments(); loadInstrumentSelects(); buildAllPianos();
   }
-  if (page === 'midi') { loadWiFiConfig(); loadMidiConfig(); loadBuses(); }
+  if (page === 'midi') { loadMidiConfig(); }
   if (page === 'calibration') {
     loadActuatorsWithNotes(); loadInstrumentSelects(); loadCCRouting();
     checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults();
   }
   if (page === 'settings') {
-    loadPower(); loadSafety(); loadLogs();
+    loadPower(); loadSafety(); loadLogs(); loadWiFiConfig(); loadBuses();
   }
 }
 
@@ -1572,6 +1593,66 @@ async function updateMidiConfig() {
     rtp_enabled: document.getElementById('midi-rtp').checked,
     jitter_buffer_ms: parseInt(document.getElementById('midi-jitter').value)
   });
+}
+
+// ============================================================================
+// MIDI Message Log (last 50 messages, fed by WebSocket)
+// ============================================================================
+const MIDI_LOG_MAX = 50;
+let midiLogEntries = [];
+const MIDI_TYPE_NAMES = {
+  0x80:'Note Off', 0x90:'Note On', 0xA0:'Aftertouch', 0xB0:'CC',
+  0xC0:'Program', 0xD0:'Ch Pressure', 0xE0:'Pitch Bend'
+};
+const MIDI_SOURCE_NAMES = {serial:'C\u00e2ble', udp:'UDP', rtp:'RTP'};
+
+function formatMidiData(m) {
+  const t = m.type & 0xF0;
+  if (t === 0x90 || t === 0x80) return noteName(m.d1) + ' (' + m.d1 + ') v=' + m.d2;
+  if (t === 0xB0) return 'CC' + m.d1 + ' = ' + m.d2;
+  if (t === 0xC0) return 'Prog ' + m.d1;
+  if (t === 0xE0) return '' + ((m.d2 << 7 | m.d1) - 8192);
+  return m.d1 + (m.d2 !== undefined ? ', ' + m.d2 : '');
+}
+
+function pushMidiLog(m) {
+  if (document.getElementById('midi-log-pause')?.checked) return;
+  midiLogEntries.push(m);
+  if (midiLogEntries.length > MIDI_LOG_MAX) midiLogEntries.shift();
+  renderMidiLog();
+}
+
+function renderMidiLog() {
+  const tbody = document.getElementById('midi-log-table');
+  if (!tbody) return;
+  if (midiLogEntries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">En attente de messages MIDI...</td></tr>';
+    return;
+  }
+  let html = '';
+  for (let i = midiLogEntries.length - 1; i >= 0; i--) {
+    const m = midiLogEntries[i];
+    const typeName = MIDI_TYPE_NAMES[m.type & 0xF0] || '0x' + m.type.toString(16);
+    const ch = (m.type & 0x0F) + 1;
+    const src = MIDI_SOURCE_NAMES[m.src] || m.src || '?';
+    const routed = m.routed ? '<span class="badge on">Oui</span>' : '<span class="badge off">Non</span>';
+    html += '<tr>';
+    html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap">' + formatLogTime(m.t || 0) + '</td>';
+    html += '<td>' + src + '</td>';
+    html += '<td>' + ch + '</td>';
+    html += '<td>' + typeName + '</td>';
+    html += '<td>' + formatMidiData(m) + '</td>';
+    html += '<td>' + routed + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+  const info = document.getElementById('midi-log-count');
+  if (info) info.textContent = midiLogEntries.length + ' / ' + MIDI_LOG_MAX + ' messages';
+}
+
+function clearMidiLog() {
+  midiLogEntries = [];
+  renderMidiLog();
 }
 
 async function loadInstrumentSelects() {
