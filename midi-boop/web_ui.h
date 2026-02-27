@@ -243,6 +243,33 @@ tr:hover td{background:var(--bg2)}
 .wiz-note-table table{margin:0}
 .wiz-note-table td{padding:4px 8px;font-size:12px}
 .wiz-note-table th{padding:4px 8px;position:sticky;top:0;z-index:1}
+
+/* Welcome page (first-run) */
+.welcome{text-align:center;padding:40px 20px;max-width:600px;margin:0 auto}
+.welcome h2{font-size:28px;font-weight:700;margin-bottom:8px}
+.welcome h2 span{color:var(--accent)}
+.welcome .subtitle{color:var(--fg2);font-size:15px;margin-bottom:36px;line-height:1.6}
+.welcome-steps{display:flex;gap:20px;justify-content:center;margin-bottom:36px;flex-wrap:wrap}
+.welcome-step{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px 16px;flex:1;min-width:150px;max-width:180px}
+.welcome-step .step-num{width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;
+  display:inline-flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;margin-bottom:10px}
+.welcome-step h3{font-size:14px;font-weight:600;margin-bottom:4px}
+.welcome-step p{font-size:12px;color:var(--fg2);line-height:1.4}
+.welcome .btn-big{padding:14px 32px;font-size:16px;font-weight:600;min-height:52px;border-radius:8px}
+
+/* Collapsible sections for merged content */
+.section-collapse{margin:20px 0}
+.section-collapse-toggle{background:var(--bg2);border:1px solid var(--border);color:var(--fg);
+  padding:12px 16px;border-radius:var(--radius);cursor:pointer;font-size:14px;font-weight:600;
+  width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;
+  transition:all .15s}
+.section-collapse-toggle:hover{background:var(--bg3);border-color:var(--fg2)}
+.section-collapse-toggle .toggle-count{font-size:12px;color:var(--fg2);font-weight:400}
+.section-collapse-toggle::after{content:'\25B6';font-size:11px;color:var(--fg2);transition:transform .2s}
+.section-collapse-toggle.open::after{transform:rotate(90deg)}
+.section-collapse-body{display:none;padding:16px 0 0}
+.section-collapse-body.open{display:block}
 </style>
 </head>
 <body>
@@ -263,22 +290,48 @@ tr:hover td{background:var(--bg2)}
       <button onclick="showPage('power');closeSettingsMenu()">Power<span class="sdesc">Budget et consommation</span></button>
       <button onclick="showPage('safety');closeSettingsMenu()">Safety<span class="sdesc">Limites de s&eacute;curit&eacute;</span></button>
       <button onclick="showPage('logs');closeSettingsMenu()">Logs<span class="sdesc">Journal syst&egrave;me</span></button>
-      <button onclick="showPage('settings');closeSettingsMenu()">Param&egrave;tres<span class="sdesc">WiFi, MIDI, bus I&sup2;C, config</span></button>
+      <button onclick="showPage('config');closeSettingsMenu()">Configuration<span class="sdesc">Sauvegarde, r&eacute;initialisation</span></button>
     </div>
   </div>
 </div>
 
 <!-- Navigation -->
-<nav>
-  <button class="active" onclick="showPage('home')">Accueil</button>
-  <button onclick="showPage('actuators')">Actionneurs</button>
-  <button onclick="showPage('cc')">CC Mapping</button>
+<nav id="main-nav">
+  <button class="active" onclick="showPage('instrument')">Instrument</button>
+  <button onclick="showPage('midi')">MIDI</button>
   <button onclick="showPage('calibration')">Calibration</button>
-  <button onclick="showPage('test')">Test</button>
 </nav>
 
-<!-- ============ HOME (Instruments + Piano) ============ -->
-<div class="page active" id="page-home">
+<!-- ============ WELCOME (First-run) ============ -->
+<div class="page" id="page-welcome">
+  <div class="welcome">
+    <h2>Bienvenue sur Midi <span>B&infin;p</span></h2>
+    <p class="subtitle">Transformez n'importe quel objet en instrument de musique MIDI.<br>
+    Servos, sol&eacute;no&iuml;des, percussions... tout est possible.</p>
+    <div class="welcome-steps">
+      <div class="welcome-step">
+        <div class="step-num">1</div>
+        <h3>Cr&eacute;er</h3>
+        <p>D&eacute;finissez votre instrument et ses actionneurs</p>
+      </div>
+      <div class="welcome-step">
+        <div class="step-num">2</div>
+        <h3>Connecter</h3>
+        <p>Branchez vos servos ou sol&eacute;no&iuml;des via PCA9685</p>
+      </div>
+      <div class="welcome-step">
+        <div class="step-num">3</div>
+        <h3>Jouer</h3>
+        <p>Envoyez du MIDI et laissez la musique op&eacute;rer</p>
+      </div>
+    </div>
+    <button class="btn primary btn-big" onclick="openWizard()">Cr&eacute;er mon premier instrument</button>
+    <p style="color:var(--fg2);font-size:12px;margin-top:16px">Ou <a href="#" onclick="showPage('instrument');return false">passer &agrave; la configuration manuelle</a></p>
+  </div>
+</div>
+
+<!-- ============ INSTRUMENT (Instruments + Piano + Actionneurs + CC) ============ -->
+<div class="page active" id="page-instrument">
   <div id="alert-zone"></div>
 
   <div class="section-title"><span>Mes instruments</span>
@@ -303,6 +356,43 @@ tr:hover td{background:var(--bg2)}
   </div>
   <div style="margin-top:8px">
     <div id="piano-active" style="color:var(--fg2);font-size:13px">Notes actives : aucune</div>
+  </div>
+
+  <!-- Actionneurs (section d&eacute;pliable) -->
+  <div class="section-collapse" style="margin-top:20px">
+    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
+      <span>Actionneurs <span class="toggle-count" id="act-count-badge"></span></span>
+    </button>
+    <div class="section-collapse-body">
+      <div style="margin-bottom:12px">
+        <button class="btn primary sm" onclick="openActuatorModal()">+ Ajouter un actionneur</button>
+      </div>
+      <div class="table-responsive">
+      <table>
+        <thead><tr><th>ID</th><th>Type</th><th>Note MIDI</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>&Eacute;tat</th><th>Actions</th></tr></thead>
+        <tbody id="actuators-table"><tr><td colspan="9" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- CC Mapping (section d&eacute;pliable) -->
+  <div class="section-collapse">
+    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
+      <span>Control Changes (CC) <span class="toggle-count" id="cc-count-badge"></span></span>
+    </button>
+    <div class="section-collapse-body">
+      <div style="margin-bottom:12px">
+        <select id="cc-instrument" onchange="loadCCRouting()" class="form-select"></select>
+      </div>
+      <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Les CC permettent de contr&ocirc;ler en continu un param&egrave;tre d'un actionneur (position, amplitude, vitesse...).</p>
+      <div class="table-responsive">
+      <table>
+        <thead><tr><th>CC#</th><th>Actionneur</th><th>Cible</th><th>Min</th><th>Max</th><th>Actif</th></tr></thead>
+        <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
+      </table>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -369,32 +459,7 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
-<!-- ============ ACTUATORS ============ -->
-<div class="page" id="page-actuators">
-  <div class="section-title"><span>Actionneurs</span>
-    <button class="btn primary sm" onclick="openActuatorModal()">+ Ajouter</button>
-  </div>
-  <div class="table-responsive">
-  <table>
-    <thead><tr><th>ID</th><th>Type</th><th>Note MIDI</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>&Eacute;tat</th><th>Actions</th></tr></thead>
-    <tbody id="actuators-table"><tr><td colspan="9" style="color:var(--fg2)">Chargement...</td></tr></tbody>
-  </table>
-  </div>
-</div>
-
-<!-- ============ CC MAPPING ============ -->
-<div class="page" id="page-cc">
-  <div class="section-title"><span>Control Changes (CC)</span>
-    <select id="cc-instrument" onchange="loadCCRouting()" class="form-select"></select>
-  </div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Les CC permettent de contr&ocirc;ler en continu un param&egrave;tre d'un actionneur (position, amplitude, vitesse...).</p>
-  <div class="table-responsive">
-  <table>
-    <thead><tr><th>CC#</th><th>Actionneur</th><th>Cible</th><th>Min</th><th>Max</th><th>Actif</th></tr></thead>
-    <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
-  </table>
-  </div>
-</div>
+<!-- (Actuators and CC Mapping are now integrated in the Instrument page above) -->
 
 <!-- ============ POWER ============ -->
 <div class="page" id="page-power">
@@ -517,41 +582,9 @@ tr:hover td{background:var(--bg2)}
   <button class="btn primary" onclick="saveSafetyConfig()">Appliquer</button>
 </div>
 
-<!-- ============ SETTINGS ============ -->
-<div class="page" id="page-settings">
-  <div class="section-title">WiFi</div>
-  <div class="form-row">
-    <div class="form-group">
-      <label>SSID du r&eacute;seau</label>
-      <input type="text" id="set-ssid" maxlength="32" placeholder="Nom du WiFi">
-      <div class="help">R&eacute;seau WiFi auquel l'ESP32 se connecte</div>
-    </div>
-    <div class="form-group">
-      <label>Mot de passe</label>
-      <input type="password" id="set-pass" maxlength="64">
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label>Hostname</label>
-      <input type="text" id="set-hostname" value="midi-boop" maxlength="31">
-      <div class="help">Nom r&eacute;seau de l'appareil (accessible via hostname.local)</div>
-    </div>
-    <div class="form-group">
-      <label>AP Fallback</label>
-      <select id="set-ap-fallback">
-        <option value="1">Oui</option>
-        <option value="0">Non</option>
-      </select>
-      <div class="help">Cr&eacute;e un point d'acc&egrave;s si le WiFi &eacute;choue</div>
-    </div>
-  </div>
-  <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
-
-  <div class="expert-section" style="margin-top:24px">
-    <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Transport MIDI &amp; Bus I&sup2;C (avanc&eacute;)</button>
-    <div class="expert-body">
-  <div class="section-title">Transport MIDI</div>
+<!-- ============ MIDI (Transports + WiFi + Routage) ============ -->
+<div class="page" id="page-midi">
+  <div class="section-title">Transports MIDI</div>
   <div class="cards" style="margin-bottom:16px">
     <div class="card">
       <h3>Serial MIDI</h3>
@@ -578,21 +611,58 @@ tr:hover td{background:var(--bg2)}
     </div>
   </div>
 
-  <div class="section-title" style="margin-top:24px">Bus I&sup2;C</div>
-  <div class="table-responsive">
-  <table>
-    <thead><tr><th>Bus</th><th>SDA</th><th>SCL</th><th>OE</th><th>Freq I²C</th><th>Freq PWM</th><th>PCA détectés</th><th>Actions</th></tr></thead>
-    <tbody id="buses-table"><tr><td colspan="8" style="color:var(--fg2)">Chargement...</td></tr></tbody>
-  </table>
-  </div>
-  <button class="btn" onclick="scanI2C()">Scanner bus I²C</button>
+  <!-- WiFi (n&eacute;cessaire pour MIDI r&eacute;seau) -->
+  <div class="section-title" style="margin-top:24px">Connexion WiFi</div>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">N&eacute;cessaire pour le MIDI via UDP et RTP-MIDI.</p>
+  <div class="form-row">
+    <div class="form-group">
+      <label>SSID du r&eacute;seau</label>
+      <input type="text" id="set-ssid" maxlength="32" placeholder="Nom du WiFi">
+    </div>
+    <div class="form-group">
+      <label>Mot de passe</label>
+      <input type="password" id="set-pass" maxlength="64">
     </div>
   </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>Hostname</label>
+      <input type="text" id="set-hostname" value="midi-boop" maxlength="31">
+      <div class="help">Accessible via hostname.local sur le r&eacute;seau</div>
+    </div>
+    <div class="form-group">
+      <label>AP Fallback</label>
+      <select id="set-ap-fallback">
+        <option value="1">Oui &mdash; cr&eacute;e un point d'acc&egrave;s si WiFi &eacute;choue</option>
+        <option value="0">Non</option>
+      </select>
+    </div>
+  </div>
+  <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
 
-  <div class="section-title" style="margin-top:24px">Configuration</div>
+  <!-- Bus I&sup2;C (section avanc&eacute;e) -->
+  <div class="section-collapse" style="margin-top:24px">
+    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
+      <span>Bus I&sup2;C (avanc&eacute;)</span>
+    </button>
+    <div class="section-collapse-body">
+      <div class="table-responsive">
+      <table>
+        <thead><tr><th>Bus</th><th>SDA</th><th>SCL</th><th>OE</th><th>Freq I&sup2;C</th><th>Freq PWM</th><th>PCA d&eacute;tect&eacute;s</th><th>&Eacute;tat</th></tr></thead>
+        <tbody id="buses-table"><tr><td colspan="8" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+      </table>
+      </div>
+      <button class="btn" onclick="scanI2C()">Scanner bus I&sup2;C</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ CONFIG (gear menu — Sauvegarde) ============ -->
+<div class="page" id="page-config">
+  <div class="section-title">Configuration</div>
   <div class="btn-row">
     <button class="btn primary" onclick="saveConfig()">Sauvegarder sur flash</button>
-    <button class="btn danger" onclick="if(confirm('Remettre les défauts?'))resetDefaults()">Réinitialiser</button>
+    <button class="btn danger" onclick="if(confirm('Remettre les d&eacute;fauts?'))resetDefaults()">R&eacute;initialiser</button>
   </div>
   <div class="sub" style="margin-top:8px">Version config: <span id="set-version">-</span></div>
 </div>
@@ -880,87 +950,18 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
-<!-- ============ CALIBRATION ============ -->
+<!-- ============ CALIBRATION (Tests + Calibration acoustique) ============ -->
 <div class="page" id="page-calibration">
-  <div class="section-title">Calibration Acoustique</div>
-  <div class="mic-status no" id="mic-status">Microphone I&sup2;S non d&eacute;tect&eacute; &mdash; Connectez un INMP441 (WS:15, SCK:14, SD:32)</div>
-  <div id="cal-controls">
 
-  <!-- État courant -->
-  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-    <div class="card">
-      <h3>État</h3>
-      <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
-    </div>
-    <div class="card">
-      <h3>Progression</h3>
-      <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
-      <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
-    </div>
-    <div class="card">
-      <h3>Actionneur en cours</h3>
-      <div class="val" id="cal-cur-act">—</div>
-    </div>
-    <div class="card">
-      <h3>Résultats</h3>
-      <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
+  <!-- === Test rapide des actionneurs === -->
+  <div class="section-title"><span>Test des actionneurs</span>
+    <div style="display:flex;gap:6px">
+      <button class="btn danger sm" id="test-stop-btn" style="display:none" onclick="stopTest()">Arr&ecirc;ter</button>
+      <button class="btn sm" onclick="loadTestStatus();loadTestLog()">&#8635;</button>
     </div>
   </div>
 
-  <!-- Boutons de contrôle -->
-  <div class="btn-row" style="margin-bottom:20px">
-    <button class="btn primary" onclick="startCalibrateAll()">▶ Calibrer tous</button>
-    <button class="btn" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
-    <button class="btn danger" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">⬛ Arrêter</button>
-    <button class="btn" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">✓ Appliquer résultats</button>
-    <button class="btn" onclick="loadCalibrateResults()" style="margin-left:auto">↻ Rafraîchir</button>
-  </div>
-
-  <!-- Sélecteur actionneur unique -->
-  <div id="cal-single-sel" style="display:none;margin-bottom:16px">
-    <label style="font-size:13px;margin-right:8px">Actionneur :</label>
-    <select id="cal-act-select" class="form-select"></select>
-    <button class="btn primary" style="margin-left:8px" onclick="confirmCalibrateOne()">Démarrer</button>
-    <button class="btn" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">✕</button>
-  </div>
-
-  <!-- Tableau des résultats -->
-  <div class="section-title">Résultats de calibration</div>
-  <div class="table-responsive">
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Type</th>
-        <th>Latence actuelle (ms)</th>
-        <th>Latence mesurée (ms)</th>
-        <th>Mesures</th>
-        <th>État</th>
-      </tr>
-    </thead>
-    <tbody id="cal-results-table">
-      <tr><td colspan="6" style="color:var(--fg2);text-align:center">Aucun résultat — lancez une calibration</td></tr>
-    </tbody>
-  </table>
-  </div>
-
-  <!-- Note config I²S -->
-  <div class="section-title" style="margin-top:24px">Configuration microphone</div>
-  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-    <div class="card"><h3>Pins</h3><div class="val" style="font-size:14px">WS:15 SCK:14 SD:32</div></div>
-    <div class="card"><h3>Sample Rate</h3><div class="val" style="font-size:18px">16 kHz</div></div>
-    <div class="card"><h3>Retries / actionneur</h3><div class="val" style="font-size:18px">3</div></div>
-    <div class="card"><h3>Fenêtre détection</h3><div class="val" style="font-size:18px">350 ms</div></div>
-  </div>
-  </div><!-- /cal-controls -->
-</div>
-
-<!-- ============ TEST & MAINTENANCE ============ -->
-<div class="page" id="page-test">
-  <div class="section-title">Test Industriel &amp; Maintenance</div>
-
-  <!-- État courant -->
-  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:20px">
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px">
     <div class="card">
       <h3>Mode</h3>
       <div class="val" id="test-mode" style="font-size:18px">Inactif</div>
@@ -972,31 +973,20 @@ tr:hover td{background:var(--bg2)}
     </div>
     <div class="card">
       <h3>Actionneur</h3>
-      <div class="val" id="test-cur-act" style="font-size:18px">—</div>
+      <div class="val" id="test-cur-act" style="font-size:18px">&mdash;</div>
     </div>
     <div class="card">
-      <h3>Événements envoyés</h3>
+      <h3>&Eacute;v&eacute;nements</h3>
       <div class="val" id="test-events-sent">0</div>
     </div>
-    <div class="card">
-      <h3>Tests complétés</h3>
-      <div class="val" id="test-tests-run">0</div>
-    </div>
   </div>
 
-  <!-- Contrôles globaux -->
-  <div class="btn-row" style="margin-bottom:20px">
-    <button class="btn danger" id="test-stop-btn" style="display:none" onclick="stopTest()">⬛ Arrêter</button>
-    <button class="btn" onclick="api('/api/test/log/clear','POST',{}).then(loadTestLog)" style="margin-left:auto">🗑 Effacer journal</button>
-    <button class="btn" onclick="loadTestStatus();loadTestLog()">↻</button>
-  </div>
-
-  <!-- === Sweep === -->
-  <div class="section-title">Sweep — Test séquentiel</div>
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+  <!-- Sweep -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px">Sweep &mdash; Test s&eacute;quentiel de tous les actionneurs</div>
     <div class="form-row">
       <div class="form-group">
-        <label>Vélocité</label>
+        <label>V&eacute;locit&eacute;</label>
         <input type="number" id="sw-vel" min="1" max="127" value="100">
       </div>
       <div class="form-group">
@@ -1004,19 +994,19 @@ tr:hover td{background:var(--bg2)}
         <input type="number" id="sw-interval" min="50" max="5000" value="400">
       </div>
       <div class="form-group">
-        <label>Durée frappe (ms)</label>
+        <label>Dur&eacute;e frappe (ms)</label>
         <input type="number" id="sw-hold" min="20" max="2000" value="120">
       </div>
-      <div class="form-group" style="justify-content:flex-end;align-items:flex-end">
-        <label><input type="checkbox" id="sw-loop"> Boucle infinie</label>
+      <div class="form-group" style="align-self:flex-end">
+        <label><input type="checkbox" id="sw-loop"> Boucle</label>
       </div>
     </div>
-    <button class="btn primary" onclick="startSweep()">▶ Lancer sweep</button>
+    <button class="btn primary sm" onclick="startSweep()">&#9654; Lancer sweep</button>
   </div>
 
-  <!-- === Burst === -->
-  <div class="section-title">Burst — Rafale sur un actionneur</div>
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+  <!-- Burst -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px">Burst &mdash; Rafale sur un actionneur</div>
     <div class="form-row">
       <div class="form-group">
         <label>Actionneur</label>
@@ -1027,7 +1017,7 @@ tr:hover td{background:var(--bg2)}
         <input type="number" id="burst-count" min="1" max="50" value="5">
       </div>
       <div class="form-group">
-        <label>Vélocité</label>
+        <label>V&eacute;locit&eacute;</label>
         <input type="number" id="burst-vel" min="1" max="127" value="100">
       </div>
       <div class="form-group">
@@ -1035,40 +1025,111 @@ tr:hover td{background:var(--bg2)}
         <input type="number" id="burst-interval" min="30" max="2000" value="150">
       </div>
     </div>
-    <button class="btn primary" onclick="startBurst()">▶ Lancer burst</button>
+    <button class="btn primary sm" onclick="startBurst()">&#9654; Lancer burst</button>
   </div>
 
-  <!-- === Stress === -->
-  <div class="section-title">Stress — Tous actionneurs simultanés</div>
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px">
-    <p style="color:var(--fg2);font-size:13px;margin-bottom:12px">Déclenche tous les actionneurs actifs en même temps. Le Power Manager et le Safety Manager filtrent selon les budgets.</p>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Vélocité</label>
-        <input type="number" id="stress-vel" min="1" max="127" value="80">
+  <!-- Stress (avanc&eacute;) -->
+  <div class="section-collapse">
+    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
+      <span>Stress test (avanc&eacute;)</span>
+    </button>
+    <div class="section-collapse-body">
+      <p style="color:var(--fg2);font-size:13px;margin-bottom:12px">D&eacute;clenche tous les actionneurs en m&ecirc;me temps. Power &amp; Safety filtrent selon les budgets.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>V&eacute;locit&eacute;</label>
+          <input type="number" id="stress-vel" min="1" max="127" value="80">
+        </div>
+        <div class="form-group">
+          <label>Dur&eacute;e frappe (ms)</label>
+          <input type="number" id="stress-hold" min="20" max="2000" value="120">
+        </div>
       </div>
-      <div class="form-group">
-        <label>Durée frappe (ms)</label>
-        <input type="number" id="stress-hold" min="20" max="2000" value="120">
+      <button class="btn danger sm" onclick="startStress()">Stress test</button>
+    </div>
+  </div>
+
+  <!-- Journal test -->
+  <div class="section-collapse" style="margin-top:12px">
+    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
+      <span>Journal des tests <span class="toggle-count" id="test-tests-run">0</span></span>
+    </button>
+    <div class="section-collapse-body">
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn sm" onclick="api('/api/test/log/clear','POST',{}).then(loadTestLog)">Effacer</button>
+      </div>
+      <div class="table-responsive">
+      <table>
+        <thead><tr><th>Temps</th><th>Actionneur</th><th>V&eacute;locit&eacute;</th><th>Mode</th><th>&Eacute;tat</th></tr></thead>
+        <tbody id="test-log-table"><tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun &eacute;v&eacute;nement</td></tr></tbody>
+      </table>
       </div>
     </div>
-    <button class="btn danger" onclick="startStress()">⚡ Stress test</button>
   </div>
 
-  <!-- Journal -->
-  <div class="section-title">Journal des événements
-    <span style="font-size:12px;font-weight:400;color:var(--fg2);margin-left:8px">(32 derniers)</span>
+  <!-- === Calibration acoustique === -->
+  <div class="section-title" style="margin-top:28px">Calibration Acoustique</div>
+  <div class="mic-status no" id="mic-status">Microphone I&sup2;S non d&eacute;tect&eacute; &mdash; Connectez un INMP441 (WS:15, SCK:14, SD:32)</div>
+  <div id="cal-controls">
+
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+    <div class="card">
+      <h3>&Eacute;tat</h3>
+      <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
+    </div>
+    <div class="card">
+      <h3>Progression</h3>
+      <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
+      <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+    <div class="card">
+      <h3>Actionneur</h3>
+      <div class="val" id="cal-cur-act">&mdash;</div>
+    </div>
+    <div class="card">
+      <h3>R&eacute;sultats</h3>
+      <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
+    </div>
   </div>
+
+  <div class="btn-row" style="margin-bottom:20px">
+    <button class="btn primary" onclick="startCalibrateAll()">&#9654; Calibrer tous</button>
+    <button class="btn" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
+    <button class="btn danger" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Arr&ecirc;ter</button>
+    <button class="btn" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Appliquer</button>
+    <button class="btn" onclick="loadCalibrateResults()" style="margin-left:auto">&#8635;</button>
+  </div>
+
+  <div id="cal-single-sel" style="display:none;margin-bottom:16px">
+    <label style="font-size:13px;margin-right:8px">Actionneur :</label>
+    <select id="cal-act-select" class="form-select"></select>
+    <button class="btn primary sm" style="margin-left:8px" onclick="confirmCalibrateOne()">D&eacute;marrer</button>
+    <button class="btn sm" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">&#10005;</button>
+  </div>
+
+  <div class="section-title" style="font-size:14px">R&eacute;sultats</div>
   <div class="table-responsive">
   <table>
-    <thead>
-      <tr><th>Temps</th><th>Actionneur</th><th>Vélocité</th><th>Mode</th><th>État</th></tr>
-    </thead>
-    <tbody id="test-log-table">
-      <tr><td colspan="5" style="color:var(--fg2);text-align:center">Aucun événement</td></tr>
-    </tbody>
+    <thead><tr><th>ID</th><th>Type</th><th>Latence actuelle</th><th>Latence mesur&eacute;e</th><th>Mesures</th><th>&Eacute;tat</th></tr></thead>
+    <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Aucun r&eacute;sultat &mdash; lancez une calibration</td></tr></tbody>
   </table>
   </div>
+
+  <div class="section-collapse" style="margin-top:16px">
+    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
+      <span>Configuration microphone</span>
+    </button>
+    <div class="section-collapse-body">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+        <div class="card"><h3>Pins</h3><div class="val" style="font-size:14px">WS:15 SCK:14 SD:32</div></div>
+        <div class="card"><h3>Sample Rate</h3><div class="val" style="font-size:18px">16 kHz</div></div>
+        <div class="card"><h3>Retries</h3><div class="val" style="font-size:18px">3</div></div>
+        <div class="card"><h3>Fen&ecirc;tre</h3><div class="val" style="font-size:18px">350 ms</div></div>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /cal-controls -->
 </div>
 
 <!-- ============ LOGS ============ -->
@@ -1124,7 +1185,7 @@ tr:hover td{background:var(--bg2)}
 // ============================================================================
 let ws = null;
 let wsConnected = false;
-let currentPage = 'home';
+let currentPage = 'instrument';
 let instruments = [];
 let actuators = [];
 let routing = [];
@@ -1315,24 +1376,36 @@ function updateAlerts(d) {
 function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  document.querySelectorAll('nav button').forEach(b => {
-    if (b.textContent.toLowerCase().includes(page) || b.onclick.toString().includes(page))
+  const navEl = document.getElementById('main-nav');
+  if (navEl) navEl.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+
+  // Highlight nav button
+  if (navEl) navEl.querySelectorAll('button').forEach(b => {
+    if (b.onclick && b.onclick.toString().includes("'" + page + "'"))
       b.classList.add('active');
   });
 
+  // Show/hide nav for welcome page
+  if (navEl) navEl.style.display = (page === 'welcome') ? 'none' : 'flex';
+
   // Load data for specific pages
-  if (page === 'home') { loadHomeInstruments(); loadInstrumentSelects(); buildPiano(); }
-  if (page === 'actuators') { loadActuatorsWithNotes(); }
-  if (page === 'cc') { loadInstrumentSelects(); loadCCRouting(); }
+  if (page === 'instrument') {
+    loadHomeInstruments(); loadInstrumentSelects(); buildPiano();
+    loadActuatorsWithNotes(); loadCCRouting();
+  }
+  if (page === 'midi') { loadWiFiConfig(); loadMidiConfig(); loadBuses(); }
+  if (page === 'calibration') {
+    checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults();
+    loadTestStatus(); loadTestLog(); populateBurstSelect();
+  }
   if (page === 'dashboard') loadDashboardLog();
   if (page === 'power') loadPower();
   if (page === 'safety') loadSafety();
-  if (page === 'calibration') { checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults(); }
-  if (page === 'test') { loadTestStatus(); loadTestLog(); populateBurstSelect(); }
   if (page === 'logs') loadLogs();
-  if (page === 'settings') { loadWiFiConfig(); loadMidiConfig(); loadBuses(); }
+  if (page === 'config') { /* config page is static, version loaded at init */ }
 }
 
 // ============================================================================
@@ -1450,6 +1523,8 @@ async function saveInstrument() {
   loadHomeInstruments();
   loadInstrumentSelects();
   buildPiano();
+  // After creating first instrument, go to instrument page (exit welcome)
+  if (currentPage === 'welcome') showPage('instrument');
 }
 
 async function deleteInstrument(idx) {
@@ -1519,6 +1594,7 @@ async function loadActuatorsWithNotes() {
     html += '</tr>';
   }
   tbody.innerHTML = html;
+  updateCountBadges();
 }
 
 async function setActuatorNote(actId, noteVal) {
@@ -1841,7 +1917,7 @@ function pianoNoteOff(note) {
 }
 
 function updatePianoActive(activeActuators) {
-  if (currentPage !== 'home') return;
+  if (currentPage !== 'instrument') return;
 
   // Reset all active states
   document.querySelectorAll('.piano .active').forEach(k => k.classList.remove('active'));
@@ -2416,6 +2492,13 @@ function toggleExpert(btn) {
   if (body) body.classList.toggle('open');
 }
 
+// Collapsible sections (simplified UI)
+function toggleCollapse(btn) {
+  btn.classList.toggle('open');
+  const body = btn.nextElementSibling;
+  if (body) body.classList.toggle('open');
+}
+
 // ============================================================================
 // Instrument Wizard
 // ============================================================================
@@ -2629,6 +2712,10 @@ async function wizNext() {
   loadHomeInstruments();
   loadInstrumentSelects();
   buildPiano();
+  updateCountBadges();
+
+  // After creation, always go to instrument page (exit welcome if needed)
+  showPage('instrument');
 }
 
 // ============================================================================
@@ -2694,17 +2781,36 @@ async function checkMicStatus() {
 // ============================================================================
 // Init
 // ============================================================================
+// Update count badges in collapsible sections
+function updateCountBadges() {
+  const actBadge = document.getElementById('act-count-badge');
+  if (actBadge) actBadge.textContent = actuators ? '(' + actuators.length + ')' : '';
+  const ccBadge = document.getElementById('cc-count-badge');
+  if (ccBadge && routing) {
+    let ccCount = 0;
+    for (const r of routing) { if (r.ccs) ccCount += r.ccs.length; }
+    ccBadge.textContent = ccCount > 0 ? '(' + ccCount + ')' : '';
+  }
+}
+
 window.addEventListener('load', () => {
   connectWS();
-  // Preload data then show home page
+  // Preload data then decide which page to show
   loadActuators().then(() => {
     loadInstrumentSelects();
     populateBurstSelect();
     api('/api/routing').then(r => {
       routing = r || [];
-      // Show home page with instruments + piano
       loadHomeInstruments();
       buildPiano();
+      updateCountBadges();
+
+      // First-run detection: show welcome if no instruments
+      if (!instruments || instruments.length === 0) {
+        showPage('welcome');
+      } else {
+        showPage('instrument');
+      }
     });
   });
 });
