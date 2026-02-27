@@ -392,7 +392,7 @@ void WebServer::handleGetStatus(AsyncWebServerRequest* request) {
 void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    DynamicJsonDocument doc(2048);
+    DynamicJsonDocument doc(8192);
     JsonArray arr = doc.to<JsonArray>();
 
     InstrumentConfig* instruments = _config->getInstruments();
@@ -668,7 +668,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     JsonArray acts = doc["actuators"];
     if (!acts.isNull()) {
         for (JsonObject a : acts) {
-            if (inst.actuator_count >= PCA_CHANNELS) break;
+            if (inst.actuator_count >= MAX_ACTUATORS_PER_INSTRUMENT) break;
             inst.actuator_ids[inst.actuator_count] = a["id"] | 0;
             inst.midi_notes[inst.actuator_count]   = a["note"] | MIDI_NOTE_UNMAPPED;
             inst.actuator_count++;

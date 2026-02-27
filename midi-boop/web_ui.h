@@ -887,7 +887,7 @@ tr:hover td{background:var(--bg2)}
       <div class="form-row tri">
         <div class="form-group">
           <label>Actionneurs</label>
-          <input type="number" id="wiz-count" min="1" max="32" value="8" oninput="wizBuildNoteTable()">
+          <input type="number" id="wiz-count" min="1" max="64" value="8" oninput="wizBuildNoteTable()">
         </div>
         <div class="form-group">
           <label>Gamme</label>
@@ -2352,7 +2352,7 @@ function wizUpdateBehaviors() {
 }
 
 function wizBuildNoteTable() {
-  const count = Math.min(parseInt(document.getElementById('wiz-count').value) || 8, 32);
+  const count = Math.min(parseInt(document.getElementById('wiz-count').value) || 8, 64);
   const startNote = parseInt(document.getElementById('wiz-start-note').value) || 48;
   const scaleKey = document.getElementById('wiz-scale').value;
   const container = document.getElementById('wiz-note-table');

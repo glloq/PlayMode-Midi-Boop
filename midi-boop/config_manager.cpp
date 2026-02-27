@@ -469,7 +469,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
     inst.actuator_count = 0;
     JsonArray actIds = obj["actuator_ids"].as<JsonArray>();
     for (JsonVariant v : actIds) {
-        if (inst.actuator_count < PCA_CHANNELS) {
+        if (inst.actuator_count < MAX_ACTUATORS_PER_INSTRUMENT) {
             inst.actuator_ids[inst.actuator_count] = v.as<uint8_t>();
             inst.actuator_count++;
         }
@@ -480,7 +480,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
     JsonArray noteIds = obj["midi_notes"].as<JsonArray>();
     uint8_t noteIdx = 0;
     for (JsonVariant v : noteIds) {
-        if (noteIdx < PCA_CHANNELS) {
+        if (noteIdx < MAX_ACTUATORS_PER_INSTRUMENT) {
             inst.midi_notes[noteIdx] = v.as<uint8_t>();
             noteIdx++;
         }
