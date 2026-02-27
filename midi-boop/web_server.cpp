@@ -1326,7 +1326,8 @@ void WebServer::handleGetCalibrateStatus(AsyncWebServerRequest* request) {
         return;
     }
 
-    doc["available"]    = true;
+    bool micReady = _calibrator->isMicReady();
+    doc["available"]    = micReady;
     doc["state"]        = calStateName(_calibrator->getState());
     doc["running"]      = _calibrator->isRunning();
     doc["progress"]     = _calibrator->getProgress();

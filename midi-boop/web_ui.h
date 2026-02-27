@@ -1030,7 +1030,7 @@ let currentPage = 'instrument';
 let instruments = [];
 let actuators = [];
 let routing = [];
-let pianoNotes = {}; // note -> actuator_id mapping
+let pianoNotes = {}; // instIndex -> { note -> actuator_id }
 let editingInstrumentIdx = -1;
 let editingActuatorId = -1;
 
@@ -1780,13 +1780,15 @@ function buildAllPianos() {
   }
 
   for (const inst of instruments) {
-    const r = routing ? routing.find(x => x.instrument === inst.index) : null;
+    const idx = inst.index;
+    const r = routing ? routing.find(x => x.instrument === idx) : null;
     let mappedNotes = new Set();
+    pianoNotes[idx] = {};
     if (r && r.notes) {
       for (const nm of r.notes) {
         if (nm.enabled) {
           mappedNotes.add(nm.note);
-          pianoNotes[nm.note] = nm.actuator; // global map for noteOn/Off
+          pianoNotes[idx][nm.note] = nm.actuator;
         }
       }
     }
@@ -1807,7 +1809,7 @@ function buildAllPianos() {
     pianoWrap.className = 'piano-container';
     const piano = document.createElement('div');
     piano.className = 'piano';
-    piano.id = 'piano-' + inst.index;
+    piano.id = 'piano-' + idx;
 
     // Compute note range
     const minNote = Math.min(...mappedNotes);
@@ -1828,12 +1830,13 @@ function buildAllPianos() {
         const k = document.createElement('div');
         k.className = 'white' + (!mappedNotes.has(n) ? ' muted' : '');
         k.dataset.note = n;
+        k.dataset.inst = idx;
         k.textContent = noteName(n);
-        k.onmousedown = () => pianoNoteOn(n);
-        k.onmouseup = () => pianoNoteOff(n);
-        k.onmouseleave = () => pianoNoteOff(n);
-        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(n); }, {passive:false});
-        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(n); }, {passive:false});
+        k.onmousedown = () => pianoNoteOn(idx, n);
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
         piano.appendChild(k);
         wCount++;
       }
@@ -1846,12 +1849,13 @@ function buildAllPianos() {
         const k = document.createElement('div');
         k.className = 'black' + (!mappedNotes.has(n) ? ' muted' : '');
         k.dataset.note = n;
+        k.dataset.inst = idx;
         k.style.left = (wIdx * 40 - 13) + 'px';
-        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(n); };
-        k.onmouseup = () => pianoNoteOff(n);
-        k.onmouseleave = () => pianoNoteOff(n);
-        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(n); }, {passive:false});
-        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(n); }, {passive:false});
+        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
         piano.appendChild(k);
       } else { wIdx++; }
     }
@@ -1862,19 +1866,25 @@ function buildAllPianos() {
   }
 }
 
-function pianoNoteOn(note) {
-  const actId = pianoNotes[note];
+function pianoNoteOn(instIdx, note) {
+  const instMap = pianoNotes[instIdx];
+  if (!instMap) return;
+  const actId = instMap[note];
   if (actId === undefined) return;
-  // Visual feedback on ALL pianos that have this note
-  document.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+  // Visual feedback only on this instrument's piano
+  const piano = document.getElementById('piano-' + instIdx);
+  if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
   if (ws && wsConnected) {
     ws.send(JSON.stringify({cmd:'test', id:actId, vel:100}));
   }
 }
 
-function pianoNoteOff(note) {
-  document.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.remove('active'));
-  const actId = pianoNotes[note];
+function pianoNoteOff(instIdx, note) {
+  const piano = document.getElementById('piano-' + instIdx);
+  if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.remove('active'));
+  const instMap = pianoNotes[instIdx];
+  if (!instMap) return;
+  const actId = instMap[note];
   if (actId === undefined) return;
   api('/api/test/actuator', 'POST', {id: actId, velocity: 0, note_on: false});
 }
@@ -1887,11 +1897,15 @@ function updatePianoActive(activeActuators) {
 
   if (!activeActuators) return;
 
-  // Find notes for active actuators and highlight on all pianos
+  // Highlight the correct key on the correct instrument's piano
   const activeIds = new Set(activeActuators.map(a => a.id));
-  for (const [note, actId] of Object.entries(pianoNotes)) {
-    if (activeIds.has(actId)) {
-      document.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+  for (const [instIdx, noteMap] of Object.entries(pianoNotes)) {
+    const piano = document.getElementById('piano-' + instIdx);
+    if (!piano) continue;
+    for (const [note, actId] of Object.entries(noteMap)) {
+      if (activeIds.has(actId)) {
+        piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+      }
     }
   }
 }
