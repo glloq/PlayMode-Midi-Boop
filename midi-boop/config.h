@@ -94,7 +94,7 @@
 #define JITTER_BUFFER_MAX_MS     80      // Délai maximum configurable
 
 // --- Event Normalizer / Mapping ---
-#define MAX_NOTE_MAPPINGS       16      // Max mappings note par instrument (sparse, 1 par actuateur)
+#define MAX_NOTE_MAPPINGS       32      // Max mappings note par instrument (sparse, 1 par actuateur)
 #define MAX_CC_MAPPINGS         32      // Max mappings CC par instrument
 #define VELOCITY_CURVE_POINTS   5       // Points de la courbe de vélocité
 
