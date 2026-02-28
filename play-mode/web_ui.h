@@ -365,13 +365,19 @@ tr:hover td{background:var(--bg2)}
 <!-- ============ SETTINGS (unified gear menu page) ============ -->
 <div class="page" id="page-settings">
 
-  <!-- Dashboard / Monitoring -->
+  <!-- Monitoring -->
   <div class="section-title">Monitoring</div>
   <div class="cards">
     <div class="card">
-      <h3>MIDI Re&ccedil;us</h3>
+      <h3>MIDI</h3>
       <div class="val" id="d-midi-recv">0</div>
-      <div class="sub">Rout&eacute;s: <span id="d-midi-routed">0</span> | Non mapp&eacute;s: <span id="d-midi-unmapped">0</span></div>
+      <div class="sub">Rout&eacute;s: <span id="d-midi-routed">0</span> | Rejet&eacute;s: <span id="d-midi-unmapped">0</span></div>
+    </div>
+    <div class="card">
+      <h3>Polyphonie</h3>
+      <div class="val"><span id="d-active">0</span><span class="unit">/ <span id="p-poly-max">12</span></span></div>
+      <div class="bar"><div class="bar-fill" id="p-total-bar" style="width:0%;background:var(--green)"></div></div>
+      <div class="sub">Rejet&eacute;s: <span id="p-rejected">0</span></div>
     </div>
     <div class="card">
       <h3>Scheduler</h3>
@@ -379,52 +385,26 @@ tr:hover td{background:var(--bg2)}
       <div class="sub">en file | <span id="d-sched-processed">0</span> trait&eacute;s</div>
     </div>
     <div class="card">
-      <h3>Actifs</h3>
-      <div class="val" id="d-active">0</div>
-      <div class="sub">actionneurs actifs</div>
-    </div>
-    <div class="card">
       <h3>WiFi</h3>
       <div class="val" id="d-wifi-rssi">-</div>
       <div class="sub" id="d-wifi-status">-</div>
     </div>
-    <div class="card">
-      <h3>Rejet&eacute;s</h3>
-      <div class="val" id="d-pwr-rejected">0</div>
-      <div class="sub">&eacute;v&eacute;nements rejet&eacute;s</div>
-    </div>
   </div>
 
-  <!-- Polyphonie -->
-  <div class="section-title" style="margin-top:24px">Polyphonie</div>
-  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-    <div class="card">
-      <h3>Actifs / Max</h3>
-      <div class="val"><span id="p-poly">0</span><span class="unit">/ <span id="p-poly-max">12</span></span></div>
-      <div class="bar"><div class="bar-fill" id="p-total-bar" style="width:0%;background:var(--green)"></div></div>
-    </div>
-    <div class="card">
-      <h3>Rejet&eacute;s</h3>
-      <div class="val" id="p-rejected">0</div>
-    </div>
-  </div>
-  <div class="form-row" style="margin-top:12px">
+  <!-- Polyphonie & Sécurité -->
+  <div class="section-title" style="margin-top:24px">Polyphonie &amp; S&eacute;curit&eacute;</div>
+  <div id="safety-alert-zone"></div>
+  <div class="form-row" style="margin-bottom:12px">
     <div class="form-group">
       <label>Polyphonie max</label>
       <input type="number" id="pw-poly" value="12" min="1" max="64">
-      <div class="help">Nombre max d'actionneurs actifs en m&ecirc;me temps</div>
+      <div class="help">Nombre max d'actionneurs actifs simultan&eacute;ment</div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:18px">
+      <button class="btn primary sm" onclick="savePowerBudget()">Appliquer</button>
     </div>
   </div>
-  <button class="btn primary sm" onclick="savePowerBudget()">Appliquer</button>
-
-  <!-- Safety -->
-  <div class="section-title" style="margin-top:24px">S&eacute;curit&eacute;</div>
-  <div id="safety-alert-zone"></div>
-  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
-    <div class="card">
-      <h3>Actifs</h3>
-      <div class="val" id="s-active">0</div>
-    </div>
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px">
     <div class="card">
       <h3>Kill Switch</h3>
       <div class="val" id="s-kill" style="color:var(--green)">OFF</div>
@@ -456,12 +436,6 @@ tr:hover td{background:var(--bg2)}
         <div class="form-group">
           <label>Watchdog timeout (ms)</label>
           <input type="number" id="sf-watchdog" value="5000" min="1000" max="30000">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Polyphonie max (s&eacute;curit&eacute;)</label>
-          <input type="number" id="sf-poly" value="12" min="1" max="64">
         </div>
       </div>
       <button class="btn primary sm" onclick="saveSafetyConfig()">Appliquer limites</button>
@@ -552,7 +526,7 @@ tr:hover td{background:var(--bg2)}
   <div class="section-title" style="margin-top:24px">Configuration</div>
   <div class="btn-row">
     <button class="btn primary" onclick="saveConfig()">Sauvegarder sur flash</button>
-    <button class="btn danger" onclick="if(confirm('Remettre les d&eacute;fauts?'))resetDefaults()">R&eacute;initialiser</button>
+    <button class="btn danger" onclick="confirmResetDefaults()">R&eacute;initialiser</button>
   </div>
   <div class="sub" style="margin-top:8px">Version config: <span id="set-version">-</span></div>
 </div>
@@ -609,6 +583,16 @@ tr:hover td{background:var(--bg2)}
 <!-- (Config is now in the unified Settings page) -->
 
 <!-- ============ MODALS ============ -->
+
+<!-- Modal Confirm (replaces native confirm/alert) -->
+<div class="modal-overlay" id="modal-confirm">
+  <div class="modal" style="max-width:380px;text-align:center">
+    <div id="confirm-icon" style="font-size:32px;margin-bottom:8px"></div>
+    <h2 id="confirm-title" style="text-align:center">Confirmer</h2>
+    <p id="confirm-message" style="color:var(--fg2);margin-bottom:20px;white-space:pre-line"></p>
+    <div class="btn-row" id="confirm-buttons" style="justify-content:center"></div>
+  </div>
+</div>
 
 <!-- Modal Instrument -->
 <div class="modal-overlay" id="modal-instrument">
@@ -855,9 +839,10 @@ tr:hover td{background:var(--bg2)}
     <div id="cc-cat-modifier" style="display:none">
       <div class="form-group">
         <label>Servo de l'instrument</label>
-        <select id="cc-actuator-inst" class="form-select"></select>
+        <select id="cc-actuator-inst" class="form-select" onchange="updateCCServoInfo()"></select>
         <div class="help">Servos assign&eacute;s &agrave; l'instrument s&eacute;lectionn&eacute;</div>
       </div>
+      <div id="cc-servo-info" style="display:none;background:var(--bg3);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:var(--fg2)"></div>
       <div class="form-group">
         <label>Param&egrave;tre &agrave; modifier</label>
         <select id="cc-mod-target" class="form-select" onchange="updateCCModRangeHints()">
@@ -1155,7 +1140,7 @@ function updateDashboard(d) {
     el('d-midi-unmapped', d.dispatcher ? d.dispatcher.dropped : 0);
   }
   if (d.dispatcher) {
-    el('d-pwr-rejected', d.dispatcher.pwr_rejected || 0);
+    el('p-rejected', d.dispatcher.pwr_rejected || 0);
   }
 
   // Scheduler
@@ -1164,13 +1149,13 @@ function updateDashboard(d) {
     el('d-sched-processed', d.scheduler.processed || 0);
   }
 
-  // Power (polyphony only)
-  if (d.power) {
-    el('p-poly', d.power.active_count || d.safety?.active || 0);
+  // Power + Polyphony (unified card)
+  if (d.power || d.safety) {
+    const active = d.power?.active_count || d.safety?.active || 0;
+    el('d-active', active);
     const pbar = document.getElementById('p-total-bar');
     if (pbar) {
-      const max = d.power.max_polyphony || 12;
-      const active = d.power.active_count || d.safety?.active || 0;
+      const max = d.power?.max_polyphony || 12;
       const pct = max > 0 ? Math.min(100, Math.round(active / max * 100)) : 0;
       pbar.style.width = pct + '%';
       pbar.style.background = pct > 80 ? 'var(--red)' : 'var(--green)';
@@ -1179,8 +1164,6 @@ function updateDashboard(d) {
 
   // Safety
   if (d.safety) {
-    el('d-active', d.safety.active || 0);
-    el('s-active', d.safety.active || 0);
 
     const killEl = document.getElementById('s-kill');
     if (killEl) {
@@ -1347,6 +1330,44 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('show');
 }
 
+// Themed confirm/alert modals (replace native confirm/alert)
+function appConfirm(title, message, {confirmText='Confirmer', cancelText='Annuler', danger=false, icon='\u26a0\ufe0f'}={}) {
+  return new Promise(resolve => {
+    document.getElementById('confirm-icon').textContent = icon;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    const btns = document.getElementById('confirm-buttons');
+    btns.innerHTML = '';
+    const btnCancel = document.createElement('button');
+    btnCancel.className = 'btn';
+    btnCancel.textContent = cancelText;
+    btnCancel.onclick = () => { closeModal('modal-confirm'); resolve(false); };
+    const btnOk = document.createElement('button');
+    btnOk.className = 'btn ' + (danger ? 'danger' : 'primary');
+    btnOk.textContent = confirmText;
+    btnOk.onclick = () => { closeModal('modal-confirm'); resolve(true); };
+    btns.appendChild(btnCancel);
+    btns.appendChild(btnOk);
+    document.getElementById('modal-confirm').classList.add('show');
+  });
+}
+
+function appAlert(title, message, {btnText='OK', icon='\u2139\ufe0f'}={}) {
+  return new Promise(resolve => {
+    document.getElementById('confirm-icon').textContent = icon;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    const btns = document.getElementById('confirm-buttons');
+    btns.innerHTML = '';
+    const btnOk = document.createElement('button');
+    btnOk.className = 'btn primary';
+    btnOk.textContent = btnText;
+    btnOk.onclick = () => { closeModal('modal-confirm'); resolve(); };
+    btns.appendChild(btnOk);
+    document.getElementById('modal-confirm').classList.add('show');
+  });
+}
+
 async function saveInstrument() {
   const data = {
     name: document.getElementById('mi-name').value || 'Instrument',
@@ -1370,7 +1391,7 @@ async function saveInstrument() {
 }
 
 async function deleteInstrument(idx) {
-  if (!confirm('Supprimer cet instrument?')) return;
+  if (!await appConfirm('Supprimer l\u2019instrument', 'Cette action supprimera l\u2019instrument et ses mappings.', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   await api('/api/instrument?index=' + idx, 'DELETE');
   instruments = [];  // Force refresh
   routing = await api('/api/routing') || [];
@@ -1642,7 +1663,7 @@ async function testActuator(id) {
 }
 
 async function deleteActuator(id) {
-  if (!confirm('Désactiver cet actionneur?')) return;
+  if (!await appConfirm('Supprimer l\u2019actionneur', 'Supprimer l\u2019actionneur #' + id + ' ?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   await api('/api/actuator?id=' + id, 'DELETE');
   loadActuatorsWithNotes();
 }
@@ -1878,6 +1899,37 @@ function updateCCModRangeHints() {
     document.getElementById('cc-mod-min').value = range[0];
     document.getElementById('cc-mod-max').value = range[1];
   }
+  updateCCServoInfo();
+}
+
+function updateCCServoInfo() {
+  const infoDiv = document.getElementById('cc-servo-info');
+  if (!infoDiv) return;
+  const actId = parseInt(document.getElementById('cc-actuator-inst').value);
+  const act = actuators ? actuators.find(a => a.id === actId) : null;
+  if (!act || isNaN(actId)) { infoDiv.style.display = 'none'; return; }
+  const init = act.angle_init !== undefined ? act.angle_init : 90;
+  const amp = act.amplitude !== undefined ? act.amplitude : 45;
+  const rev = act.hit_reverse;
+  const speed = act.speed_ms || 150;
+  const beh = SERVO_BEHAVIORS[act.behavior] || '?';
+  let minAngle, maxAngle;
+  if (act.behavior === 1) { // Alterné
+    minAngle = init;
+    maxAngle = act.angle_b !== undefined ? act.angle_b : 120;
+  } else if (rev) {
+    minAngle = Math.max(0, init - amp);
+    maxAngle = init;
+  } else {
+    minAngle = init;
+    maxAngle = Math.min(180, init + amp);
+  }
+  let s = '<strong>Servo #' + act.id + '</strong> \u2014 ' + beh;
+  s += ' \u2022 Repos : ' + init + '\u00b0';
+  s += ' \u2022 Course : ' + minAngle + '\u00b0 \u2192 ' + maxAngle + '\u00b0';
+  s += ' \u2022 Vitesse : ' + speed + 'ms';
+  infoDiv.innerHTML = s;
+  infoDiv.style.display = '';
 }
 
 // Quick-create a servo for CC usage
@@ -1981,7 +2033,7 @@ async function saveCC() {
 }
 
 async function deleteCC(instIdx, ccNum) {
-  if (!confirm('Supprimer le CC ' + ccNum + ' ?')) return;
+  if (!await appConfirm('Supprimer le CC', 'Supprimer le mapping CC ' + ccNum + ' ?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
   if (!r || !r.ccs) return;
   const ccs = r.ccs.filter(c => c.cc !== ccNum);
@@ -2193,8 +2245,7 @@ async function loadPower() {
   }
   if (d.stats) {
     el('p-rejected', d.stats.rejected);
-    el('p-poly', d.stats.active_count);
-    // Update bar
+    el('d-active', d.stats.active_count);
     const max = d.budget ? d.budget.max_polyphony : 12;
     const pct = max > 0 ? Math.min(100, Math.round(d.stats.active_count / max * 100)) : 0;
     const bar = document.getElementById('p-total-bar');
@@ -2220,7 +2271,6 @@ async function loadSafety() {
     document.getElementById('sf-duty').value = d.config.max_duty_pct;
     document.getElementById('sf-freq').value = d.config.max_freq_hz;
     document.getElementById('sf-watchdog').value = d.config.watchdog_ms;
-    document.getElementById('sf-poly').value = d.config.max_polyphony;
   }
 }
 
@@ -2229,8 +2279,9 @@ async function saveSafetyConfig() {
     max_duty_pct: parseInt(document.getElementById('sf-duty').value),
     max_freq_hz: parseInt(document.getElementById('sf-freq').value),
     watchdog_ms: parseInt(document.getElementById('sf-watchdog').value),
-    max_polyphony: parseInt(document.getElementById('sf-poly').value)
+    max_polyphony: parseInt(document.getElementById('pw-poly').value)
   });
+  toast('Limites appliqu\u00e9es', 'ok');
 }
 
 async function toggleKillSwitch(on) {
@@ -2256,7 +2307,7 @@ async function saveWiFiConfig() {
     ap_fallback: document.getElementById('set-ap-fallback').value === '1',
     enabled: true
   });
-  alert('WiFi sauvegardé. Redémarrer pour appliquer.');
+  appAlert('WiFi sauvegard\u00e9', 'Red\u00e9marrer l\u2019appareil pour appliquer les nouveaux param\u00e8tres.', {icon:'\ud83d\udce1'});
 }
 
 async function loadBuses() {
@@ -2305,7 +2356,7 @@ async function scanI2C() {
       }
       msg += '\n';
     }
-    alert(msg);
+    appAlert('Scan I\u00b2C', msg, {icon:'\ud83d\udd0d'});
     loadBuses();
   }
 }
@@ -2313,15 +2364,16 @@ async function scanI2C() {
 async function saveConfig() {
   const result = await api('/api/config/save', 'POST');
   if (result && result.ok) {
-    alert('Configuration sauvegardée sur flash');
+    appAlert('Sauvegarde r\u00e9ussie', 'Configuration sauvegard\u00e9e sur la m\u00e9moire flash.', {icon:'\u2705'});
   } else {
-    alert('Erreur de sauvegarde');
+    appAlert('Erreur', 'La sauvegarde a \u00e9chou\u00e9.', {icon:'\u274c'});
   }
 }
 
-async function resetDefaults() {
+async function confirmResetDefaults() {
+  if (!await appConfirm('R\u00e9initialiser', 'Remettre toute la configuration aux valeurs par d\u00e9faut ?\nCette action est irr\u00e9versible.', {danger:true, confirmText:'R\u00e9initialiser', icon:'\u26a0\ufe0f'})) return;
   await api('/api/config/defaults', 'POST');
-  alert('Configuration réinitialisée. Rechargement...');
+  await appAlert('R\u00e9initialis\u00e9', 'Configuration r\u00e9initialis\u00e9e. La page va se recharger.', {icon:'\u2705'});
   location.reload();
 }
 
@@ -2402,8 +2454,8 @@ async function loadCalibrateResults() {
   tbody.innerHTML = html;
 }
 
-function startCalibrateAll() {
-  if (!confirm('Démarrer la calibration de tous les actionneurs ?\nAssurez-vous que le microphone est positionné et que l\'environnement est silencieux.')) return;
+async function startCalibrateAll() {
+  if (!await appConfirm('Calibration', 'D\u00e9marrer la calibration de tous les actionneurs ?\nAssurez-vous que le microphone est positionn\u00e9 et que l\u2019environnement est silencieux.', {icon:'\ud83c\udfaf', confirmText:'D\u00e9marrer'})) return;
   api('/api/calibrate', 'POST', { all: true }).then(r => {
     if (r && r.ok) {
       toast('Calibration démarrée', 'ok');
@@ -2559,8 +2611,8 @@ function renderLogs() {
   }
 }
 
-function clearLogs() {
-  if (!confirm('Effacer tout le journal système ?')) return;
+async function clearLogs() {
+  if (!await appConfirm('Effacer le journal', 'Supprimer toutes les entr\u00e9es du journal syst\u00e8me ?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   api('/api/logs/clear', 'POST', {}).then(r => {
     if (r && r.ok) {
       logCache = [];
