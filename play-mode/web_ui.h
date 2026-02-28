@@ -855,9 +855,10 @@ tr:hover td{background:var(--bg2)}
     <div id="cc-cat-modifier" style="display:none">
       <div class="form-group">
         <label>Servo de l'instrument</label>
-        <select id="cc-actuator-inst" class="form-select"></select>
+        <select id="cc-actuator-inst" class="form-select" onchange="updateCCServoInfo()"></select>
         <div class="help">Servos assign&eacute;s &agrave; l'instrument s&eacute;lectionn&eacute;</div>
       </div>
+      <div id="cc-servo-info" style="display:none;background:var(--bg3);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:var(--fg2)"></div>
       <div class="form-group">
         <label>Param&egrave;tre &agrave; modifier</label>
         <select id="cc-mod-target" class="form-select" onchange="updateCCModRangeHints()">
@@ -1878,6 +1879,37 @@ function updateCCModRangeHints() {
     document.getElementById('cc-mod-min').value = range[0];
     document.getElementById('cc-mod-max').value = range[1];
   }
+  updateCCServoInfo();
+}
+
+function updateCCServoInfo() {
+  const infoDiv = document.getElementById('cc-servo-info');
+  if (!infoDiv) return;
+  const actId = parseInt(document.getElementById('cc-actuator-inst').value);
+  const act = actuators ? actuators.find(a => a.id === actId) : null;
+  if (!act || isNaN(actId)) { infoDiv.style.display = 'none'; return; }
+  const init = act.angle_init !== undefined ? act.angle_init : 90;
+  const amp = act.amplitude !== undefined ? act.amplitude : 45;
+  const rev = act.hit_reverse;
+  const speed = act.speed_ms || 150;
+  const beh = SERVO_BEHAVIORS[act.behavior] || '?';
+  let minAngle, maxAngle;
+  if (act.behavior === 1) { // Alterné
+    minAngle = init;
+    maxAngle = act.angle_b !== undefined ? act.angle_b : 120;
+  } else if (rev) {
+    minAngle = Math.max(0, init - amp);
+    maxAngle = init;
+  } else {
+    minAngle = init;
+    maxAngle = Math.min(180, init + amp);
+  }
+  let s = '<strong>Servo #' + act.id + '</strong> \u2014 ' + beh;
+  s += ' \u2022 Repos : ' + init + '\u00b0';
+  s += ' \u2022 Course : ' + minAngle + '\u00b0 \u2192 ' + maxAngle + '\u00b0';
+  s += ' \u2022 Vitesse : ' + speed + 'ms';
+  infoDiv.innerHTML = s;
+  infoDiv.style.display = '';
 }
 
 // Quick-create a servo for CC usage
