@@ -88,6 +88,8 @@ tr:hover td{background:var(--bg2)}
 .badge.off{background:var(--bg3);color:var(--fg2)}
 .badge.servo{background:#58a6ff22;color:var(--accent)}
 .badge.sol{background:#d2992222;color:var(--yellow)}
+.inst-separator td{background:var(--bg3);font-weight:600;font-size:13px;padding:8px 10px !important;
+  border-top:2px solid var(--border)}
 
 /* Buttons — min-height 44px WCAG 2.5.5 touch target */
 .btn{background:var(--bg3);border:1px solid var(--border);color:var(--fg);
@@ -129,7 +131,7 @@ tr:hover td{background:var(--bg2)}
   height:60px;align-self:center;line-height:1;touch-action:manipulation}
 .piano-scroll-wrap .piano-nav:active{background:var(--accent);color:#fff}
 .piano-container{overflow-x:auto;padding:12px 0;-webkit-overflow-scrolling:touch;touch-action:pan-x;flex:1;min-width:0}
-.piano{--wk:40px;display:flex;position:relative;height:130px;user-select:none}
+.piano{--wk:40px;display:flex;position:relative;height:130px;user-select:none;touch-action:none}
 .piano .white{width:var(--wk);height:130px;background:#f0f0f0;border:1px solid #999;
   border-radius:0 0 4px 4px;cursor:pointer;position:relative;z-index:1;
   display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;
@@ -137,7 +139,6 @@ tr:hover td{background:var(--bg2)}
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .piano .white:hover{background:#e0e8f0}
 .piano .white.active{background:var(--accent);color:#fff}
-.piano .white.mapped{background:#d0e8ff}
 .piano .white.muted{display:none}
 .piano .black{width:calc(var(--wk) * 0.65);height:85px;background:#222;border:1px solid #000;
   border-radius:0 0 3px 3px;cursor:pointer;position:absolute;z-index:2;
@@ -145,7 +146,6 @@ tr:hover td{background:var(--bg2)}
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .piano .black:hover{background:#444}
 .piano .black.active{background:var(--accent)}
-.piano .black.mapped{background:#2a5a8f}
 .piano .black.muted{display:none}
 
 /* Section titles — flexbox pour alignement mobile */
@@ -1360,15 +1360,26 @@ async function loadActuatorsWithNotes() {
     tbody.innerHTML = '<tr><td colspan="9" style="color:var(--fg2)">Aucun actionneur configur&eacute;</td></tr>';
     return;
   }
-  let html = '';
+  // Group actuators by instrument
+  const groups = {};
+  const unassigned = [];
   for (const act of actuators) {
+    const nm = noteMap[act.id];
+    if (nm) {
+      if (!groups[nm.inst]) groups[nm.inst] = [];
+      groups[nm.inst].push(act);
+    } else {
+      unassigned.push(act);
+    }
+  }
+  let html = '';
+  function renderRow(act) {
     const isServo = act.type === 0;
     const behaviors = isServo ? SERVO_BEHAVIORS : SOL_BEHAVIORS;
     const nm = noteMap[act.id];
-    const noteStr = nm ? noteName(nm.note) + ' (' + nm.note + ')' : '';
     html += '<tr>';
     html += '<td>' + act.id + '</td>';
-    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Sol&eacute;no&iuml;de</span>') + '</td>';
+    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Sol\u00e9no\u00efde</span>') + '</td>';
     html += '<td><input class="note-input" type="number" min="0" max="127" value="' + (nm ? nm.note : '') + '" placeholder="-" '
       + 'onchange="setActuatorNote(' + act.id + ',this.value)">';
     if (nm) html += '<span class="note-label">' + noteName(nm.note) + '</span>';
@@ -1378,10 +1389,22 @@ async function loadActuatorsWithNotes() {
     html += '<td>' + act.pca_ch + '</td>';
     html += '<td>' + (behaviors[act.behavior] || '?') + '</td>';
     html += '<td>' + (act.state && act.state.active ? '<span class="badge on">Actif</span>' : '<span class="badge off">Repos</span>') + '</td>';
-    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">Éditer</button> ';
+    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">\u00c9diter</button> ';
     html += '<button class="btn sm" onclick="testActuator(' + act.id + ')">Test</button> ';
     html += '<button class="btn sm" onclick="deleteActuator(' + act.id + ')">Suppr</button></td>';
     html += '</tr>';
+  }
+  // Render each instrument group
+  for (const inst of (instruments || [])) {
+    const acts = groups[inst.index];
+    if (!acts || acts.length === 0) continue;
+    html += '<tr class="inst-separator"><td colspan="9">' + esc(inst.name) + ' <span style="font-weight:400;color:var(--fg2)">(' + acts.length + ')</span></td></tr>';
+    for (const act of acts) renderRow(act);
+  }
+  // Unassigned actuators
+  if (unassigned.length > 0) {
+    html += '<tr class="inst-separator"><td colspan="9">Non assign\u00e9s <span style="font-weight:400;color:var(--fg2)">(' + unassigned.length + ')</span></td></tr>';
+    for (const act of unassigned) renderRow(act);
   }
   tbody.innerHTML = html;
   updateCountBadges();
@@ -1838,15 +1861,19 @@ function buildAllPianos() {
       if (!notesToRender.has(n)) continue;
       whiteIdxMap[n] = wIdx;
       const k = document.createElement('div');
-      k.className = 'white' + (mappedNotes.has(n) ? ' mapped' : '');
+      const wMapped = mappedNotes.has(n);
+      k.className = 'white';
+      if (!wMapped) { k.style.opacity = '0.4'; k.style.cursor = 'default'; }
       k.dataset.note = n;
       k.dataset.inst = idx;
       k.textContent = noteName(n);
-      k.onmousedown = () => pianoNoteOn(idx, n);
-      k.onmouseup = () => pianoNoteOff(idx, n);
-      k.onmouseleave = () => pianoNoteOff(idx, n);
-      k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
-      k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      if (wMapped) {
+        k.onmousedown = () => pianoNoteOn(idx, n);
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      }
       piano.appendChild(k);
       wIdx++;
     }
@@ -1860,15 +1887,19 @@ function buildAllPianos() {
       if (!(prevWhite in whiteIdxMap)) continue;
       const wi = whiteIdxMap[prevWhite];
       const k = document.createElement('div');
-      k.className = 'black' + (mappedNotes.has(n) ? ' mapped' : '');
+      const bMapped = mappedNotes.has(n);
+      k.className = 'black';
+      if (!bMapped) { k.style.opacity = '0.3'; k.style.cursor = 'default'; }
       k.dataset.note = n;
       k.dataset.inst = idx;
       k.style.left = 'calc(' + (wi + 1) + ' * var(--wk) - var(--wk) * 0.325)';
-      k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
-      k.onmouseup = () => pianoNoteOff(idx, n);
-      k.onmouseleave = () => pianoNoteOff(idx, n);
-      k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
-      k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      if (bMapped) {
+        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      }
       piano.appendChild(k);
     }
 
