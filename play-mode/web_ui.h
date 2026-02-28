@@ -88,6 +88,8 @@ tr:hover td{background:var(--bg2)}
 .badge.off{background:var(--bg3);color:var(--fg2)}
 .badge.servo{background:#58a6ff22;color:var(--accent)}
 .badge.sol{background:#d2992222;color:var(--yellow)}
+.inst-separator td{background:var(--bg3);font-weight:600;font-size:13px;padding:8px 10px !important;
+  border-top:2px solid var(--border)}
 
 /* Buttons — min-height 44px WCAG 2.5.5 touch target */
 .btn{background:var(--bg3);border:1px solid var(--border);color:var(--fg);
@@ -1358,15 +1360,26 @@ async function loadActuatorsWithNotes() {
     tbody.innerHTML = '<tr><td colspan="9" style="color:var(--fg2)">Aucun actionneur configur&eacute;</td></tr>';
     return;
   }
-  let html = '';
+  // Group actuators by instrument
+  const groups = {};
+  const unassigned = [];
   for (const act of actuators) {
+    const nm = noteMap[act.id];
+    if (nm) {
+      if (!groups[nm.inst]) groups[nm.inst] = [];
+      groups[nm.inst].push(act);
+    } else {
+      unassigned.push(act);
+    }
+  }
+  let html = '';
+  function renderRow(act) {
     const isServo = act.type === 0;
     const behaviors = isServo ? SERVO_BEHAVIORS : SOL_BEHAVIORS;
     const nm = noteMap[act.id];
-    const noteStr = nm ? noteName(nm.note) + ' (' + nm.note + ')' : '';
     html += '<tr>';
     html += '<td>' + act.id + '</td>';
-    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Sol&eacute;no&iuml;de</span>') + '</td>';
+    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Sol\u00e9no\u00efde</span>') + '</td>';
     html += '<td><input class="note-input" type="number" min="0" max="127" value="' + (nm ? nm.note : '') + '" placeholder="-" '
       + 'onchange="setActuatorNote(' + act.id + ',this.value)">';
     if (nm) html += '<span class="note-label">' + noteName(nm.note) + '</span>';
@@ -1376,10 +1389,22 @@ async function loadActuatorsWithNotes() {
     html += '<td>' + act.pca_ch + '</td>';
     html += '<td>' + (behaviors[act.behavior] || '?') + '</td>';
     html += '<td>' + (act.state && act.state.active ? '<span class="badge on">Actif</span>' : '<span class="badge off">Repos</span>') + '</td>';
-    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">Éditer</button> ';
+    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">\u00c9diter</button> ';
     html += '<button class="btn sm" onclick="testActuator(' + act.id + ')">Test</button> ';
     html += '<button class="btn sm" onclick="deleteActuator(' + act.id + ')">Suppr</button></td>';
     html += '</tr>';
+  }
+  // Render each instrument group
+  for (const inst of (instruments || [])) {
+    const acts = groups[inst.index];
+    if (!acts || acts.length === 0) continue;
+    html += '<tr class="inst-separator"><td colspan="9">' + esc(inst.name) + ' <span style="font-weight:400;color:var(--fg2)">(' + acts.length + ')</span></td></tr>';
+    for (const act of acts) renderRow(act);
+  }
+  // Unassigned actuators
+  if (unassigned.length > 0) {
+    html += '<tr class="inst-separator"><td colspan="9">Non assign\u00e9s <span style="font-weight:400;color:var(--fg2)">(' + unassigned.length + ')</span></td></tr>';
+    for (const act of unassigned) renderRow(act);
   }
   tbody.innerHTML = html;
   updateCountBadges();
