@@ -129,7 +129,7 @@ tr:hover td{background:var(--bg2)}
   height:60px;align-self:center;line-height:1;touch-action:manipulation}
 .piano-scroll-wrap .piano-nav:active{background:var(--accent);color:#fff}
 .piano-container{overflow-x:auto;padding:12px 0;-webkit-overflow-scrolling:touch;touch-action:pan-x;flex:1;min-width:0}
-.piano{--wk:40px;display:flex;position:relative;height:130px;user-select:none}
+.piano{--wk:40px;display:flex;position:relative;height:130px;user-select:none;touch-action:none}
 .piano .white{width:var(--wk);height:130px;background:#f0f0f0;border:1px solid #999;
   border-radius:0 0 4px 4px;cursor:pointer;position:relative;z-index:1;
   display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;
@@ -137,7 +137,6 @@ tr:hover td{background:var(--bg2)}
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .piano .white:hover{background:#e0e8f0}
 .piano .white.active{background:var(--accent);color:#fff}
-.piano .white.mapped{background:#d0e8ff}
 .piano .white.muted{display:none}
 .piano .black{width:calc(var(--wk) * 0.65);height:85px;background:#222;border:1px solid #000;
   border-radius:0 0 3px 3px;cursor:pointer;position:absolute;z-index:2;
@@ -145,7 +144,6 @@ tr:hover td{background:var(--bg2)}
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .piano .black:hover{background:#444}
 .piano .black.active{background:var(--accent)}
-.piano .black.mapped{background:#2a5a8f}
 .piano .black.muted{display:none}
 
 /* Section titles — flexbox pour alignement mobile */
@@ -1838,15 +1836,19 @@ function buildAllPianos() {
       if (!notesToRender.has(n)) continue;
       whiteIdxMap[n] = wIdx;
       const k = document.createElement('div');
-      k.className = 'white' + (mappedNotes.has(n) ? ' mapped' : '');
+      const wMapped = mappedNotes.has(n);
+      k.className = 'white';
+      if (!wMapped) { k.style.opacity = '0.4'; k.style.cursor = 'default'; }
       k.dataset.note = n;
       k.dataset.inst = idx;
       k.textContent = noteName(n);
-      k.onmousedown = () => pianoNoteOn(idx, n);
-      k.onmouseup = () => pianoNoteOff(idx, n);
-      k.onmouseleave = () => pianoNoteOff(idx, n);
-      k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
-      k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      if (wMapped) {
+        k.onmousedown = () => pianoNoteOn(idx, n);
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      }
       piano.appendChild(k);
       wIdx++;
     }
@@ -1860,15 +1862,19 @@ function buildAllPianos() {
       if (!(prevWhite in whiteIdxMap)) continue;
       const wi = whiteIdxMap[prevWhite];
       const k = document.createElement('div');
-      k.className = 'black' + (mappedNotes.has(n) ? ' mapped' : '');
+      const bMapped = mappedNotes.has(n);
+      k.className = 'black';
+      if (!bMapped) { k.style.opacity = '0.3'; k.style.cursor = 'default'; }
       k.dataset.note = n;
       k.dataset.inst = idx;
       k.style.left = 'calc(' + (wi + 1) + ' * var(--wk) - var(--wk) * 0.325)';
-      k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
-      k.onmouseup = () => pianoNoteOff(idx, n);
-      k.onmouseleave = () => pianoNoteOff(idx, n);
-      k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
-      k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      if (bMapped) {
+        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      }
       piano.appendChild(k);
     }
 
