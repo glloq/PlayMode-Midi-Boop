@@ -807,37 +807,44 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
-<!-- Modal Add CC Mapping -->
+<!-- Modal Add/Edit CC Mapping -->
 <div class="modal-overlay" id="modal-cc">
-  <div class="modal" style="max-width:400px">
-    <h2>Ajouter un CC Mapping</h2>
+  <div class="modal" style="max-width:440px">
+    <h2 id="modal-cc-title">Ajouter un CC Mapping</h2>
     <div class="form-group">
       <label>Num&eacute;ro CC (0-127)</label>
       <input type="number" id="cc-num" min="0" max="127" value="1">
+      <div class="help">Ex : CC1 = Modulation, CC7 = Volume, CC11 = Expression</div>
     </div>
     <div class="form-group">
-      <label>Actionneur (servo uniquement)</label>
+      <label>Servo contr&ocirc;l&eacute;</label>
       <select id="cc-actuator" class="form-select"></select>
+      <div class="help">Seuls les servos non assign&eacute;s &agrave; un instrument sont disponibles</div>
     </div>
     <div class="form-group">
       <label>Param&egrave;tre cible</label>
-      <select id="cc-target" class="form-select">
-        <option value="0">Position (angle servo)</option>
-        <option value="1">Fr&eacute;quence de mouvement (Hz)</option>
+      <select id="cc-target" class="form-select" onchange="updateCCRangeHints()">
+        <option value="0">Position &mdash; angle du servo (&deg;)</option>
+        <option value="1">Amplitude &mdash; course de frappe (&deg;)</option>
+        <option value="2">Vitesse &mdash; dur&eacute;e du mouvement (ms)</option>
+        <option value="3">PWM maintien &mdash; puissance sol&eacute;no&iuml;de</option>
       </select>
+      <div class="help" id="cc-target-help">Contr&ocirc;le l'angle du servo en temps r&eacute;el</div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Valeur min</label>
-        <input type="number" id="cc-min" min="0" max="127" value="0">
+        <label>Valeur min <span id="cc-min-unit">(&deg;)</span></label>
+        <input type="number" id="cc-min" value="0">
+        <div class="help">Valeur quand CC = 0</div>
       </div>
       <div class="form-group">
-        <label>Valeur max</label>
-        <input type="number" id="cc-max" min="0" max="127" value="127">
+        <label>Valeur max <span id="cc-max-unit">(&deg;)</span></label>
+        <input type="number" id="cc-max" value="180">
+        <div class="help">Valeur quand CC = 127</div>
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn primary" onclick="saveCC()">Ajouter</button>
+      <button class="btn primary" id="cc-save-btn" onclick="saveCC()">Ajouter</button>
       <button class="btn" onclick="closeModal('modal-cc')">Annuler</button>
     </div>
   </div>
@@ -972,11 +979,11 @@ tr:hover td{background:var(--bg2)}
   <div style="margin-bottom:8px">
     <select id="cc-instrument" onchange="loadCCRouting()" class="form-select" style="max-width:250px"></select>
   </div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Contr&ocirc;le continu d'un servo : position ou fr&eacute;quence de mouvement.</p>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Contr&ocirc;le continu d'un servo via CC MIDI : position, amplitude, vitesse ou PWM.</p>
   <div class="table-responsive">
   <table>
-    <thead><tr><th>CC#</th><th>Actionneur</th><th>Cible</th><th>Min</th><th>Max</th><th>Actif</th><th>Actions</th></tr></thead>
-    <tbody id="mapping-cc-table"><tr><td colspan="7" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
+    <thead><tr><th>CC#</th><th>Servo</th><th>Cible</th><th>Plage</th><th>Actif</th><th>Actions</th></tr></thead>
+    <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
   </table>
   </div>
 </div>
@@ -1045,7 +1052,9 @@ let editingActuatorId = -1;
 
 const SERVO_BEHAVIORS = ['Frappe','Alterné','Gratter','Touche'];
 const SOL_BEHAVIORS = ['Frappe','Hit-and-Hold'];
-const CC_TARGETS = ['Position','Fr\u00e9quence (Hz)'];
+const CC_TARGETS = ['Position (\u00b0)','Amplitude (\u00b0)','Vitesse (ms)','PWM maintien'];
+const CC_TARGET_UNITS = ['\u00b0','\u00b0','ms',''];
+const CC_TARGET_RANGES = [[0,180],[0,180],[10,2000],[0,4095]];
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const SCALES = {
   chromatic:{intervals:[0,1,2,3,4,5,6,7,8,9,10,11]},
@@ -1720,19 +1729,20 @@ async function loadCCRouting() {
   const ctbody = document.getElementById('mapping-cc-table');
   if (!ctbody) return;
   if (!r || !r.ccs || r.ccs.length === 0) {
-    ctbody.innerHTML = '<tr><td colspan="7" style="color:var(--fg2)">Aucun mapping CC</td></tr>';
+    ctbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">Aucun mapping CC</td></tr>';
   } else {
     let html = '';
     for (let ci = 0; ci < r.ccs.length; ci++) {
       const cm = r.ccs[ci];
+      const unit = CC_TARGET_UNITS[cm.target] || '';
       html += '<tr>';
       html += '<td>CC ' + cm.cc + '</td>';
-      html += '<td>Actionneur #' + cm.actuator + '</td>';
+      html += '<td>Servo #' + cm.actuator + '</td>';
       html += '<td>' + (CC_TARGETS[cm.target] || '?') + '</td>';
-      html += '<td>' + cm.min + '</td>';
-      html += '<td>' + cm.max + '</td>';
+      html += '<td>' + cm.min + unit + ' \u2192 ' + cm.max + unit + '</td>';
       html += '<td>' + (cm.enabled ? '<span class="badge on">Oui</span>' : '<span class="badge off">Non</span>') + '</td>';
-      html += '<td><button class="btn sm" onclick="deleteCC(' + instIdx + ',' + cm.cc + ')">Suppr</button></td>';
+      html += '<td><button class="btn sm" onclick="editCC(' + instIdx + ',' + cm.cc + ')">\u00c9diter</button> ';
+      html += '<button class="btn sm" onclick="deleteCC(' + instIdx + ',' + cm.cc + ')">Suppr</button></td>';
       html += '</tr>';
     }
     ctbody.innerHTML = html;
@@ -1741,27 +1751,95 @@ async function loadCCRouting() {
   updateCountBadges();
 }
 
-function openAddCCModal() {
-  // Populate actuator select with servo-only actuators
-  const sel = document.getElementById('cc-actuator');
-  sel.innerHTML = '';
-  if (actuators) {
-    for (const a of actuators) {
-      if (a.type === 0) { // Only servos
-        const opt = document.createElement('option');
-        opt.value = a.id;
-        opt.textContent = 'Actionneur #' + a.id + ' (Servo)';
-        sel.appendChild(opt);
+// Build set of actuator IDs used by instrument note mappings
+function getInstrumentActuatorIds() {
+  const used = {};
+  if (routing) {
+    for (const r of routing) {
+      if (r.notes) {
+        for (const n of r.notes) {
+          if (n.enabled) used[n.actuator] = r.instrument;
+        }
       }
     }
   }
-  if (sel.options.length === 0) {
-    sel.innerHTML = '<option value="">Aucun servo disponible</option>';
+  return used;
+}
+
+function populateCCActuatorSelect(selectedActId) {
+  const sel = document.getElementById('cc-actuator');
+  sel.innerHTML = '';
+  const usedByInst = getInstrumentActuatorIds();
+  if (actuators) {
+    for (const a of actuators) {
+      if (a.type !== 0) continue; // Only servos
+      if (usedByInst[a.id] !== undefined) continue; // Skip servos used by instruments
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = 'Servo #' + a.id;
+      if (selectedActId !== undefined && a.id === selectedActId) opt.selected = true;
+      sel.appendChild(opt);
+    }
   }
+  if (sel.options.length === 0) {
+    sel.innerHTML = '<option value="">Aucun servo libre</option>';
+  }
+}
+
+let editingCCNum = -1; // -1 = adding new, >= 0 = editing existing
+
+function openAddCCModal() {
+  editingCCNum = -1;
+  populateCCActuatorSelect();
   document.getElementById('cc-num').value = '1';
-  document.getElementById('cc-min').value = '0';
-  document.getElementById('cc-max').value = '127';
+  document.getElementById('cc-num').disabled = false;
+  document.getElementById('cc-target').value = '0';
+  document.getElementById('modal-cc-title').textContent = 'Ajouter un CC Mapping';
+  document.getElementById('cc-save-btn').textContent = 'Ajouter';
+  updateCCRangeHints();
   document.getElementById('modal-cc').classList.add('show');
+}
+
+function editCC(instIdx, ccNum) {
+  const r = routing ? routing.find(x => x.instrument === instIdx) : null;
+  if (!r || !r.ccs) return;
+  const cm = r.ccs.find(c => c.cc === ccNum);
+  if (!cm) return;
+  editingCCNum = ccNum;
+  populateCCActuatorSelect(cm.actuator);
+  document.getElementById('cc-num').value = cm.cc;
+  document.getElementById('cc-num').disabled = true; // Can't change CC# when editing
+  document.getElementById('cc-actuator').value = cm.actuator;
+  document.getElementById('cc-target').value = cm.target;
+  document.getElementById('cc-min').value = cm.min;
+  document.getElementById('cc-max').value = cm.max;
+  document.getElementById('modal-cc-title').textContent = '\u00c9diter CC ' + ccNum;
+  document.getElementById('cc-save-btn').textContent = 'Sauvegarder';
+  updateCCRangeHints();
+  document.getElementById('modal-cc').classList.add('show');
+}
+
+const CC_TARGET_HELPS = [
+  'Contr\u00f4le l\u2019angle du servo en temps r\u00e9el (0\u00b0\u2013180\u00b0)',
+  'Modifie la course de frappe du servo (\u00b0)',
+  'Modifie la dur\u00e9e du mouvement aller (ms)',
+  'Ajuste la puissance PWM de maintien (sol\u00e9no\u00efde)'
+];
+
+function updateCCRangeHints() {
+  const t = parseInt(document.getElementById('cc-target').value) || 0;
+  const range = CC_TARGET_RANGES[t] || [0,127];
+  const unit = CC_TARGET_UNITS[t] || '';
+  document.getElementById('cc-target-help').textContent = CC_TARGET_HELPS[t] || '';
+  document.getElementById('cc-min-unit').textContent = unit ? '(' + unit + ')' : '';
+  document.getElementById('cc-max-unit').textContent = unit ? '(' + unit + ')' : '';
+  // Set sensible defaults if fields are empty or at old defaults
+  const minEl = document.getElementById('cc-min');
+  const maxEl = document.getElementById('cc-max');
+  if (editingCCNum < 0) {
+    minEl.value = range[0];
+    maxEl.value = range[1];
+  }
 }
 
 async function saveCC() {
@@ -1774,15 +1852,15 @@ async function saveCC() {
   const max = parseInt(document.getElementById('cc-max').value);
   if (isNaN(ccNum) || isNaN(actId)) { toast('Valeurs invalides', 'error'); return; }
 
-  // Get existing CCs and add new one
+  // Get existing CCs and add/replace
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
   let ccs = r && r.ccs ? [...r.ccs] : [];
-  // Replace if same CC# exists
   ccs = ccs.filter(c => c.cc !== ccNum);
   ccs.push({cc: ccNum, actuator: actId, target, min, max, enabled: true});
   await api('/api/routing/cc', 'POST', {instrument: instIdx, ccs});
   closeModal('modal-cc');
-  toast('CC ' + ccNum + ' ajout\u00e9', 'ok');
+  toast(editingCCNum >= 0 ? 'CC ' + ccNum + ' modifi\u00e9' : 'CC ' + ccNum + ' ajout\u00e9', 'ok');
+  editingCCNum = -1;
   loadCCRouting();
 }
 
