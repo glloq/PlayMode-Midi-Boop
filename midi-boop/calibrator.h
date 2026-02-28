@@ -117,6 +117,7 @@ private:
     // --- Méthodes internes ---
     bool    initI2S();
     void    deinitI2S();
+    bool    probeMic();                // Lit des samples pour vérifier qu'un micro est réellement branché
     void    flushI2S();
     bool    readChunk();               // Lit jusqu'à CAL_READ_CHUNK samples, renvoie vrai si ≥1 sample lu
     int32_t detectOnset() const;       // Retourne index dans _i2s_buf ou -1

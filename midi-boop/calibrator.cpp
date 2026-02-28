@@ -333,11 +333,72 @@ bool Calibrator::initI2S() {
     }
 
     i2s_zero_dma_buffer(I2S_PORT);
+
+    // Vérification physique : lire des samples pour détecter un micro réel
+    if (!probeMic()) {
+        i2s_driver_uninstall(I2S_PORT);
+        Serial.println("[CAL] Aucun microphone détecté (signal absent)");
+        return false;
+    }
+
     _i2s_ready = true;
     Serial.printf("[CAL] Microphone I²S prêt (port %d, WS=%d, SCK=%d, SD=%d, %dHz)\n",
                   CAL_I2S_PORT, CAL_I2S_WS_PIN,
                   CAL_I2S_SCK_PIN, CAL_I2S_SD_PIN,
                   CAL_SAMPLE_RATE);
+    return true;
+}
+
+bool Calibrator::probeMic() {
+    // Lire quelques blocs de samples et vérifier qu'il y a un signal non-nul.
+    // Sans micro branché, le bus I2S retourne des zéros ou des valeurs saturées identiques.
+    const int PROBE_READS = 3;
+    uint32_t non_zero = 0;
+    uint32_t total = 0;
+    int32_t first_val = 0;
+    uint32_t identical = 0;
+
+    // Attente courte pour que le DMA se remplisse
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    for (int r = 0; r < PROBE_READS; r++) {
+        size_t bytes_read = 0;
+        esp_err_t err = i2s_read(I2S_PORT, _i2s_buf, sizeof(_i2s_buf),
+                                  &bytes_read, pdMS_TO_TICKS(50));
+        if (err != ESP_OK || bytes_read == 0) continue;
+
+        uint32_t samples = bytes_read / sizeof(int32_t);
+        for (uint32_t i = 0; i < samples; i++) {
+            total++;
+            if (_i2s_buf[i] != 0) non_zero++;
+            if (total == 1) {
+                first_val = _i2s_buf[i];
+            } else if (_i2s_buf[i] == first_val) {
+                identical++;
+            }
+        }
+    }
+
+    if (total == 0) {
+        Serial.println("[CAL] Probe : aucun sample lu");
+        return false;
+    }
+
+    // Aucun sample non-nul → pas de micro (bus flottant = zéros)
+    if (non_zero == 0) {
+        Serial.printf("[CAL] Probe : %lu samples tous à zéro\n", (unsigned long)total);
+        return false;
+    }
+
+    // Tous les samples identiques → pas de micro (valeur figée)
+    if (identical >= total - 1) {
+        Serial.printf("[CAL] Probe : %lu samples identiques (0x%08lX)\n",
+                      (unsigned long)total, (unsigned long)(uint32_t)first_val);
+        return false;
+    }
+
+    Serial.printf("[CAL] Probe OK : %lu/%lu samples non-nuls\n",
+                  (unsigned long)non_zero, (unsigned long)total);
     return true;
 }
 

@@ -40,8 +40,7 @@ a{color:var(--accent);text-decoration:none}
   padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .header h1{font-size:18px;font-weight:600}
 .header h1 span{color:var(--accent)}
-.header .status{margin-left:auto;font-size:12px;color:var(--fg2);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header .status{margin-left:auto}
 .header .dot{width:8px;height:8px;border-radius:50%;display:inline-block;
   margin-right:4px;background:var(--green)}
 .header .dot.off{background:var(--red)}
@@ -123,27 +122,25 @@ tr:hover td{background:var(--bg2)}
 .modal h2{font-size:16px;margin-bottom:16px}
 
 /* Piano — touches plus larges pour le tactile */
-.piano-container{overflow-x:auto;padding:12px 0;-webkit-overflow-scrolling:touch}
-.piano{display:flex;position:relative;height:130px;user-select:none;touch-action:none}
-.piano .white{width:40px;height:130px;background:#f0f0f0;border:1px solid #999;
+.piano-container{overflow-x:auto;padding:12px 0;-webkit-overflow-scrolling:touch;touch-action:pan-x}
+.piano{--wk:40px;display:flex;position:relative;height:130px;user-select:none}
+.piano .white{width:var(--wk);height:130px;background:#f0f0f0;border:1px solid #999;
   border-radius:0 0 4px 4px;cursor:pointer;position:relative;z-index:1;
   display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;
-  font-size:9px;color:#666;transition:background .1s;
+  font-size:9px;color:#666;transition:background .1s;flex-shrink:0;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .piano .white:hover{background:#e0e8f0}
 .piano .white.active{background:var(--accent);color:#fff}
 .piano .white.mapped{background:#d0e8ff}
-.piano .white.muted{background:#e8e8e8;color:#bbb;cursor:default;opacity:.5}
-.piano .white.muted:hover{background:#e8e8e8}
-.piano .black{width:26px;height:85px;background:#222;border:1px solid #000;
+.piano .white.muted{display:none}
+.piano .black{width:calc(var(--wk) * 0.65);height:85px;background:#222;border:1px solid #000;
   border-radius:0 0 3px 3px;cursor:pointer;position:absolute;z-index:2;
-  margin-left:-13px;transition:background .1s;
+  transition:background .1s;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .piano .black:hover{background:#444}
 .piano .black.active{background:var(--accent)}
 .piano .black.mapped{background:#2a5a8f}
-.piano .black.muted{background:#666;opacity:.4;cursor:default}
-.piano .black.muted:hover{background:#666}
+.piano .black.muted{display:none}
 
 /* Section titles — flexbox pour alignement mobile */
 .section-title{font-size:16px;font-weight:600;margin-bottom:16px;
@@ -164,7 +161,7 @@ tr:hover td{background:var(--bg2)}
   .form-group input,.form-group select{font-size:16px}
   .header{padding:12px}
   .header h1{font-size:20px}
-  .header .status{font-size:10px;flex-wrap:wrap}
+  .header .status{}
   .log-container{max-height:calc(100vh - 150px)}
   .modal{padding:14px;width:95%}
   .section-title{font-size:14px;flex-wrap:wrap;gap:6px}
@@ -173,9 +170,9 @@ tr:hover td{background:var(--bg2)}
   table{font-size:12px;min-width:500px}
   table th,table td{padding:6px 4px;white-space:nowrap}
   .piano-container{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px}
-  .piano{min-width:auto}
-  .piano .white{width:28px;font-size:7px}
-  .piano .black{width:20px;height:70px}
+  .piano{--wk:44px;min-width:auto;height:120px}
+  .piano .white{height:120px;font-size:8px}
+  .piano .black{height:75px}
   .welcome h2{font-size:22px}
   .welcome-steps{flex-direction:column;align-items:center}
   .welcome-step{max-width:100%;min-width:auto}
@@ -183,9 +180,9 @@ tr:hover td{background:var(--bg2)}
 }
 @media(max-width:380px){
   .cards{grid-template-columns:1fr}
-  .header .status span:not(#ws-status){display:none}
-  .piano .white{width:22px;font-size:6px}
-  .piano .black{width:16px;height:60px}
+  .piano{--wk:40px;height:110px}
+  .piano .white{height:110px;font-size:7px}
+  .piano .black{height:68px}
   nav button{font-size:11px;padding:6px 8px}
 }
 @media(min-width:601px) and (max-width:768px){
@@ -289,9 +286,6 @@ tr:hover td{background:var(--bg2)}
   <h1>Midi <span>B&infin;p</span></h1>
   <div class="status">
     <span class="dot" id="ws-dot"></span>
-    <span id="ws-status">Connexion...</span>
-    &nbsp;|&nbsp; Heap: <span id="heap">-</span>
-    &nbsp;|&nbsp; Uptime: <span id="uptime">-</span>
   </div>
   <button class="gear-btn" onclick="showPage('settings')" title="R&eacute;glages syst&egrave;me">&#9881;</button>
 </div>
@@ -969,7 +963,7 @@ tr:hover td{background:var(--bg2)}
 <!-- ============ CALIBRATION ACOUSTIQUE (visible uniquement si micro) ============ -->
 <div class="page" id="page-calibration">
   <div class="section-title">Calibration Acoustique</div>
-  <div class="mic-status ok" id="mic-status">Microphone d&eacute;tect&eacute;</div>
+  <div class="mic-status" id="mic-status">V&eacute;rification du microphone...</div>
   <div id="cal-controls">
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
       <div class="card">
@@ -1087,10 +1081,6 @@ function connectWS() {
 }
 
 function updateDashboard(d) {
-  // Header
-  el('heap', formatBytes(d.heap || 0));
-  el('uptime', formatUptime(d.uptime_s || 0));
-
   // MIDI Transport
   if (d.midi) {
     el('d-midi-recv', (d.midi.serial_bytes || 0) + (d.midi.udp_packets || 0) + (d.midi.rtp_packets || 0));
@@ -1223,18 +1213,6 @@ async function api(url, method='GET', body=null) {
 function el(id, val) {
   const e = document.getElementById(id);
   if (e) e.textContent = val;
-}
-
-function formatBytes(b) {
-  if (b > 1024) return (b/1024).toFixed(1) + ' KB';
-  return b + ' B';
-}
-
-function formatUptime(s) {
-  const h = Math.floor(s/3600);
-  const m = Math.floor((s%3600)/60);
-  const sec = s%60;
-  return (h>0 ? h+'h ' : '') + m+'m ' + sec+'s';
 }
 
 // ============================================================================
@@ -1806,53 +1784,77 @@ function buildAllPianos() {
     piano.className = 'piano';
     piano.id = 'piano-' + idx;
 
-    // Compute note range
+    // Compute note range — tight range around mapped notes
     const minNote = Math.min(...mappedNotes);
     const maxNote = Math.max(...mappedNotes);
-    let startNote = Math.max(0, (Math.floor((minNote - 2) / 12)) * 12);
-    let endNote = Math.min(128, (Math.ceil((maxNote + 3) / 12)) * 12);
-    if (endNote - startNote < 24) {
-      const mid = Math.floor((startNote + endNote) / 2);
-      startNote = Math.max(0, mid - 12);
-      endNote = Math.min(128, mid + 12);
-    }
+    // Pad 1 note below and above to give context, clamp to octave boundary
+    let startNote = Math.max(0, minNote - 1);
+    // Align to nearest white key below
+    while (startNote > 0 && [1,3,6,8,10].includes(startNote % 12)) startNote--;
+    let endNote = Math.min(128, maxNote + 2);
+    // Align to nearest white key above
+    while (endNote < 128 && [1,3,6,8,10].includes(endNote % 12)) endNote++;
 
-    // White keys
-    let wCount = 0;
-    for (let n = startNote; n < endNote; n++) {
+    // Build list of notes to render (only mapped + their black neighbors)
+    const notesToRender = new Set();
+    for (let n = startNote; n <= endNote; n++) {
       const nio = n % 12;
-      if (![1,3,6,8,10].includes(nio)) {
-        const k = document.createElement('div');
-        k.className = 'white' + (!mappedNotes.has(n) ? ' muted' : '');
-        k.dataset.note = n;
-        k.dataset.inst = idx;
-        k.textContent = noteName(n);
-        k.onmousedown = () => pianoNoteOn(idx, n);
-        k.onmouseup = () => pianoNoteOff(idx, n);
-        k.onmouseleave = () => pianoNoteOff(idx, n);
-        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
-        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
-        piano.appendChild(k);
-        wCount++;
+      const isBlack = [1,3,6,8,10].includes(nio);
+      if (mappedNotes.has(n)) {
+        notesToRender.add(n);
+        // Add adjacent white keys for context around black mapped notes
+        if (isBlack) {
+          notesToRender.add(n - 1);
+          if (n + 1 <= endNote) notesToRender.add(n + 1);
+        }
+        // Add black keys between consecutive mapped white keys
+        if (!isBlack && mappedNotes.has(n + 2) && [1,3,6,8,10].includes((n+1) % 12)) {
+          notesToRender.add(n + 1);
+        }
       }
     }
-    // Black keys
+
+    // White keys first (they define layout flow)
     let wIdx = 0;
-    for (let n = startNote; n < endNote; n++) {
+    const whiteIdxMap = {}; // note -> white key index (for black key positioning)
+    for (let n = startNote; n <= endNote; n++) {
       const nio = n % 12;
-      if ([1,3,6,8,10].includes(nio)) {
-        const k = document.createElement('div');
-        k.className = 'black' + (!mappedNotes.has(n) ? ' muted' : '');
-        k.dataset.note = n;
-        k.dataset.inst = idx;
-        k.style.left = (wIdx * 40 - 13) + 'px';
-        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
-        k.onmouseup = () => pianoNoteOff(idx, n);
-        k.onmouseleave = () => pianoNoteOff(idx, n);
-        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
-        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
-        piano.appendChild(k);
-      } else { wIdx++; }
+      if ([1,3,6,8,10].includes(nio)) continue; // skip black
+      if (!notesToRender.has(n)) continue;
+      whiteIdxMap[n] = wIdx;
+      const k = document.createElement('div');
+      k.className = 'white' + (mappedNotes.has(n) ? ' mapped' : '');
+      k.dataset.note = n;
+      k.dataset.inst = idx;
+      k.textContent = noteName(n);
+      k.onmousedown = () => pianoNoteOn(idx, n);
+      k.onmouseup = () => pianoNoteOff(idx, n);
+      k.onmouseleave = () => pianoNoteOff(idx, n);
+      k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+      k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      piano.appendChild(k);
+      wIdx++;
+    }
+    // Black keys — positioned relative to the white key on their left
+    for (let n = startNote; n <= endNote; n++) {
+      const nio = n % 12;
+      if (![1,3,6,8,10].includes(nio)) continue; // skip white
+      if (!notesToRender.has(n)) continue;
+      // Find the white key just below this black key
+      const prevWhite = n - 1; // always a white key for standard black positions
+      if (!(prevWhite in whiteIdxMap)) continue;
+      const wi = whiteIdxMap[prevWhite];
+      const k = document.createElement('div');
+      k.className = 'black' + (mappedNotes.has(n) ? ' mapped' : '');
+      k.dataset.note = n;
+      k.dataset.inst = idx;
+      k.style.left = 'calc(' + (wi + 1) + ' * var(--wk) - var(--wk) * 0.325)';
+      k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
+      k.onmouseup = () => pianoNoteOff(idx, n);
+      k.onmouseleave = () => pianoNoteOff(idx, n);
+      k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+      k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+      piano.appendChild(k);
     }
 
     pianoWrap.appendChild(piano);
