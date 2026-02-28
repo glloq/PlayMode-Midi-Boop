@@ -969,7 +969,7 @@ tr:hover td{background:var(--bg2)}
 <!-- ============ CALIBRATION ACOUSTIQUE (visible uniquement si micro) ============ -->
 <div class="page" id="page-calibration">
   <div class="section-title">Calibration Acoustique</div>
-  <div class="mic-status ok" id="mic-status">Microphone d&eacute;tect&eacute;</div>
+  <div class="mic-status" id="mic-status">V&eacute;rification du microphone...</div>
   <div id="cal-controls">
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
       <div class="card">
