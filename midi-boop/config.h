@@ -46,7 +46,8 @@
 #define SCHEDULER_MAX_EVENTS    128     // Max événements dans la priority queue
 
 // --- Actionneurs ---
-#define MAX_ACTUATORS           32      // Max actionneurs total (2 bus × 4 PCA × 16 ch = 128 théorique)
+#define MAX_ACTUATORS_PER_INSTRUMENT  (PCA_MAX_PER_BUS * PCA_CHANNELS) // 4 PCA × 16 ch = 64
+#define MAX_ACTUATORS           64      // Max actionneurs total
 #define MAX_INSTRUMENTS         8       // Max instruments simultanés
 
 // --- Sécurité ---

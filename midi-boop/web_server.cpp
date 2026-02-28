@@ -392,7 +392,7 @@ void WebServer::handleGetStatus(AsyncWebServerRequest* request) {
 void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    DynamicJsonDocument doc(2048);
+    DynamicJsonDocument doc(8192);
     JsonArray arr = doc.to<JsonArray>();
 
     InstrumentConfig* instruments = _config->getInstruments();
@@ -444,10 +444,11 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
 
         // Paramètres servo
         if (actuators[i].type == ACT_SERVO) {
-            obj["angle_init"] = actuators[i].angle_initial;
-            obj["amplitude"]  = actuators[i].amplitude;
-            obj["speed_ms"]   = actuators[i].speed_ms;
-            obj["angle_b"]    = actuators[i].angle_b;
+            obj["angle_init"]   = actuators[i].angle_initial;
+            obj["amplitude"]    = actuators[i].amplitude;
+            obj["speed_ms"]     = actuators[i].speed_ms;
+            obj["angle_b"]      = actuators[i].angle_b;
+            obj["hit_reverse"]  = actuators[i].hit_reverse;
         }
         // Paramètres solénoïde
         else {
@@ -668,7 +669,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     JsonArray acts = doc["actuators"];
     if (!acts.isNull()) {
         for (JsonObject a : acts) {
-            if (inst.actuator_count >= PCA_CHANNELS) break;
+            if (inst.actuator_count >= MAX_ACTUATORS_PER_INSTRUMENT) break;
             inst.actuator_ids[inst.actuator_count] = a["id"] | 0;
             inst.midi_notes[inst.actuator_count]   = a["note"] | MIDI_NOTE_UNMAPPED;
             inst.actuator_count++;
@@ -736,6 +737,7 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     act.amplitude     = doc["amplitude"] | 45;
     act.speed_ms      = doc["speed_ms"] | 150;
     act.angle_b       = doc["angle_b"] | 120;
+    act.hit_reverse   = doc["hit_reverse"] | false;
 
     // Paramètres solénoïde
     act.pulse_ms      = doc["pulse_ms"] | 20;
@@ -1326,7 +1328,8 @@ void WebServer::handleGetCalibrateStatus(AsyncWebServerRequest* request) {
         return;
     }
 
-    doc["available"]    = true;
+    bool micReady = _calibrator->isMicReady();
+    doc["available"]    = micReady;
     doc["state"]        = calStateName(_calibrator->getState());
     doc["running"]      = _calibrator->isRunning();
     doc["progress"]     = _calibrator->getProgress();

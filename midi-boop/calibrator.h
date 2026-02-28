@@ -62,6 +62,7 @@ public:
     bool             isRunning()            const;
     uint8_t          getProgress()          const;  // 0-100 %
     uint8_t          getCurrentActuatorId() const;
+    bool             isMicReady()           const { return _i2s_ready; }
 
     // --- Résultats ---
     const CalibrationResult* getResult(uint8_t actuator_id) const;

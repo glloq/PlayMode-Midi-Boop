@@ -61,6 +61,7 @@ struct ActuatorConfig {
     uint16_t amplitude;          // Amplitude de mouvement (degrés)
     uint16_t speed_ms;           // Durée du mouvement (ms)
     uint16_t angle_b;            // Angle B pour mode alterné
+    bool     hit_reverse;        // Sens de frappe : false = horaire (+), true = anti-horaire (-)
 
     // Paramètres solénoïde
     uint16_t pulse_ms;           // Durée frappe (ms)
@@ -91,8 +92,8 @@ struct InstrumentConfig {
     char name[32];               // Nom de l'instrument
     uint8_t midi_channel;        // Canal MIDI assigné (0-15)
     uint8_t bus_id;              // Bus I²C dédié
-    uint8_t actuator_ids[PCA_CHANNELS]; // IDs des actionneurs associés
-    uint8_t midi_notes[PCA_CHANNELS];   // Note MIDI pour chaque actionneur (0xFF = non mappé)
+    uint8_t actuator_ids[MAX_ACTUATORS_PER_INSTRUMENT]; // IDs des actionneurs associés
+    uint8_t midi_notes[MAX_ACTUATORS_PER_INSTRUMENT];   // Note MIDI pour chaque actionneur (0xFF = non mappé)
     uint8_t actuator_count;      // Nombre d'actionneurs
     uint16_t default_latency_ms; // Latence par défaut
     bool auto_calibration;       // Calibration auto activée

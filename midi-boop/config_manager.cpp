@@ -363,6 +363,7 @@ void ConfigManager::serializeActuator(const ActuatorConfig& act, JsonObject& obj
         obj["amplitude"] = act.amplitude;
         obj["speed_ms"] = act.speed_ms;
         obj["angle_b"] = act.angle_b;
+        obj["hit_reverse"] = act.hit_reverse;
     } else {
         const char* behaviors[] = {"frappe", "hit_and_hold"};
         obj["behavior"] = behaviors[act.behavior % 2];
@@ -396,6 +397,7 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
         act.amplitude = obj["amplitude"] | 45;
         act.speed_ms = obj["speed_ms"] | 100;
         act.angle_b = obj["angle_b"] | 135;
+        act.hit_reverse = obj["hit_reverse"] | false;
     } else {
         if (strcmp(behavior_str, "hit_and_hold") == 0) act.behavior = SOL_HIT_AND_HOLD;
         else act.behavior = SOL_FRAPPE;
@@ -469,7 +471,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
     inst.actuator_count = 0;
     JsonArray actIds = obj["actuator_ids"].as<JsonArray>();
     for (JsonVariant v : actIds) {
-        if (inst.actuator_count < PCA_CHANNELS) {
+        if (inst.actuator_count < MAX_ACTUATORS_PER_INSTRUMENT) {
             inst.actuator_ids[inst.actuator_count] = v.as<uint8_t>();
             inst.actuator_count++;
         }
@@ -480,7 +482,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
     JsonArray noteIds = obj["midi_notes"].as<JsonArray>();
     uint8_t noteIdx = 0;
     for (JsonVariant v : noteIds) {
-        if (noteIdx < PCA_CHANNELS) {
+        if (noteIdx < MAX_ACTUATORS_PER_INSTRUMENT) {
             inst.midi_notes[noteIdx] = v.as<uint8_t>();
             noteIdx++;
         }

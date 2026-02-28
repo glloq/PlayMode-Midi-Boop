@@ -300,7 +300,8 @@ tr:hover td{background:var(--bg2)}
 <nav id="main-nav">
   <button class="active" onclick="showPage('instrument')">Instrument</button>
   <button onclick="showPage('midi')">MIDI</button>
-  <button onclick="showPage('calibration')">Calibration</button>
+  <button onclick="showPage('actuators')">Actionneurs</button>
+  <button onclick="showPage('calibration')" id="nav-cal" style="display:none">Calibration</button>
 </nav>
 
 <!-- ============ WELCOME (First-run) ============ -->
@@ -385,20 +386,6 @@ tr:hover td{background:var(--bg2)}
     </div>
   </div>
 
-  <div class="section-collapse" style="margin-top:12px">
-    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
-      <span>Actionneurs actifs</span>
-    </button>
-    <div class="section-collapse-body">
-      <div class="table-responsive">
-      <table>
-        <thead><tr><th>ID</th><th>Type</th><th>&Eacute;tat</th><th>Position</th></tr></thead>
-        <tbody id="d-active-table"><tr><td colspan="4" style="color:var(--fg2)">Aucun actionneur actif</td></tr></tbody>
-      </table>
-      </div>
-    </div>
-  </div>
-
   <!-- Polyphonie -->
   <div class="section-title" style="margin-top:24px">Polyphonie</div>
   <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
@@ -466,10 +453,6 @@ tr:hover td{background:var(--bg2)}
         <div class="form-group">
           <label>Polyphonie max (s&eacute;curit&eacute;)</label>
           <input type="number" id="sf-poly" value="12" min="1" max="32">
-        </div>
-        <div class="form-group">
-          <label>Courant max (mA)</label>
-          <input type="number" id="sf-current" value="5000" min="500" max="20000">
         </div>
       </div>
       <button class="btn primary sm" onclick="saveSafetyConfig()">Appliquer limites</button>
@@ -708,10 +691,20 @@ tr:hover td{background:var(--bg2)}
       <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
         <div style="font-size:13px;font-weight:600;margin-bottom:8px">R&eacute;glages servo</div>
       </div>
-      <div class="form-group">
-        <label>Mode de jeu</label>
-        <select id="ma-servo-behavior"><option value="0">Frappe (aller-retour rapide)</option><option value="1">Altern&eacute; (bascule A/B)</option><option value="2">Gratter (mouvement continu)</option><option value="3">Touche (maintien appuy&eacute;)</option></select>
-        <div class="help">Frappe : percussion | Altern&eacute; : bascule entre 2 positions | Gratter : va-et-vient | Touche : maintien</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Mode de jeu</label>
+          <select id="ma-servo-behavior" onchange="toggleServoDirection()"><option value="0">Frappe (aller-retour rapide)</option><option value="1">Altern&eacute; (bascule A/B)</option><option value="2">Gratter (mouvement continu)</option><option value="3">Touche (maintien appuy&eacute;)</option></select>
+          <div class="help">Frappe : percussion | Altern&eacute; : bascule entre 2 positions | Gratter : va-et-vient | Touche : maintien</div>
+        </div>
+        <div class="form-group" id="servo-direction-group">
+          <label>Sens de frappe</label>
+          <select id="ma-hit-reverse">
+            <option value="0">Horaire (+) &mdash; repos &rarr; repos + amplitude</option>
+            <option value="1">Anti-horaire (&minus;) &mdash; repos &rarr; repos &minus; amplitude</option>
+          </select>
+          <div class="help">Direction du mouvement par rapport &agrave; l'angle de repos</div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -751,7 +744,7 @@ tr:hover td{background:var(--bg2)}
       </div>
       <div class="form-group">
         <label>Mode de frappe</label>
-        <select id="ma-sol-behavior"><option value="0">Frappe (impulsion courte)</option><option value="1">Hit-and-Hold (frappe puis maintien)</option></select>
+        <select id="ma-sol-behavior" onchange="toggleHitHoldFields()"><option value="0">Frappe (impulsion courte)</option><option value="1">Hit-and-Hold (frappe puis maintien)</option></select>
         <div class="help">Frappe : impulsion br&egrave;ve | Hit-and-Hold : frappe forte puis maintien doux</div>
       </div>
       <div class="form-row">
@@ -773,7 +766,7 @@ tr:hover td{background:var(--bg2)}
           <div class="help">Puissance initiale de frappe. 4095 = maximum</div>
         </div>
       </div>
-      <div class="expert-section">
+      <div id="hit-hold-fields" class="expert-section" style="display:none">
         <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Hit-and-Hold (avanc&eacute;)</button>
         <div class="expert-body">
           <div class="form-row">
@@ -887,7 +880,7 @@ tr:hover td{background:var(--bg2)}
       <div class="form-row tri">
         <div class="form-group">
           <label>Actionneurs</label>
-          <input type="number" id="wiz-count" min="1" max="32" value="8" oninput="wizBuildNoteTable()">
+          <input type="number" id="wiz-count" min="1" max="64" value="8" oninput="wizBuildNoteTable()">
         </div>
         <div class="form-group">
           <label>Gamme</label>
@@ -943,7 +936,8 @@ tr:hover td{background:var(--bg2)}
 </div>
 
 <!-- ============ CALIBRATION (Actionneurs + CC + Calibration acoustique) ============ -->
-<div class="page" id="page-calibration">
+<!-- ============ ACTIONNEURS (table + CC mapping) ============ -->
+<div class="page" id="page-actuators">
 
   <!-- === Actionneurs === -->
   <div class="section-title"><span>Actionneurs</span>
@@ -970,50 +964,50 @@ tr:hover td{background:var(--bg2)}
     <tbody id="mapping-cc-table"><tr><td colspan="7" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
   </table>
   </div>
+</div>
 
-  <!-- === Calibration acoustique (hidden if no mic) === -->
-  <div id="cal-section" style="margin-top:24px;display:none">
-    <div class="section-title">Calibration Acoustique</div>
-    <div class="mic-status ok" id="mic-status">Microphone d&eacute;tect&eacute;</div>
-    <div id="cal-controls">
-      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-        <div class="card">
-          <h3>&Eacute;tat</h3>
-          <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
-        </div>
-        <div class="card">
-          <h3>Progression</h3>
-          <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
-          <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
-        </div>
-        <div class="card">
-          <h3>Actionneur</h3>
-          <div class="val" id="cal-cur-act">&mdash;</div>
-        </div>
-        <div class="card">
-          <h3>R&eacute;sultats</h3>
-          <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
-        </div>
+<!-- ============ CALIBRATION ACOUSTIQUE (visible uniquement si micro) ============ -->
+<div class="page" id="page-calibration">
+  <div class="section-title">Calibration Acoustique</div>
+  <div class="mic-status ok" id="mic-status">Microphone d&eacute;tect&eacute;</div>
+  <div id="cal-controls">
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+      <div class="card">
+        <h3>&Eacute;tat</h3>
+        <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
       </div>
-      <div class="btn-row" style="margin:16px 0">
-        <button class="btn primary sm" onclick="startCalibrateAll()">&#9654; Calibrer tous</button>
-        <button class="btn sm" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
-        <button class="btn danger sm" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Arr&ecirc;ter</button>
-        <button class="btn sm" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Appliquer</button>
-        <button class="btn sm" onclick="loadCalibrateResults()" style="margin-left:auto">&#8635;</button>
+      <div class="card">
+        <h3>Progression</h3>
+        <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
+        <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
       </div>
-      <div id="cal-single-sel" style="display:none;margin-bottom:12px">
-        <label style="font-size:13px;margin-right:8px">Actionneur :</label>
-        <select id="cal-act-select" class="form-select"></select>
-        <button class="btn primary sm" style="margin-left:8px" onclick="confirmCalibrateOne()">Go</button>
-        <button class="btn sm" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">&#10005;</button>
+      <div class="card">
+        <h3>Actionneur</h3>
+        <div class="val" id="cal-cur-act">&mdash;</div>
       </div>
-      <div class="table-responsive">
-      <table>
-        <thead><tr><th>ID</th><th>Type</th><th>Latence actuelle</th><th>Latence mesur&eacute;e</th><th>Mesures</th><th>&Eacute;tat</th></tr></thead>
-        <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Lancez une calibration</td></tr></tbody>
-      </table>
+      <div class="card">
+        <h3>R&eacute;sultats</h3>
+        <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
       </div>
+    </div>
+    <div class="btn-row" style="margin:16px 0">
+      <button class="btn primary sm" onclick="startCalibrateAll()">&#9654; Calibrer tous</button>
+      <button class="btn sm" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
+      <button class="btn danger sm" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Arr&ecirc;ter</button>
+      <button class="btn sm" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Appliquer</button>
+      <button class="btn sm" onclick="loadCalibrateResults()" style="margin-left:auto">&#8635;</button>
+    </div>
+    <div id="cal-single-sel" style="display:none;margin-bottom:12px">
+      <label style="font-size:13px;margin-right:8px">Actionneur :</label>
+      <select id="cal-act-select" class="form-select"></select>
+      <button class="btn primary sm" style="margin-left:8px" onclick="confirmCalibrateOne()">Go</button>
+      <button class="btn sm" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">&#10005;</button>
+    </div>
+    <div class="table-responsive">
+    <table>
+      <thead><tr><th>ID</th><th>Type</th><th>Latence actuelle</th><th>Latence mesur&eacute;e</th><th>Mesures</th><th>&Eacute;tat</th></tr></thead>
+      <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Lancez une calibration</td></tr></tbody>
+    </table>
     </div>
   </div>
 </div>
@@ -1030,7 +1024,7 @@ let currentPage = 'instrument';
 let instruments = [];
 let actuators = [];
 let routing = [];
-let pianoNotes = {}; // note -> actuator_id mapping
+let pianoNotes = {}; // instIndex -> { note -> actuator_id }
 let editingInstrumentIdx = -1;
 let editingActuatorId = -1;
 
@@ -1152,24 +1146,8 @@ function updateDashboard(d) {
     el('d-wifi-status', d.wifi.connected ? 'Connecté' : 'Déconnecté');
   }
 
-  // Active actuators table
+  // Update piano active notes
   if (d.active_actuators) {
-    const tbody = document.getElementById('d-active-table');
-    if (d.active_actuators.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg2)">Aucun actionneur actif</td></tr>';
-    } else {
-      let html = '';
-      for (const a of d.active_actuators) {
-        const act = actuators.find(x => x.id === a.id);
-        html += '<tr><td>' + a.id + '</td>';
-        html += '<td>' + (act ? (act.type === 0 ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Solénoïde</span>') : '-') + '</td>';
-        html += '<td><span class="badge on">Actif</span></td>';
-        html += '<td>' + a.pos + '</td></tr>';
-      }
-      tbody.innerHTML = html;
-    }
-
-    // Update piano active notes
     updatePianoActive(d.active_actuators);
   }
 }
@@ -1178,9 +1156,6 @@ function updateAlerts(d) {
   let html = '';
   if (d.safety && d.safety.kill_switch) {
     html += '<div class="alert danger">KILL SWITCH ACTIF — Toutes les sorties sont désactivées</div>';
-  }
-  if (d.safety && d.safety.over_current) {
-    html += '<div class="alert danger">SURINTENSITÉ — Courant estimé dépasse la limite</div>';
   }
   if (d.safety && d.safety.degradation) {
     html += '<div class="alert warn">DÉGRADATION — Approche du seuil de sécurité</div>';
@@ -1193,9 +1168,6 @@ function updateAlerts(d) {
   let safetyHtml = '';
   if (d.safety && d.safety.kill_switch) {
     safetyHtml += '<div class="alert danger">KILL SWITCH ACTIF</div>';
-  }
-  if (d.safety && d.safety.over_current) {
-    safetyHtml += '<div class="alert danger">SURINTENSITÉ DÉTECTÉE</div>';
   }
   const sz = document.getElementById('safety-alert-zone');
   if (sz) sz.innerHTML = safetyHtml;
@@ -1227,9 +1199,11 @@ function showPage(page) {
     loadHomeInstruments(); loadInstrumentSelects(); buildAllPianos();
   }
   if (page === 'midi') { loadMidiConfig(); }
-  if (page === 'calibration') {
+  if (page === 'actuators') {
     loadActuatorsWithNotes(); loadInstrumentSelects(); loadCCRouting();
-    checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults();
+  }
+  if (page === 'calibration') {
+    loadCalibrateStatus(); loadCalibrateResults();
   }
   if (page === 'settings') {
     loadPower(); loadSafety(); loadLogs(); loadWiFiConfig(); loadBuses();
@@ -1450,7 +1424,24 @@ function toggleActuatorFields() {
   if (editingActuatorId < 0) {
     document.getElementById('ma-bus').value = type === '1' ? '1' : '0';
   }
+  toggleHitHoldFields();
+  toggleServoDirection();
   updateAnglePreview();
+}
+
+function toggleHitHoldFields() {
+  const el = document.getElementById('hit-hold-fields');
+  if (!el) return;
+  const mode = document.getElementById('ma-sol-behavior').value;
+  el.style.display = (mode === '1') ? 'block' : 'none';
+}
+
+function toggleServoDirection() {
+  const el = document.getElementById('servo-direction-group');
+  if (!el) return;
+  const mode = document.getElementById('ma-servo-behavior').value;
+  // Show direction only for frappe (0) and touche (3)
+  el.style.display = (mode === '0' || mode === '3') ? 'block' : 'none';
 }
 
 function openActuatorModal() {
@@ -1506,10 +1497,12 @@ function editActuator(id) {
   toggleActuatorFields();
   if (act.type === 0) {
     document.getElementById('ma-servo-behavior').value = act.behavior || 0;
+    document.getElementById('ma-hit-reverse').value = act.hit_reverse ? '1' : '0';
     document.getElementById('ma-angle-init').value = act.angle_init !== undefined ? act.angle_init : 90;
     document.getElementById('ma-amplitude').value = act.amplitude !== undefined ? act.amplitude : 45;
     document.getElementById('ma-speed').value = act.speed_ms || 150;
     document.getElementById('ma-angle-b').value = act.angle_b !== undefined ? act.angle_b : 120;
+    toggleServoDirection();
   } else {
     document.getElementById('ma-sol-behavior').value = act.behavior || 0;
     document.getElementById('ma-pulse-min').value = act.pulse_min_ms !== undefined ? act.pulse_min_ms : 5;
@@ -1517,6 +1510,7 @@ function editActuator(id) {
     document.getElementById('ma-pwm-init').value = act.pwm_initial !== undefined ? act.pwm_initial : 4095;
     document.getElementById('ma-pwm-hold').value = act.pwm_hold !== undefined ? act.pwm_hold : 2048;
     document.getElementById('ma-ramp').value = act.ramp_ms || 50;
+    toggleHitHoldFields();
   }
   document.getElementById('modal-act-title').textContent = 'Modifier actionneur #' + id;
   document.getElementById('modal-actuator').classList.add('show');
@@ -1537,6 +1531,7 @@ async function saveActuator() {
 
   if (type === 0) { // Servo
     data.behavior = parseInt(document.getElementById('ma-servo-behavior').value);
+    data.hit_reverse = document.getElementById('ma-hit-reverse').value === '1';
     data.angle_init = parseInt(document.getElementById('ma-angle-init').value);
     data.amplitude = parseInt(document.getElementById('ma-amplitude').value);
     data.speed_ms = parseInt(document.getElementById('ma-speed').value);
@@ -1780,13 +1775,15 @@ function buildAllPianos() {
   }
 
   for (const inst of instruments) {
-    const r = routing ? routing.find(x => x.instrument === inst.index) : null;
+    const idx = inst.index;
+    const r = routing ? routing.find(x => x.instrument === idx) : null;
     let mappedNotes = new Set();
+    pianoNotes[idx] = {};
     if (r && r.notes) {
       for (const nm of r.notes) {
         if (nm.enabled) {
           mappedNotes.add(nm.note);
-          pianoNotes[nm.note] = nm.actuator; // global map for noteOn/Off
+          pianoNotes[idx][nm.note] = nm.actuator;
         }
       }
     }
@@ -1807,7 +1804,7 @@ function buildAllPianos() {
     pianoWrap.className = 'piano-container';
     const piano = document.createElement('div');
     piano.className = 'piano';
-    piano.id = 'piano-' + inst.index;
+    piano.id = 'piano-' + idx;
 
     // Compute note range
     const minNote = Math.min(...mappedNotes);
@@ -1828,12 +1825,13 @@ function buildAllPianos() {
         const k = document.createElement('div');
         k.className = 'white' + (!mappedNotes.has(n) ? ' muted' : '');
         k.dataset.note = n;
+        k.dataset.inst = idx;
         k.textContent = noteName(n);
-        k.onmousedown = () => pianoNoteOn(n);
-        k.onmouseup = () => pianoNoteOff(n);
-        k.onmouseleave = () => pianoNoteOff(n);
-        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(n); }, {passive:false});
-        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(n); }, {passive:false});
+        k.onmousedown = () => pianoNoteOn(idx, n);
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
         piano.appendChild(k);
         wCount++;
       }
@@ -1846,12 +1844,13 @@ function buildAllPianos() {
         const k = document.createElement('div');
         k.className = 'black' + (!mappedNotes.has(n) ? ' muted' : '');
         k.dataset.note = n;
+        k.dataset.inst = idx;
         k.style.left = (wIdx * 40 - 13) + 'px';
-        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(n); };
-        k.onmouseup = () => pianoNoteOff(n);
-        k.onmouseleave = () => pianoNoteOff(n);
-        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(n); }, {passive:false});
-        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(n); }, {passive:false});
+        k.onmousedown = (e) => { e.preventDefault(); pianoNoteOn(idx, n); };
+        k.onmouseup = () => pianoNoteOff(idx, n);
+        k.onmouseleave = () => pianoNoteOff(idx, n);
+        k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
+        k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
         piano.appendChild(k);
       } else { wIdx++; }
     }
@@ -1862,19 +1861,25 @@ function buildAllPianos() {
   }
 }
 
-function pianoNoteOn(note) {
-  const actId = pianoNotes[note];
+function pianoNoteOn(instIdx, note) {
+  const instMap = pianoNotes[instIdx];
+  if (!instMap) return;
+  const actId = instMap[note];
   if (actId === undefined) return;
-  // Visual feedback on ALL pianos that have this note
-  document.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+  // Visual feedback only on this instrument's piano
+  const piano = document.getElementById('piano-' + instIdx);
+  if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
   if (ws && wsConnected) {
     ws.send(JSON.stringify({cmd:'test', id:actId, vel:100}));
   }
 }
 
-function pianoNoteOff(note) {
-  document.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.remove('active'));
-  const actId = pianoNotes[note];
+function pianoNoteOff(instIdx, note) {
+  const piano = document.getElementById('piano-' + instIdx);
+  if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.remove('active'));
+  const instMap = pianoNotes[instIdx];
+  if (!instMap) return;
+  const actId = instMap[note];
   if (actId === undefined) return;
   api('/api/test/actuator', 'POST', {id: actId, velocity: 0, note_on: false});
 }
@@ -1887,11 +1892,15 @@ function updatePianoActive(activeActuators) {
 
   if (!activeActuators) return;
 
-  // Find notes for active actuators and highlight on all pianos
+  // Highlight the correct key on the correct instrument's piano
   const activeIds = new Set(activeActuators.map(a => a.id));
-  for (const [note, actId] of Object.entries(pianoNotes)) {
-    if (activeIds.has(actId)) {
-      document.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+  for (const [instIdx, noteMap] of Object.entries(pianoNotes)) {
+    const piano = document.getElementById('piano-' + instIdx);
+    if (!piano) continue;
+    for (const [note, actId] of Object.entries(noteMap)) {
+      if (activeIds.has(actId)) {
+        piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+      }
     }
   }
 }
@@ -1936,7 +1945,6 @@ async function loadSafety() {
     document.getElementById('sf-freq').value = d.config.max_freq_hz;
     document.getElementById('sf-watchdog').value = d.config.watchdog_ms;
     document.getElementById('sf-poly').value = d.config.max_polyphony;
-    document.getElementById('sf-current').value = d.config.max_current_ma;
   }
 }
 
@@ -1945,8 +1953,7 @@ async function saveSafetyConfig() {
     max_duty_pct: parseInt(document.getElementById('sf-duty').value),
     max_freq_hz: parseInt(document.getElementById('sf-freq').value),
     watchdog_ms: parseInt(document.getElementById('sf-watchdog').value),
-    max_polyphony: parseInt(document.getElementById('sf-poly').value),
-    max_current_ma: parseInt(document.getElementById('sf-current').value)
+    max_polyphony: parseInt(document.getElementById('sf-poly').value)
   });
 }
 
@@ -2352,7 +2359,7 @@ function wizUpdateBehaviors() {
 }
 
 function wizBuildNoteTable() {
-  const count = Math.min(parseInt(document.getElementById('wiz-count').value) || 8, 32);
+  const count = Math.min(parseInt(document.getElementById('wiz-count').value) || 8, 64);
   const startNote = parseInt(document.getElementById('wiz-start-note').value) || 48;
   const scaleKey = document.getElementById('wiz-scale').value;
   const container = document.getElementById('wiz-note-table');
@@ -2562,24 +2569,21 @@ function updateAnglePreview() {
 // Microphone detection for calibration
 // ============================================================================
 async function checkMicStatus() {
-  const calSection = document.getElementById('cal-section');
+  const navBtn = document.getElementById('nav-cal');
   const micDiv = document.getElementById('mic-status');
-  if (!calSection) return;
   try {
     const d = await api('/api/calibrate/status');
     if (d && d.available) {
-      calSection.style.display = 'block';
+      if (navBtn) navBtn.style.display = '';
       if (micDiv) {
         micDiv.className = 'mic-status ok';
         micDiv.innerHTML = '&#9679; Micro d\u00e9tect\u00e9 \u2014 Pr\u00eat pour la calibration';
       }
     } else {
-      // No mic = hide entire calibration section
-      calSection.style.display = 'none';
+      if (navBtn) navBtn.style.display = 'none';
     }
   } catch(e) {
-    // API unavailable = hide calibration
-    calSection.style.display = 'none';
+    if (navBtn) navBtn.style.display = 'none';
   }
 }
 
@@ -2608,6 +2612,7 @@ window.addEventListener('load', async () => {
   loadHomeInstruments_render();
   buildAllPianos();
   updateCountBadges();
+  checkMicStatus();
 
   // First-run detection: show welcome only if truly no instruments
   if (!instruments || instruments.length === 0) {
