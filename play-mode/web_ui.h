@@ -809,40 +809,77 @@ tr:hover td{background:var(--bg2)}
 
 <!-- Modal Add/Edit CC Mapping -->
 <div class="modal-overlay" id="modal-cc">
-  <div class="modal" style="max-width:440px">
+  <div class="modal" style="max-width:460px">
     <h2 id="modal-cc-title">Ajouter un CC Mapping</h2>
-    <div class="form-group">
-      <label>Num&eacute;ro CC (0-127)</label>
-      <input type="number" id="cc-num" min="0" max="127" value="1">
-      <div class="help">Ex : CC1 = Modulation, CC7 = Volume, CC11 = Expression</div>
-    </div>
-    <div class="form-group">
-      <label>Servo contr&ocirc;l&eacute;</label>
-      <select id="cc-actuator" class="form-select"></select>
-      <div class="help">Seuls les servos non assign&eacute;s &agrave; un instrument sont disponibles</div>
-    </div>
-    <div class="form-group">
-      <label>Param&egrave;tre cible</label>
-      <select id="cc-target" class="form-select" onchange="updateCCRangeHints()">
-        <option value="0">Position &mdash; angle du servo (&deg;)</option>
-        <option value="1">Amplitude &mdash; course de frappe (&deg;)</option>
-        <option value="2">Vitesse &mdash; dur&eacute;e du mouvement (ms)</option>
-        <option value="3">PWM maintien &mdash; puissance sol&eacute;no&iuml;de</option>
-      </select>
-      <div class="help" id="cc-target-help">Contr&ocirc;le l'angle du servo en temps r&eacute;el</div>
-    </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Valeur min <span id="cc-min-unit">(&deg;)</span></label>
-        <input type="number" id="cc-min" value="0">
-        <div class="help">Valeur quand CC = 0</div>
+        <label>Num&eacute;ro CC (0-127)</label>
+        <input type="number" id="cc-num" min="0" max="127" value="1">
+        <div class="help">Ex : CC1 = Modulation, CC7 = Volume, CC11 = Expression</div>
       </div>
       <div class="form-group">
-        <label>Valeur max <span id="cc-max-unit">(&deg;)</span></label>
-        <input type="number" id="cc-max" value="180">
-        <div class="help">Valeur quand CC = 127</div>
+        <label>Type de contr&ocirc;le</label>
+        <select id="cc-category" class="form-select" onchange="toggleCCCategory()">
+          <option value="position">Position servo (d&eacute;placement direct)</option>
+          <option value="modifier">Modificateur (amplitude / vitesse)</option>
+        </select>
       </div>
     </div>
+
+    <!-- Category: Position — free servo -->
+    <div id="cc-cat-position">
+      <div class="form-group">
+        <label>Servo d&eacute;di&eacute;</label>
+        <select id="cc-actuator-free" class="form-select"></select>
+        <div class="help">Seuls les servos non assign&eacute;s &agrave; un instrument sont list&eacute;s</div>
+      </div>
+      <div id="cc-create-servo-hint" style="display:none;margin:-4px 0 10px">
+        <span style="color:var(--yellow);font-size:12px">Aucun servo libre.</span>
+        <button class="btn sm" onclick="quickCreateServoForCC()" style="margin-left:6px">Cr&eacute;er un servo</button>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Angle min (&deg;)</label>
+          <input type="number" id="cc-pos-min" min="0" max="180" value="0">
+          <div class="help">Position quand CC = 0</div>
+        </div>
+        <div class="form-group">
+          <label>Angle max (&deg;)</label>
+          <input type="number" id="cc-pos-max" min="0" max="180" value="180">
+          <div class="help">Position quand CC = 127</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Category: Modifier — instrument servo -->
+    <div id="cc-cat-modifier" style="display:none">
+      <div class="form-group">
+        <label>Servo de l'instrument</label>
+        <select id="cc-actuator-inst" class="form-select"></select>
+        <div class="help">Servos assign&eacute;s &agrave; l'instrument s&eacute;lectionn&eacute;</div>
+      </div>
+      <div class="form-group">
+        <label>Param&egrave;tre &agrave; modifier</label>
+        <select id="cc-mod-target" class="form-select" onchange="updateCCModRangeHints()">
+          <option value="1">Amplitude &mdash; course de frappe (&deg;)</option>
+          <option value="2">Vitesse &mdash; dur&eacute;e du mouvement (ms)</option>
+        </select>
+        <div class="help" id="cc-mod-help">Modifie la course de frappe en temps r&eacute;el pour les prochaines notes</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Valeur min <span id="cc-mod-min-unit">(&deg;)</span></label>
+          <input type="number" id="cc-mod-min" value="0">
+          <div class="help">Valeur quand CC = 0</div>
+        </div>
+        <div class="form-group">
+          <label>Valeur max <span id="cc-mod-max-unit">(&deg;)</span></label>
+          <input type="number" id="cc-mod-max" value="180">
+          <div class="help">Valeur quand CC = 127</div>
+        </div>
+      </div>
+    </div>
+
     <div class="btn-row">
       <button class="btn primary" id="cc-save-btn" onclick="saveCC()">Ajouter</button>
       <button class="btn" onclick="closeModal('modal-cc')">Annuler</button>
@@ -979,10 +1016,10 @@ tr:hover td{background:var(--bg2)}
   <div style="margin-bottom:8px">
     <select id="cc-instrument" onchange="loadCCRouting()" class="form-select" style="max-width:250px"></select>
   </div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Contr&ocirc;le continu d'un servo via CC MIDI : position, amplitude, vitesse ou PWM.</p>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Position : d&eacute;place un servo d&eacute;di&eacute;. Modificateur : ajuste amplitude ou vitesse d'un servo instrument.</p>
   <div class="table-responsive">
   <table>
-    <thead><tr><th>CC#</th><th>Servo</th><th>Cible</th><th>Plage</th><th>Actif</th><th>Actions</th></tr></thead>
+    <thead><tr><th>CC#</th><th>Type</th><th>Servo</th><th>Action</th><th>Plage</th><th>Actions</th></tr></thead>
     <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
   </table>
   </div>
@@ -1734,13 +1771,14 @@ async function loadCCRouting() {
     let html = '';
     for (let ci = 0; ci < r.ccs.length; ci++) {
       const cm = r.ccs[ci];
+      const isPos = cm.target === 0;
       const unit = CC_TARGET_UNITS[cm.target] || '';
       html += '<tr>';
       html += '<td>CC ' + cm.cc + '</td>';
+      html += '<td>' + (isPos ? '<span class="badge servo">Position</span>' : '<span class="badge sol">Modif.</span>') + '</td>';
       html += '<td>Servo #' + cm.actuator + '</td>';
       html += '<td>' + (CC_TARGETS[cm.target] || '?') + '</td>';
       html += '<td>' + cm.min + unit + ' \u2192 ' + cm.max + unit + '</td>';
-      html += '<td>' + (cm.enabled ? '<span class="badge on">Oui</span>' : '<span class="badge off">Non</span>') + '</td>';
       html += '<td><button class="btn sm" onclick="editCC(' + instIdx + ',' + cm.cc + ')">\u00c9diter</button> ';
       html += '<button class="btn sm" onclick="deleteCC(' + instIdx + ',' + cm.cc + ')">Suppr</button></td>';
       html += '</tr>';
@@ -1751,7 +1789,7 @@ async function loadCCRouting() {
   updateCountBadges();
 }
 
-// Build set of actuator IDs used by instrument note mappings
+// Build map: actuator_id -> instrument index (for servos used by note mappings)
 function getInstrumentActuatorIds() {
   const used = {};
   if (routing) {
@@ -1766,14 +1804,46 @@ function getInstrumentActuatorIds() {
   return used;
 }
 
-function populateCCActuatorSelect(selectedActId) {
-  const sel = document.getElementById('cc-actuator');
+// Populate servo select with FREE servos only (not assigned to any instrument note)
+function populateFreeServoSelect(selectedActId) {
+  const sel = document.getElementById('cc-actuator-free');
   sel.innerHTML = '';
   const usedByInst = getInstrumentActuatorIds();
   if (actuators) {
     for (const a of actuators) {
-      if (a.type !== 0) continue; // Only servos
-      if (usedByInst[a.id] !== undefined) continue; // Skip servos used by instruments
+      if (a.type !== 0) continue;
+      if (usedByInst[a.id] !== undefined) continue;
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = 'Servo #' + a.id;
+      if (selectedActId !== undefined && a.id === selectedActId) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+  const hint = document.getElementById('cc-create-servo-hint');
+  if (sel.options.length === 0) {
+    sel.innerHTML = '<option value="">Aucun servo libre</option>';
+    if (hint) hint.style.display = '';
+  } else {
+    if (hint) hint.style.display = 'none';
+  }
+}
+
+// Populate servo select with INSTRUMENT servos (assigned to current instrument notes)
+function populateInstServoSelect(instIdx, selectedActId) {
+  const sel = document.getElementById('cc-actuator-inst');
+  sel.innerHTML = '';
+  const r = routing ? routing.find(x => x.instrument === instIdx) : null;
+  const instActIds = new Set();
+  if (r && r.notes) {
+    for (const n of r.notes) {
+      if (n.enabled) instActIds.add(n.actuator);
+    }
+  }
+  if (actuators) {
+    for (const a of actuators) {
+      if (a.type !== 0) continue;
+      if (!instActIds.has(a.id)) continue;
       const opt = document.createElement('option');
       opt.value = a.id;
       opt.textContent = 'Servo #' + a.id;
@@ -1782,21 +1852,74 @@ function populateCCActuatorSelect(selectedActId) {
     }
   }
   if (sel.options.length === 0) {
-    sel.innerHTML = '<option value="">Aucun servo libre</option>';
+    sel.innerHTML = '<option value="">Aucun servo dans cet instrument</option>';
   }
 }
 
-let editingCCNum = -1; // -1 = adding new, >= 0 = editing existing
+function toggleCCCategory() {
+  const cat = document.getElementById('cc-category').value;
+  document.getElementById('cc-cat-position').style.display = cat === 'position' ? '' : 'none';
+  document.getElementById('cc-cat-modifier').style.display = cat === 'modifier' ? '' : 'none';
+}
+
+function updateCCModRangeHints() {
+  const t = parseInt(document.getElementById('cc-mod-target').value);
+  const range = CC_TARGET_RANGES[t] || [0,180];
+  const unit = CC_TARGET_UNITS[t] || '';
+  const help = document.getElementById('cc-mod-help');
+  if (t === 1) {
+    if (help) help.textContent = 'Modifie la course de frappe en temps r\u00e9el pour les prochaines notes';
+  } else {
+    if (help) help.textContent = 'Modifie la dur\u00e9e du mouvement aller (10ms = rapide, 2000ms = lent)';
+  }
+  document.getElementById('cc-mod-min-unit').textContent = unit ? '(' + unit + ')' : '';
+  document.getElementById('cc-mod-max-unit').textContent = unit ? '(' + unit + ')' : '';
+  if (editingCCNum < 0) {
+    document.getElementById('cc-mod-min').value = range[0];
+    document.getElementById('cc-mod-max').value = range[1];
+  }
+}
+
+// Quick-create a servo for CC usage
+async function quickCreateServoForCC() {
+  const nextId = (actuators && actuators.length > 0) ? Math.max(...actuators.map(a => a.id)) + 1 : 0;
+  let nextCh = 0, pcaAddr = 64;
+  if (actuators && actuators.length > 0) {
+    const sorted = [...actuators].sort((a,b) => a.pca_addr !== b.pca_addr ? a.pca_addr - b.pca_addr : a.pca_ch - b.pca_ch);
+    const last = sorted[sorted.length - 1];
+    nextCh = last.pca_ch + 1;
+    pcaAddr = last.pca_addr;
+    if (nextCh > 15) { nextCh = 0; pcaAddr = Math.min(pcaAddr + 1, 67); }
+  }
+  const data = {
+    id: nextId, type: 0, bus_id: 0, pca_addr: pcaAddr, pca_ch: nextCh,
+    latency_ms: 0, behavior: 0, hit_reverse: false,
+    angle_init: 90, amplitude: 90, speed_ms: 200, angle_b: 120, enabled: true
+  };
+  await api('/api/actuator', 'POST', data);
+  actuators = await api('/api/actuators') || [];
+  populateFreeServoSelect(nextId);
+  toast('Servo #' + nextId + ' cr\u00e9\u00e9', 'ok');
+}
+
+let editingCCNum = -1;
 
 function openAddCCModal() {
   editingCCNum = -1;
-  populateCCActuatorSelect();
+  const instSel = document.getElementById('cc-instrument');
+  const instIdx = parseInt(instSel ? instSel.value : '0');
+  document.getElementById('cc-category').value = 'position';
+  toggleCCCategory();
+  populateFreeServoSelect();
+  populateInstServoSelect(instIdx);
   document.getElementById('cc-num').value = '1';
   document.getElementById('cc-num').disabled = false;
-  document.getElementById('cc-target').value = '0';
+  document.getElementById('cc-pos-min').value = '0';
+  document.getElementById('cc-pos-max').value = '180';
+  document.getElementById('cc-mod-target').value = '1';
+  updateCCModRangeHints();
   document.getElementById('modal-cc-title').textContent = 'Ajouter un CC Mapping';
   document.getElementById('cc-save-btn').textContent = 'Ajouter';
-  updateCCRangeHints();
   document.getElementById('modal-cc').classList.add('show');
 }
 
@@ -1806,53 +1929,46 @@ function editCC(instIdx, ccNum) {
   const cm = r.ccs.find(c => c.cc === ccNum);
   if (!cm) return;
   editingCCNum = ccNum;
-  populateCCActuatorSelect(cm.actuator);
+  const isPos = cm.target === 0;
+  document.getElementById('cc-category').value = isPos ? 'position' : 'modifier';
+  toggleCCCategory();
+  if (isPos) {
+    populateFreeServoSelect(cm.actuator);
+    document.getElementById('cc-pos-min').value = cm.min;
+    document.getElementById('cc-pos-max').value = cm.max;
+  } else {
+    populateInstServoSelect(instIdx, cm.actuator);
+    document.getElementById('cc-mod-target').value = cm.target;
+    document.getElementById('cc-mod-min').value = cm.min;
+    document.getElementById('cc-mod-max').value = cm.max;
+    updateCCModRangeHints();
+  }
   document.getElementById('cc-num').value = cm.cc;
-  document.getElementById('cc-num').disabled = true; // Can't change CC# when editing
-  document.getElementById('cc-actuator').value = cm.actuator;
-  document.getElementById('cc-target').value = cm.target;
-  document.getElementById('cc-min').value = cm.min;
-  document.getElementById('cc-max').value = cm.max;
+  document.getElementById('cc-num').disabled = true;
   document.getElementById('modal-cc-title').textContent = '\u00c9diter CC ' + ccNum;
   document.getElementById('cc-save-btn').textContent = 'Sauvegarder';
-  updateCCRangeHints();
   document.getElementById('modal-cc').classList.add('show');
-}
-
-const CC_TARGET_HELPS = [
-  'Contr\u00f4le l\u2019angle du servo en temps r\u00e9el (0\u00b0\u2013180\u00b0)',
-  'Modifie la course de frappe du servo (\u00b0)',
-  'Modifie la dur\u00e9e du mouvement aller (ms)',
-  'Ajuste la puissance PWM de maintien (sol\u00e9no\u00efde)'
-];
-
-function updateCCRangeHints() {
-  const t = parseInt(document.getElementById('cc-target').value) || 0;
-  const range = CC_TARGET_RANGES[t] || [0,127];
-  const unit = CC_TARGET_UNITS[t] || '';
-  document.getElementById('cc-target-help').textContent = CC_TARGET_HELPS[t] || '';
-  document.getElementById('cc-min-unit').textContent = unit ? '(' + unit + ')' : '';
-  document.getElementById('cc-max-unit').textContent = unit ? '(' + unit + ')' : '';
-  // Set sensible defaults if fields are empty or at old defaults
-  const minEl = document.getElementById('cc-min');
-  const maxEl = document.getElementById('cc-max');
-  if (editingCCNum < 0) {
-    minEl.value = range[0];
-    maxEl.value = range[1];
-  }
 }
 
 async function saveCC() {
   const instSel = document.getElementById('cc-instrument');
   const instIdx = parseInt(instSel ? instSel.value : '0');
   const ccNum = parseInt(document.getElementById('cc-num').value);
-  const actId = parseInt(document.getElementById('cc-actuator').value);
-  const target = parseInt(document.getElementById('cc-target').value);
-  const min = parseInt(document.getElementById('cc-min').value);
-  const max = parseInt(document.getElementById('cc-max').value);
+  const cat = document.getElementById('cc-category').value;
+  let actId, target, min, max;
+  if (cat === 'position') {
+    actId = parseInt(document.getElementById('cc-actuator-free').value);
+    target = 0;
+    min = parseInt(document.getElementById('cc-pos-min').value);
+    max = parseInt(document.getElementById('cc-pos-max').value);
+  } else {
+    actId = parseInt(document.getElementById('cc-actuator-inst').value);
+    target = parseInt(document.getElementById('cc-mod-target').value);
+    min = parseInt(document.getElementById('cc-mod-min').value);
+    max = parseInt(document.getElementById('cc-mod-max').value);
+  }
   if (isNaN(ccNum) || isNaN(actId)) { toast('Valeurs invalides', 'error'); return; }
 
-  // Get existing CCs and add/replace
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
   let ccs = r && r.ccs ? [...r.ccs] : [];
   ccs = ccs.filter(c => c.cc !== ccNum);
