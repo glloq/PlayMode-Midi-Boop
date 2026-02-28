@@ -61,6 +61,7 @@ struct ActuatorConfig {
     uint16_t amplitude;          // Amplitude de mouvement (degrés)
     uint16_t speed_ms;           // Durée du mouvement (ms)
     uint16_t angle_b;            // Angle B pour mode alterné
+    bool     hit_reverse;        // Sens de frappe : false = horaire (+), true = anti-horaire (-)
 
     // Paramètres solénoïde
     uint16_t pulse_ms;           // Durée frappe (ms)

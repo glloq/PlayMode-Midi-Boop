@@ -75,8 +75,16 @@ void ActuatorEngine::servoFrappe(ActuatorConfig& act, const SchedulerEvent& even
     if (event.action == ACTION_NOTE_ON) {
         // Calculer amplitude selon vélocité
         uint16_t amp = velocityToAmplitude(act, event.velocity);
-        uint16_t target_angle = act.angle_initial + amp;
-        if (target_angle > SERVO_MAX_ANGLE) target_angle = SERVO_MAX_ANGLE;
+        uint16_t target_angle;
+        if (act.hit_reverse) {
+            // Anti-horaire : angle_initial - amplitude
+            int16_t t = (int16_t)act.angle_initial - (int16_t)amp;
+            target_angle = (t < SERVO_MIN_ANGLE) ? SERVO_MIN_ANGLE : (uint16_t)t;
+        } else {
+            // Horaire : angle_initial + amplitude
+            target_angle = act.angle_initial + amp;
+            if (target_angle > SERVO_MAX_ANGLE) target_angle = SERVO_MAX_ANGLE;
+        }
 
         // Mouvement vers position de frappe
         setServoAngle(act, target_angle);
@@ -145,8 +153,14 @@ void ActuatorEngine::servoGratter(ActuatorConfig& act, const SchedulerEvent& eve
 void ActuatorEngine::servoTouche(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
         // Décaler de ±δ (amplitude) depuis position initiale
-        uint16_t target = act.angle_initial + act.amplitude;
-        if (target > SERVO_MAX_ANGLE) target = SERVO_MAX_ANGLE;
+        uint16_t target;
+        if (act.hit_reverse) {
+            int16_t t = (int16_t)act.angle_initial - (int16_t)act.amplitude;
+            target = (t < SERVO_MIN_ANGLE) ? SERVO_MIN_ANGLE : (uint16_t)t;
+        } else {
+            target = act.angle_initial + act.amplitude;
+            if (target > SERVO_MAX_ANGLE) target = SERVO_MAX_ANGLE;
+        }
 
         setServoAngle(act, target);
         act.state.active = true;

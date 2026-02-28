@@ -300,7 +300,8 @@ tr:hover td{background:var(--bg2)}
 <nav id="main-nav">
   <button class="active" onclick="showPage('instrument')">Instrument</button>
   <button onclick="showPage('midi')">MIDI</button>
-  <button onclick="showPage('calibration')">Calibration</button>
+  <button onclick="showPage('actuators')">Actionneurs</button>
+  <button onclick="showPage('calibration')" id="nav-cal" style="display:none">Calibration</button>
 </nav>
 
 <!-- ============ WELCOME (First-run) ============ -->
@@ -690,10 +691,20 @@ tr:hover td{background:var(--bg2)}
       <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
         <div style="font-size:13px;font-weight:600;margin-bottom:8px">R&eacute;glages servo</div>
       </div>
-      <div class="form-group">
-        <label>Mode de jeu</label>
-        <select id="ma-servo-behavior"><option value="0">Frappe (aller-retour rapide)</option><option value="1">Altern&eacute; (bascule A/B)</option><option value="2">Gratter (mouvement continu)</option><option value="3">Touche (maintien appuy&eacute;)</option></select>
-        <div class="help">Frappe : percussion | Altern&eacute; : bascule entre 2 positions | Gratter : va-et-vient | Touche : maintien</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Mode de jeu</label>
+          <select id="ma-servo-behavior" onchange="toggleServoDirection()"><option value="0">Frappe (aller-retour rapide)</option><option value="1">Altern&eacute; (bascule A/B)</option><option value="2">Gratter (mouvement continu)</option><option value="3">Touche (maintien appuy&eacute;)</option></select>
+          <div class="help">Frappe : percussion | Altern&eacute; : bascule entre 2 positions | Gratter : va-et-vient | Touche : maintien</div>
+        </div>
+        <div class="form-group" id="servo-direction-group">
+          <label>Sens de frappe</label>
+          <select id="ma-hit-reverse">
+            <option value="0">Horaire (+) &mdash; repos &rarr; repos + amplitude</option>
+            <option value="1">Anti-horaire (&minus;) &mdash; repos &rarr; repos &minus; amplitude</option>
+          </select>
+          <div class="help">Direction du mouvement par rapport &agrave; l'angle de repos</div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -925,7 +936,8 @@ tr:hover td{background:var(--bg2)}
 </div>
 
 <!-- ============ CALIBRATION (Actionneurs + CC + Calibration acoustique) ============ -->
-<div class="page" id="page-calibration">
+<!-- ============ ACTIONNEURS (table + CC mapping) ============ -->
+<div class="page" id="page-actuators">
 
   <!-- === Actionneurs === -->
   <div class="section-title"><span>Actionneurs</span>
@@ -952,50 +964,50 @@ tr:hover td{background:var(--bg2)}
     <tbody id="mapping-cc-table"><tr><td colspan="7" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
   </table>
   </div>
+</div>
 
-  <!-- === Calibration acoustique (hidden if no mic) === -->
-  <div id="cal-section" style="margin-top:24px;display:none">
-    <div class="section-title">Calibration Acoustique</div>
-    <div class="mic-status ok" id="mic-status">Microphone d&eacute;tect&eacute;</div>
-    <div id="cal-controls">
-      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-        <div class="card">
-          <h3>&Eacute;tat</h3>
-          <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
-        </div>
-        <div class="card">
-          <h3>Progression</h3>
-          <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
-          <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
-        </div>
-        <div class="card">
-          <h3>Actionneur</h3>
-          <div class="val" id="cal-cur-act">&mdash;</div>
-        </div>
-        <div class="card">
-          <h3>R&eacute;sultats</h3>
-          <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
-        </div>
+<!-- ============ CALIBRATION ACOUSTIQUE (visible uniquement si micro) ============ -->
+<div class="page" id="page-calibration">
+  <div class="section-title">Calibration Acoustique</div>
+  <div class="mic-status ok" id="mic-status">Microphone d&eacute;tect&eacute;</div>
+  <div id="cal-controls">
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+      <div class="card">
+        <h3>&Eacute;tat</h3>
+        <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
       </div>
-      <div class="btn-row" style="margin:16px 0">
-        <button class="btn primary sm" onclick="startCalibrateAll()">&#9654; Calibrer tous</button>
-        <button class="btn sm" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
-        <button class="btn danger sm" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Arr&ecirc;ter</button>
-        <button class="btn sm" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Appliquer</button>
-        <button class="btn sm" onclick="loadCalibrateResults()" style="margin-left:auto">&#8635;</button>
+      <div class="card">
+        <h3>Progression</h3>
+        <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
+        <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
       </div>
-      <div id="cal-single-sel" style="display:none;margin-bottom:12px">
-        <label style="font-size:13px;margin-right:8px">Actionneur :</label>
-        <select id="cal-act-select" class="form-select"></select>
-        <button class="btn primary sm" style="margin-left:8px" onclick="confirmCalibrateOne()">Go</button>
-        <button class="btn sm" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">&#10005;</button>
+      <div class="card">
+        <h3>Actionneur</h3>
+        <div class="val" id="cal-cur-act">&mdash;</div>
       </div>
-      <div class="table-responsive">
-      <table>
-        <thead><tr><th>ID</th><th>Type</th><th>Latence actuelle</th><th>Latence mesur&eacute;e</th><th>Mesures</th><th>&Eacute;tat</th></tr></thead>
-        <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Lancez une calibration</td></tr></tbody>
-      </table>
+      <div class="card">
+        <h3>R&eacute;sultats</h3>
+        <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
       </div>
+    </div>
+    <div class="btn-row" style="margin:16px 0">
+      <button class="btn primary sm" onclick="startCalibrateAll()">&#9654; Calibrer tous</button>
+      <button class="btn sm" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
+      <button class="btn danger sm" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Arr&ecirc;ter</button>
+      <button class="btn sm" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Appliquer</button>
+      <button class="btn sm" onclick="loadCalibrateResults()" style="margin-left:auto">&#8635;</button>
+    </div>
+    <div id="cal-single-sel" style="display:none;margin-bottom:12px">
+      <label style="font-size:13px;margin-right:8px">Actionneur :</label>
+      <select id="cal-act-select" class="form-select"></select>
+      <button class="btn primary sm" style="margin-left:8px" onclick="confirmCalibrateOne()">Go</button>
+      <button class="btn sm" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">&#10005;</button>
+    </div>
+    <div class="table-responsive">
+    <table>
+      <thead><tr><th>ID</th><th>Type</th><th>Latence actuelle</th><th>Latence mesur&eacute;e</th><th>Mesures</th><th>&Eacute;tat</th></tr></thead>
+      <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Lancez une calibration</td></tr></tbody>
+    </table>
     </div>
   </div>
 </div>
@@ -1187,9 +1199,11 @@ function showPage(page) {
     loadHomeInstruments(); loadInstrumentSelects(); buildAllPianos();
   }
   if (page === 'midi') { loadMidiConfig(); }
-  if (page === 'calibration') {
+  if (page === 'actuators') {
     loadActuatorsWithNotes(); loadInstrumentSelects(); loadCCRouting();
-    checkMicStatus(); loadCalibrateStatus(); loadCalibrateResults();
+  }
+  if (page === 'calibration') {
+    loadCalibrateStatus(); loadCalibrateResults();
   }
   if (page === 'settings') {
     loadPower(); loadSafety(); loadLogs(); loadWiFiConfig(); loadBuses();
@@ -1411,6 +1425,7 @@ function toggleActuatorFields() {
     document.getElementById('ma-bus').value = type === '1' ? '1' : '0';
   }
   toggleHitHoldFields();
+  toggleServoDirection();
   updateAnglePreview();
 }
 
@@ -1419,6 +1434,14 @@ function toggleHitHoldFields() {
   if (!el) return;
   const mode = document.getElementById('ma-sol-behavior').value;
   el.style.display = (mode === '1') ? 'block' : 'none';
+}
+
+function toggleServoDirection() {
+  const el = document.getElementById('servo-direction-group');
+  if (!el) return;
+  const mode = document.getElementById('ma-servo-behavior').value;
+  // Show direction only for frappe (0) and touche (3)
+  el.style.display = (mode === '0' || mode === '3') ? 'block' : 'none';
 }
 
 function openActuatorModal() {
@@ -1474,10 +1497,12 @@ function editActuator(id) {
   toggleActuatorFields();
   if (act.type === 0) {
     document.getElementById('ma-servo-behavior').value = act.behavior || 0;
+    document.getElementById('ma-hit-reverse').value = act.hit_reverse ? '1' : '0';
     document.getElementById('ma-angle-init').value = act.angle_init !== undefined ? act.angle_init : 90;
     document.getElementById('ma-amplitude').value = act.amplitude !== undefined ? act.amplitude : 45;
     document.getElementById('ma-speed').value = act.speed_ms || 150;
     document.getElementById('ma-angle-b').value = act.angle_b !== undefined ? act.angle_b : 120;
+    toggleServoDirection();
   } else {
     document.getElementById('ma-sol-behavior').value = act.behavior || 0;
     document.getElementById('ma-pulse-min').value = act.pulse_min_ms !== undefined ? act.pulse_min_ms : 5;
@@ -1506,6 +1531,7 @@ async function saveActuator() {
 
   if (type === 0) { // Servo
     data.behavior = parseInt(document.getElementById('ma-servo-behavior').value);
+    data.hit_reverse = document.getElementById('ma-hit-reverse').value === '1';
     data.angle_init = parseInt(document.getElementById('ma-angle-init').value);
     data.amplitude = parseInt(document.getElementById('ma-amplitude').value);
     data.speed_ms = parseInt(document.getElementById('ma-speed').value);
@@ -2543,24 +2569,21 @@ function updateAnglePreview() {
 // Microphone detection for calibration
 // ============================================================================
 async function checkMicStatus() {
-  const calSection = document.getElementById('cal-section');
+  const navBtn = document.getElementById('nav-cal');
   const micDiv = document.getElementById('mic-status');
-  if (!calSection) return;
   try {
     const d = await api('/api/calibrate/status');
     if (d && d.available) {
-      calSection.style.display = 'block';
+      if (navBtn) navBtn.style.display = '';
       if (micDiv) {
         micDiv.className = 'mic-status ok';
         micDiv.innerHTML = '&#9679; Micro d\u00e9tect\u00e9 \u2014 Pr\u00eat pour la calibration';
       }
     } else {
-      // No mic = hide entire calibration section
-      calSection.style.display = 'none';
+      if (navBtn) navBtn.style.display = 'none';
     }
   } catch(e) {
-    // API unavailable = hide calibration
-    calSection.style.display = 'none';
+    if (navBtn) navBtn.style.display = 'none';
   }
 }
 
@@ -2589,6 +2612,7 @@ window.addEventListener('load', async () => {
   loadHomeInstruments_render();
   buildAllPianos();
   updateCountBadges();
+  checkMicStatus();
 
   // First-run detection: show welcome only if truly no instruments
   if (!instruments || instruments.length === 0) {

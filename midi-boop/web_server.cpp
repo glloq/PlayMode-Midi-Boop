@@ -444,10 +444,11 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
 
         // Paramètres servo
         if (actuators[i].type == ACT_SERVO) {
-            obj["angle_init"] = actuators[i].angle_initial;
-            obj["amplitude"]  = actuators[i].amplitude;
-            obj["speed_ms"]   = actuators[i].speed_ms;
-            obj["angle_b"]    = actuators[i].angle_b;
+            obj["angle_init"]   = actuators[i].angle_initial;
+            obj["amplitude"]    = actuators[i].amplitude;
+            obj["speed_ms"]     = actuators[i].speed_ms;
+            obj["angle_b"]      = actuators[i].angle_b;
+            obj["hit_reverse"]  = actuators[i].hit_reverse;
         }
         // Paramètres solénoïde
         else {
@@ -736,6 +737,7 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     act.amplitude     = doc["amplitude"] | 45;
     act.speed_ms      = doc["speed_ms"] | 150;
     act.angle_b       = doc["angle_b"] | 120;
+    act.hit_reverse   = doc["hit_reverse"] | false;
 
     // Paramètres solénoïde
     act.pulse_ms      = doc["pulse_ms"] | 20;

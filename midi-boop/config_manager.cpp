@@ -363,6 +363,7 @@ void ConfigManager::serializeActuator(const ActuatorConfig& act, JsonObject& obj
         obj["amplitude"] = act.amplitude;
         obj["speed_ms"] = act.speed_ms;
         obj["angle_b"] = act.angle_b;
+        obj["hit_reverse"] = act.hit_reverse;
     } else {
         const char* behaviors[] = {"frappe", "hit_and_hold"};
         obj["behavior"] = behaviors[act.behavior % 2];
@@ -396,6 +397,7 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
         act.amplitude = obj["amplitude"] | 45;
         act.speed_ms = obj["speed_ms"] | 100;
         act.angle_b = obj["angle_b"] | 135;
+        act.hit_reverse = obj["hit_reverse"] | false;
     } else {
         if (strcmp(behavior_str, "hit_and_hold") == 0) act.behavior = SOL_HIT_AND_HOLD;
         else act.behavior = SOL_FRAPPE;
