@@ -385,20 +385,6 @@ tr:hover td{background:var(--bg2)}
     </div>
   </div>
 
-  <div class="section-collapse" style="margin-top:12px">
-    <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
-      <span>Actionneurs actifs</span>
-    </button>
-    <div class="section-collapse-body">
-      <div class="table-responsive">
-      <table>
-        <thead><tr><th>ID</th><th>Type</th><th>&Eacute;tat</th><th>Position</th></tr></thead>
-        <tbody id="d-active-table"><tr><td colspan="4" style="color:var(--fg2)">Aucun actionneur actif</td></tr></tbody>
-      </table>
-      </div>
-    </div>
-  </div>
-
   <!-- Polyphonie -->
   <div class="section-title" style="margin-top:24px">Polyphonie</div>
   <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
@@ -466,10 +452,6 @@ tr:hover td{background:var(--bg2)}
         <div class="form-group">
           <label>Polyphonie max (s&eacute;curit&eacute;)</label>
           <input type="number" id="sf-poly" value="12" min="1" max="32">
-        </div>
-        <div class="form-group">
-          <label>Courant max (mA)</label>
-          <input type="number" id="sf-current" value="5000" min="500" max="20000">
         </div>
       </div>
       <button class="btn primary sm" onclick="saveSafetyConfig()">Appliquer limites</button>
@@ -751,7 +733,7 @@ tr:hover td{background:var(--bg2)}
       </div>
       <div class="form-group">
         <label>Mode de frappe</label>
-        <select id="ma-sol-behavior"><option value="0">Frappe (impulsion courte)</option><option value="1">Hit-and-Hold (frappe puis maintien)</option></select>
+        <select id="ma-sol-behavior" onchange="toggleHitHoldFields()"><option value="0">Frappe (impulsion courte)</option><option value="1">Hit-and-Hold (frappe puis maintien)</option></select>
         <div class="help">Frappe : impulsion br&egrave;ve | Hit-and-Hold : frappe forte puis maintien doux</div>
       </div>
       <div class="form-row">
@@ -773,7 +755,7 @@ tr:hover td{background:var(--bg2)}
           <div class="help">Puissance initiale de frappe. 4095 = maximum</div>
         </div>
       </div>
-      <div class="expert-section">
+      <div id="hit-hold-fields" class="expert-section" style="display:none">
         <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Hit-and-Hold (avanc&eacute;)</button>
         <div class="expert-body">
           <div class="form-row">
@@ -1152,24 +1134,8 @@ function updateDashboard(d) {
     el('d-wifi-status', d.wifi.connected ? 'Connecté' : 'Déconnecté');
   }
 
-  // Active actuators table
+  // Update piano active notes
   if (d.active_actuators) {
-    const tbody = document.getElementById('d-active-table');
-    if (d.active_actuators.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg2)">Aucun actionneur actif</td></tr>';
-    } else {
-      let html = '';
-      for (const a of d.active_actuators) {
-        const act = actuators.find(x => x.id === a.id);
-        html += '<tr><td>' + a.id + '</td>';
-        html += '<td>' + (act ? (act.type === 0 ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Solénoïde</span>') : '-') + '</td>';
-        html += '<td><span class="badge on">Actif</span></td>';
-        html += '<td>' + a.pos + '</td></tr>';
-      }
-      tbody.innerHTML = html;
-    }
-
-    // Update piano active notes
     updatePianoActive(d.active_actuators);
   }
 }
@@ -1178,9 +1144,6 @@ function updateAlerts(d) {
   let html = '';
   if (d.safety && d.safety.kill_switch) {
     html += '<div class="alert danger">KILL SWITCH ACTIF — Toutes les sorties sont désactivées</div>';
-  }
-  if (d.safety && d.safety.over_current) {
-    html += '<div class="alert danger">SURINTENSITÉ — Courant estimé dépasse la limite</div>';
   }
   if (d.safety && d.safety.degradation) {
     html += '<div class="alert warn">DÉGRADATION — Approche du seuil de sécurité</div>';
@@ -1193,9 +1156,6 @@ function updateAlerts(d) {
   let safetyHtml = '';
   if (d.safety && d.safety.kill_switch) {
     safetyHtml += '<div class="alert danger">KILL SWITCH ACTIF</div>';
-  }
-  if (d.safety && d.safety.over_current) {
-    safetyHtml += '<div class="alert danger">SURINTENSITÉ DÉTECTÉE</div>';
   }
   const sz = document.getElementById('safety-alert-zone');
   if (sz) sz.innerHTML = safetyHtml;
@@ -1450,7 +1410,15 @@ function toggleActuatorFields() {
   if (editingActuatorId < 0) {
     document.getElementById('ma-bus').value = type === '1' ? '1' : '0';
   }
+  toggleHitHoldFields();
   updateAnglePreview();
+}
+
+function toggleHitHoldFields() {
+  const el = document.getElementById('hit-hold-fields');
+  if (!el) return;
+  const mode = document.getElementById('ma-sol-behavior').value;
+  el.style.display = (mode === '1') ? 'block' : 'none';
 }
 
 function openActuatorModal() {
@@ -1517,6 +1485,7 @@ function editActuator(id) {
     document.getElementById('ma-pwm-init').value = act.pwm_initial !== undefined ? act.pwm_initial : 4095;
     document.getElementById('ma-pwm-hold').value = act.pwm_hold !== undefined ? act.pwm_hold : 2048;
     document.getElementById('ma-ramp').value = act.ramp_ms || 50;
+    toggleHitHoldFields();
   }
   document.getElementById('modal-act-title').textContent = 'Modifier actionneur #' + id;
   document.getElementById('modal-actuator').classList.add('show');
@@ -1950,7 +1919,6 @@ async function loadSafety() {
     document.getElementById('sf-freq').value = d.config.max_freq_hz;
     document.getElementById('sf-watchdog').value = d.config.watchdog_ms;
     document.getElementById('sf-poly').value = d.config.max_polyphony;
-    document.getElementById('sf-current').value = d.config.max_current_ma;
   }
 }
 
@@ -1959,8 +1927,7 @@ async function saveSafetyConfig() {
     max_duty_pct: parseInt(document.getElementById('sf-duty').value),
     max_freq_hz: parseInt(document.getElementById('sf-freq').value),
     watchdog_ms: parseInt(document.getElementById('sf-watchdog').value),
-    max_polyphony: parseInt(document.getElementById('sf-poly').value),
-    max_current_ma: parseInt(document.getElementById('sf-current').value)
+    max_polyphony: parseInt(document.getElementById('sf-poly').value)
   });
 }
 
