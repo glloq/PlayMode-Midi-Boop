@@ -708,39 +708,45 @@ tr:hover td{background:var(--bg2)}
         </div>
         <div class="form-group" id="servo-direction-group">
           <label>Sens de frappe</label>
-          <select id="ma-hit-reverse">
+          <select id="ma-hit-reverse" onchange="updateAnglePreview()">
             <option value="0">Horaire (+) &mdash; repos &rarr; repos + amplitude</option>
             <option value="1">Anti-horaire (&minus;) &mdash; repos &rarr; repos &minus; amplitude</option>
           </select>
           <div class="help">Direction du mouvement par rapport &agrave; l'angle de repos</div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Angle de repos (&deg;)</label>
-          <input type="number" id="ma-angle-init" min="0" max="180" value="90" oninput="updateAnglePreview()">
-          <div class="help">Position du bras au repos (0&deg; &agrave; 180&deg;)</div>
+      <div id="servo-standard-fields">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Angle de repos (&deg;)</label>
+            <input type="number" id="ma-angle-init" min="0" max="180" value="90" oninput="updateAnglePreview()">
+            <div class="help">Position du bras au repos (0&deg; &agrave; 180&deg;)</div>
+          </div>
+          <div class="form-group">
+            <label>Amplitude (&deg;)</label>
+            <input type="number" id="ma-amplitude" min="0" max="180" value="45" oninput="updateAnglePreview()">
+            <div class="help">Course du mouvement en degr&eacute;s</div>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Amplitude (&deg;)</label>
-          <input type="number" id="ma-amplitude" min="0" max="180" value="45" oninput="updateAnglePreview()">
-          <div class="help">Course du mouvement en degr&eacute;s</div>
+      </div>
+      <div id="servo-alterne-fields" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Angle A (&deg;)</label>
+            <input type="number" id="ma-angle-a-alt" min="0" max="180" value="90" oninput="updateAnglePreview()">
+            <div class="help">Premi&egrave;re position de bascule</div>
+          </div>
+          <div class="form-group">
+            <label>Angle B (&deg;)</label>
+            <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
+            <div class="help">Seconde position de bascule</div>
+          </div>
         </div>
       </div>
       <div class="form-group">
         <label>Dur&eacute;e du mouvement (ms)</label>
         <input type="number" id="ma-speed" min="10" max="2000" value="150">
         <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
-      </div>
-      <div class="expert-section">
-        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Mode altern&eacute; (avanc&eacute;)</button>
-        <div class="expert-body">
-          <div class="form-group">
-            <label>Angle B - position altern&eacute;e (&deg;)</label>
-            <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
-            <div class="help">2e position pour le mode Altern&eacute;</div>
-          </div>
-        </div>
       </div>
       <!-- Angle visual preview -->
       <div class="angle-preview" id="angle-preview"></div>
@@ -1454,10 +1460,17 @@ function toggleHitHoldFields() {
 
 function toggleServoDirection() {
   const el = document.getElementById('servo-direction-group');
-  if (!el) return;
+  const stdFields = document.getElementById('servo-standard-fields');
+  const altFields = document.getElementById('servo-alterne-fields');
   const mode = document.getElementById('ma-servo-behavior').value;
+  const isAlterne = mode === '1';
   // Show direction only for frappe (0) and touche (3)
-  el.style.display = (mode === '0' || mode === '3') ? 'block' : 'none';
+  if (el) el.style.display = (mode === '0' || mode === '3') ? 'block' : 'none';
+  // Show standard fields (repos + amplitude) for all modes except alterné
+  if (stdFields) stdFields.style.display = isAlterne ? 'none' : '';
+  // Show angle A / angle B only for alterné
+  if (altFields) altFields.style.display = isAlterne ? '' : 'none';
+  updateAnglePreview();
 }
 
 function openActuatorModal() {
@@ -1486,6 +1499,7 @@ function openActuatorModal() {
   document.getElementById('ma-angle-init').value = '90';
   document.getElementById('ma-amplitude').value = '45';
   document.getElementById('ma-speed').value = '150';
+  document.getElementById('ma-angle-a-alt').value = '90';
   document.getElementById('ma-angle-b').value = '120';
   // Reset solenoid fields
   document.getElementById('ma-sol-behavior').value = '0';
@@ -1517,6 +1531,7 @@ function editActuator(id) {
     document.getElementById('ma-angle-init').value = act.angle_init !== undefined ? act.angle_init : 90;
     document.getElementById('ma-amplitude').value = act.amplitude !== undefined ? act.amplitude : 45;
     document.getElementById('ma-speed').value = act.speed_ms || 150;
+    document.getElementById('ma-angle-a-alt').value = act.angle_init !== undefined ? act.angle_init : 90;
     document.getElementById('ma-angle-b').value = act.angle_b !== undefined ? act.angle_b : 120;
     toggleServoDirection();
   } else {
@@ -1548,8 +1563,13 @@ async function saveActuator() {
   if (type === 0) { // Servo
     data.behavior = parseInt(document.getElementById('ma-servo-behavior').value);
     data.hit_reverse = document.getElementById('ma-hit-reverse').value === '1';
-    data.angle_init = parseInt(document.getElementById('ma-angle-init').value);
-    data.amplitude = parseInt(document.getElementById('ma-amplitude').value);
+    if (data.behavior === 1) { // Alterné: use angle A/B fields
+      data.angle_init = parseInt(document.getElementById('ma-angle-a-alt').value);
+      data.amplitude = 0;
+    } else {
+      data.angle_init = parseInt(document.getElementById('ma-angle-init').value);
+      data.amplitude = parseInt(document.getElementById('ma-amplitude').value);
+    }
     data.speed_ms = parseInt(document.getElementById('ma-speed').value);
     data.angle_b = parseInt(document.getElementById('ma-angle-b').value);
   } else { // Solenoid
@@ -2599,31 +2619,63 @@ async function wizNext() {
 function updateAnglePreview() {
   const preview = document.getElementById('angle-preview');
   if (!preview || document.getElementById('servo-fields').style.display === 'none') return;
-  const init = parseInt(document.getElementById('ma-angle-init').value) || 90;
-  const amp = parseInt(document.getElementById('ma-amplitude').value) || 45;
-  const angleB = parseInt(document.getElementById('ma-angle-b').value) || 120;
-  const minA = Math.max(0, init - amp);
-  const maxA = Math.min(180, init + amp);
+  const mode = document.getElementById('ma-servo-behavior').value;
+  const isAlterne = mode === '1';
   const cx=60,cy=55,r=40;
   const toX=(deg)=>cx+r*Math.cos((180-deg)*Math.PI/180);
   const toY=(deg)=>cy-r*Math.sin((180-deg)*Math.PI/180);
-  const x1=toX(minA),y1=toY(minA),x2=toX(maxA),y2=toY(maxA);
-  const xi=toX(init),yi=toY(init),xb=toX(angleB),yb=toY(angleB);
-  const la=(maxA-minA)>180?1:0;
   let s='<svg width="120" height="70" viewBox="0 0 120 70">';
   s+='<path d="M '+(cx-r)+' '+cy+' A '+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy+'" fill="none" stroke="var(--bg3)" stroke-width="3"/>';
-  s+='<path d="M '+x1+' '+y1+' A '+r+' '+r+' 0 '+la+' 1 '+x2+' '+y2+'" fill="none" stroke="var(--accent)" stroke-width="3"/>';
-  s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xi+'" y2="'+yi+'" stroke="var(--green)" stroke-width="2"/>';
-  s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xb+'" y2="'+yb+'" stroke="var(--yellow)" stroke-width="1.5" stroke-dasharray="4,3"/>';
-  s+='<circle cx="'+cx+'" cy="'+cy+'" r="3" fill="var(--fg)"/>';
-  s+='<text x="2" y="68" font-size="9" fill="var(--fg2)">180</text>';
-  s+='<text x="104" y="68" font-size="9" fill="var(--fg2)">0</text>';
-  s+='</svg>';
-  s+='<div class="angle-info">';
-  s+='Repos: <span>'+init+'&deg;</span>';
-  s+=' Course: <span>'+minA+'&deg;&rarr;'+maxA+'&deg;</span>';
-  s+=' Alt(B): <span>'+angleB+'&deg;</span>';
-  s+='</div>';
+
+  if (isAlterne) {
+    // Alterné: show angle A and angle B as two positions
+    const angleA = parseInt(document.getElementById('ma-angle-a-alt').value) || 90;
+    const angleB = parseInt(document.getElementById('ma-angle-b').value) || 120;
+    const lo = Math.min(angleA, angleB), hi = Math.max(angleA, angleB);
+    const la=(hi-lo)>180?1:0;
+    const x1=toX(lo),y1=toY(lo),x2=toX(hi),y2=toY(hi);
+    s+='<path d="M '+x1+' '+y1+' A '+r+' '+r+' 0 '+la+' 1 '+x2+' '+y2+'" fill="none" stroke="var(--yellow)" stroke-width="3"/>';
+    const xa=toX(angleA),ya=toY(angleA),xb=toX(angleB),yb=toY(angleB);
+    s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xa+'" y2="'+ya+'" stroke="var(--green)" stroke-width="2"/>';
+    s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xb+'" y2="'+yb+'" stroke="var(--yellow)" stroke-width="2"/>';
+    s+='<circle cx="'+cx+'" cy="'+cy+'" r="3" fill="var(--fg)"/>';
+    s+='<text x="2" y="68" font-size="9" fill="var(--fg2)">180</text>';
+    s+='<text x="104" y="68" font-size="9" fill="var(--fg2)">0</text>';
+    s+='</svg>';
+    s+='<div class="angle-info">';
+    s+='A: <span style="color:var(--green)">'+angleA+'&deg;</span>';
+    s+=' B: <span style="color:var(--yellow)">'+angleB+'&deg;</span>';
+    s+='</div>';
+  } else {
+    // Frappe / Gratter / Touche: show repos + amplitude arc
+    const init = parseInt(document.getElementById('ma-angle-init').value) || 90;
+    const amp = parseInt(document.getElementById('ma-amplitude').value) || 45;
+    const reverse = document.getElementById('ma-hit-reverse').value === '1';
+    let minA, maxA;
+    if (mode === '2') { // Gratter: bidirectional
+      minA = Math.max(0, init - amp);
+      maxA = Math.min(180, init + amp);
+    } else if (reverse) {
+      minA = Math.max(0, init - amp);
+      maxA = init;
+    } else {
+      minA = init;
+      maxA = Math.min(180, init + amp);
+    }
+    const la=(maxA-minA)>180?1:0;
+    const x1=toX(minA),y1=toY(minA),x2=toX(maxA),y2=toY(maxA);
+    const xi=toX(init),yi=toY(init);
+    s+='<path d="M '+x1+' '+y1+' A '+r+' '+r+' 0 '+la+' 1 '+x2+' '+y2+'" fill="none" stroke="var(--accent)" stroke-width="3"/>';
+    s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+xi+'" y2="'+yi+'" stroke="var(--green)" stroke-width="2"/>';
+    s+='<circle cx="'+cx+'" cy="'+cy+'" r="3" fill="var(--fg)"/>';
+    s+='<text x="2" y="68" font-size="9" fill="var(--fg2)">180</text>';
+    s+='<text x="104" y="68" font-size="9" fill="var(--fg2)">0</text>';
+    s+='</svg>';
+    s+='<div class="angle-info">';
+    s+='Repos: <span>'+init+'&deg;</span>';
+    s+=' Course: <span>'+minA+'&deg;&rarr;'+maxA+'&deg;</span>';
+    s+='</div>';
+  }
   preview.innerHTML=s;
 }
 
