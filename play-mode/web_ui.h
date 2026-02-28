@@ -37,10 +37,10 @@ a{color:var(--accent);text-decoration:none}
 
 /* Layout */
 .header{background:var(--bg2);border-bottom:1px solid var(--border);
-  padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative}
 .header h1{font-size:18px;font-weight:600;margin:0}
 .header h1 span{color:var(--accent)}
-.header .logo{flex-shrink:0;line-height:0}
+.header .logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);line-height:0}
 .header .status{margin-left:auto}
 .header .dot{width:8px;height:8px;border-radius:50%;display:inline-block;
   margin-right:4px;background:var(--green)}
