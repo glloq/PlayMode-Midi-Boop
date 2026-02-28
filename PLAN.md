@@ -1,87 +1,79 @@
 # Plan de refactoring UI — Simplification pour débutants
 
-## Analyse de l'existant
-
-L'interface actuelle comporte **10+ pages** avec beaucoup de sous-menus :
-- Accueil (instruments + piano)
-- Actionneurs (table séparée)
-- CC Mapping (page dédiée)
-- Calibration acoustique
-- Test industriel (sweep/burst/stress)
-- Dashboard, Power, Safety, Logs, Paramètres (gear menu)
-
-**Problème** : Trop de pages, navigation complexe, un débutant ne sait pas par où commencer.
+## Statut : Implémenté
 
 ---
 
-## Nouvelle architecture : 3 pages + Welcome + Settings
+## Architecture actuelle : 3 onglets + Welcome + Réglages
 
 ### Page "Bienvenue" (first-run, affichée si 0 instruments)
-- Écran d'accueil chaleureux avec le logo Midi B∞p
-- Explication en 3 étapes illustrées : Créer → Connecter → Jouer
-- Bouton unique "Créer mon premier instrument" qui lance le wizard
-- Disparaît une fois qu'un instrument existe (et ne réapparaît plus)
+- Écran d'accueil avec le logo Midi B∞p centré dans le header
+- 3 étapes illustrées : Créer → Connecter → Jouer
+- Bouton "Créer mon premier instrument" → lance le wizard 4 étapes
+- Lien secondaire vers la configuration manuelle
+- Disparaît automatiquement dès qu'un instrument existe
 
 ### Page 1 : **Instrument** (onglet par défaut)
 - Liste des instruments (nom, canal, type, nb actionneurs, état)
 - Boutons Créer (wizard) / Éditer / Supprimer
-- **Piano virtuel** intégré en bas (sélecteur d'instrument)
-- Section dépliable "Actionneurs" : table complète des actionneurs avec test inline
-- Section dépliable "CC Mapping" : table des Control Changes
+- **Piano(s) virtuels** : un clavier interactif par instrument
+- Section dépliable "Actionneurs" inline
+- Section dépliable "CC Mapping" inline
 
 ### Page 2 : **MIDI**
-- Transports MIDI : Serial / UDP / RTP-MIDI (toggle + status)
-- Jitter buffer (slider)
-- Routage MIDI : table des notes mappées par instrument
-- WiFi : SSID, password, hostname (car le MIDI réseau en dépend)
+- Transports MIDI : Serial / UDP / RTP-MIDI (toggle + status par carte)
+- Jitter buffer (slider 10–80 ms)
+- Messages MIDI reçus en temps réel (table avec pause/effacer)
 
-### Page 3 : **Calibration**
-- **Tests actionneurs** : Test individuel (bouton par actionneur), Sweep, Burst
-- **Calibration acoustique** : micro I²S, calibrer tous / un seul, résultats
-- **Réglages servo** : angle preview, ajustement rapide
-- **Réglages solénoïde** : durée impulsion, PWM
+### Page 3 : **Actionneurs**
+- Table complète de tous les actionneurs (ID, type, note, bus, PCA, canal, mode, état)
+- CC Routing : table des Control Changes par instrument
 
-### Gear menu (inchangé mais réorganisé)
-- Dashboard (monitoring temps réel)
-- Power (budget énergie)
-- Safety (limites sécurité + kill switch)
-- Logs (journal système)
-- Sauvegarde/Reset config
+### Page 4 : **Calibration** (onglet conditionnel, masqué si non pertinent)
+- Calibration acoustique : micro I²S, progression, résultats
+- Test actionneur : sweep, burst, calibration individuelle/globale
 
----
-
-## Changements techniques
-
-### Fichier `web_ui.h` (refonte complète du HTML/CSS/JS)
-
-1. **Welcome page** : nouveau `<div id="page-welcome">` avec détection auto `instruments.length === 0`
-2. **Nav simplifiée** : 3 boutons au lieu de 5 (`Instrument` / `MIDI` / `Calibration`)
-3. **Page Instrument** : fusionne Home + Actuators + CC Mapping avec sections collapsibles
-4. **Page MIDI** : fusionne transport MIDI + WiFi + routage (ex-Settings partiel)
-5. **Page Calibration** : fusionne Calibration acoustique + Test industriel
-6. **Gear menu** : conservé tel quel (Dashboard, Power, Safety, Logs + config save)
-7. **Modals** : conservés (instrument, actuator, wizard) — aucun changement fonctionnel
-8. **Init JS** : détection first-run, redirection auto vers welcome/wizard
-
-### Fichier `web_server.cpp` — AUCUN changement
-Toutes les API REST restent identiques. Seul le frontend change.
+### Réglages (engrenage ⚙)
+- **Monitoring** : 4 cartes (MIDI, Polyphonie avec barre, Scheduler, WiFi)
+- **Polyphonie & Sécurité** : polyphonie max, Kill Switch, dégradation, limites avancées dépliables
+- **Journal système** : logs filtrables par niveau et catégorie, auto-scroll
+- **Connexion WiFi** : SSID, mot de passe, hostname, AP fallback
+- **Bus I²C** (avancé, dépliable) : table des bus avec fréquence PWM configurable
+- **Configuration** : sauvegarde flash, réinitialisation
 
 ---
 
-## Ce qui est conservé intact
-- Toutes les API REST (pas de changement backend)
+## Changements implémentés
+
+### Navigation
+- 10+ pages → 3 onglets + Réglages (engrenage)
+- Page Welcome au premier démarrage
+- Wizard de création en 4 étapes
+
+### Réglages (refonte)
+- Fusion des sections Monitoring + Polyphonie + Sécurité
+- Suppression doublons :
+  - "Actifs" affiché 1 fois (était 3 : monitoring, polyphonie, sécurité)
+  - "Rejetés" affiché 1 fois (était 2 : monitoring, polyphonie)
+  - "Polyphonie max" : 1 seul input partagé entre polyphonie et sécurité
+- 4 cartes Monitoring : MIDI, Polyphonie (avec barre + rejetés), Scheduler, WiFi
+
+### Modals de confirmation/alerte thémés
+- `appConfirm()` remplace tous les `confirm()` natifs (6 occurrences)
+- `appAlert()` remplace tous les `alert()` natifs (5 occurrences)
+- Design intégré au thème sombre avec icônes contextuelles
+- Support danger/primary, textes de boutons personnalisables
+
+### Header
+- Logo B∞P centré horizontalement via positionnement absolu
+
+### Ce qui est conservé intact
+- Toutes les API REST (aucun changement backend)
 - WebSocket et monitoring temps réel
-- Wizard de création d'instrument (4 étapes)
-- Modals d'édition (instrument + actionneur)
-- Piano virtuel interactif
-- Gear menu avancé (Dashboard, Power, Safety, Logs)
+- Wizard 4 étapes (instrument, type, notes, résumé)
+- Modals d'édition (instrument, actionneur, CC)
+- Piano virtuel interactif (un par instrument)
+- Thème sombre GitHub-style
 - Design responsive (mobile/tablette/desktop)
-- Dark theme GitHub-style
-
-## Ce qui change
-- Navigation : 5 onglets → 3 onglets
-- Page d'accueil : welcome screen au premier démarrage
-- Regroupement logique : les actionneurs et CC sont sous "Instrument"
-- Tests et calibration : fusionnés en une seule page "Calibration"
-- MIDI et WiFi : fusionnés car liés (MIDI réseau = WiFi)
-- Bus I²C : déplacé dans gear menu (Paramètres avancés)
+- Toasts de notification
+- Sections dépliables pour réglages avancés

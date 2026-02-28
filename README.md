@@ -124,18 +124,15 @@ Le projet consiste à créer un **contrôleur MIDI physique automatisé**, capab
 
 10. **Web UI / UX**
 
-    * Interface no-code
-    * Épurée et modulable
-    * Sections :
-
-      * Instruments (multi-canaux)
-      * Actionneurs par instrument
-      * Mapping notes MIDI + CC
-      * Paramètres bus / PCA / OE
-      * Calibration
-      * Monitoring temps réel (notes actives, latences, consommation)
-      * Visualisation piano(s) avec notes MIDI associées
-      * Logs et état sécurité
+    * Interface no-code, thème sombre, responsive mobile/tablette/desktop
+    * Navigation simplifiée : 3 onglets + page Réglages
+    * Page d'accueil guidée (Bienvenue) + assistant de création 4 étapes
+    * Piano(s) virtuels interactifs par instrument
+    * Monitoring temps réel via WebSocket (polyphonie, MIDI, WiFi, scheduler)
+    * Modals de confirmation thémés (remplacent les dialogues natifs du navigateur)
+    * Toasts pour les notifications
+    * Sections dépliables pour les réglages avancés
+    * Logs système avec filtrage par niveau et catégorie
 
 ---
 
@@ -163,20 +160,30 @@ struct Instrument {
 
 ### Principes
 
-* **Épurée** : pas de menus complexes
-* **Interactive** : piano(s) visuels pour chaque instrument
-* **Paramétrable** : choix bus, actionneur, profil instrument
-* **Temps réel** : état notes et CC visibles instantanément
-* **Calibration guidée** : bouton “auto-calibrer” pour chaque instrument
+* **Épurée** : navigation en 3 onglets + page Réglages (engrenage)
+* **Guidée** : page d'accueil “Bienvenue” au premier lancement, assistant de création en 4 étapes
+* **Interactive** : piano(s) visuels par instrument, test actionneur en un clic
+* **Temps réel** : monitoring WebSocket (notes actives, polyphonie, MIDI, WiFi)
+* **Thème sombre** : palette inspirée GitHub, toasts et modals de confirmation intégrés au thème
 
-### Composants essentiels
+### Navigation
 
-* Tableau instruments / canaux
-* Timeline MIDI / latence
-* Piano virtuel avec notes associées
-* Indicateur de charge bus / PCA
-* Boutons de test actionneur individuel
-* Mode maintenance / sécurité
+| Onglet | Contenu |
+|--------|---------|
+| **Instrument** | Liste instruments, piano(s) virtuels, actionneurs, CC mapping |
+| **MIDI** | Transports (Serial/UDP/RTP), jitter buffer, messages reçus |
+| **Actionneurs** | Table actionneurs, CC routing |
+| **Calibration** | Calibration acoustique (micro I²S), test sweep/burst |
+| **Réglages** (engrenage) | Monitoring, polyphonie & sécurité, logs, WiFi, bus I²C, sauvegarde |
+
+### Composants UI
+
+* **Page Bienvenue** : 3 étapes Créer → Connecter → Jouer, visible si aucun instrument
+* **Assistant (Wizard)** : création guidée en 4 étapes (identité, type, notes, résumé)
+* **Piano virtuel** : un clavier par instrument, notes MIDI visuelles, scroll horizontal tactile
+* **Modals thémés** : confirmation/alerte intégrés au thème (remplacent `confirm()` / `alert()` natifs)
+* **Toasts** : notifications temporaires (succès, erreur, avertissement)
+* **Sections dépliables** : réglages avancés masqués par défaut (sécurité, bus I²C, hit-and-hold)
 
 ---
 
@@ -224,7 +231,7 @@ MIDI In → Parser → Normalizer → Latency Engine → Scheduler → Actuator 
 
 ---
 
-## 10️⃣ Étapes de conception recommandées
+## 10️⃣ Étapes de conception
 
 1. **Base scheduler + actuator engine**
 2. **Gestion PCA batch + multi-bus**
@@ -233,9 +240,7 @@ MIDI In → Parser → Normalizer → Latency Engine → Scheduler → Actuator 
 5. **Safety + power manager**
 6. **Web UI + piano(s) visuels**
 7. **Auto-calibration acoustique**
-8. **Test industriel / maintenance mode**
+8. **Test actionneur / maintenance mode**
 9. **Logs + monitoring temps réel**
-10. 
-
-
+10. **Simplification UI : 3 onglets, welcome, wizard, modals thémés**
 
