@@ -331,22 +331,6 @@ uint16_t PowerManager::estimateCurrent(const ActuatorConfig& actuator,
     return 0;
 }
 
-void PowerManager::recalculateBusTotals() {
-    uint32_t servo_ma    = 0;
-    uint32_t solenoid_ma = 0;
-
-    // Cette méthode est un recalcul interne depuis _actuator_allocated_ma.
-    // Elle est appelée si nécessaire mais update() est la source principale.
-    for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
-        if (_actuator_tracked[i]) {
-            // bus_id n'est pas accessible directement ici sans accès aux configs.
-            // Le recalcul complet se fait dans update() avec les ActuatorConfig.
-            (void)servo_ma;
-            (void)solenoid_ma;
-        }
-    }
-}
-
 void PowerManager::updateDerivedStats() {
     // Pourcentage du budget utilisé
     if (_budget.global_max_ma > 0) {

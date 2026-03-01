@@ -82,7 +82,12 @@ bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEv
     }
 
     // Mettre à jour les compteurs
-    _actuator_safety[id].trigger_count_window++;
+    // AUDIT FIX : seuls les NOTE_ON comptent comme déclenchements pour le
+    // rate limiter. Les NOTE_OFF et ACTION_PWM_SET (retours solénoïde) ne
+    // doivent pas gonfler trigger_count_window.
+    if (event.action == ACTION_NOTE_ON) {
+        _actuator_safety[id].trigger_count_window++;
+    }
     _actuator_safety[id].last_activity_us = (uint32_t)esp_timer_get_time();
     _actuator_safety[id].watchdog_triggered = false;
     _actuator_safety[id].rate_limited = false;
