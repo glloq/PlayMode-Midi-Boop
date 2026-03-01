@@ -367,6 +367,7 @@ void ConfigManager::serializeActuator(const ActuatorConfig& act, JsonObject& obj
     } else {
         const char* behaviors[] = {"frappe", "hit_and_hold"};
         obj["behavior"] = behaviors[act.behavior % 2];
+        obj["pulse_min_ms"] = act.pulse_min_ms;
         obj["pulse_ms"] = act.pulse_ms;
         obj["pwm_initial"] = act.pwm_initial;
         obj["pwm_hold"] = act.pwm_hold;
@@ -381,6 +382,14 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
     act.pca_channel = obj["pca_channel"] | 0;
     act.enabled = obj["enabled"] | true;
     act.latency_ms = obj["latency_ms"] | 0;
+
+    // AUDIT FIX : valider bus_id, pca_address et pca_channel
+    if (act.bus_id > 1) act.bus_id = 0;
+    if (act.pca_address < PCA_BASE_ADDRESS ||
+        act.pca_address >= PCA_BASE_ADDRESS + PCA_MAX_PER_BUS) {
+        act.pca_address = PCA_BASE_ADDRESS;
+    }
+    if (act.pca_channel >= PCA_CHANNELS) act.pca_channel = 0;
 
     const char* type_str = obj["type"] | "servo";
     act.type = (strcmp(type_str, "solenoid") == 0) ? ACT_SOLENOID : ACT_SERVO;
@@ -398,14 +407,24 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
         act.speed_ms = obj["speed_ms"] | 100;
         act.angle_b = obj["angle_b"] | 135;
         act.hit_reverse = obj["hit_reverse"] | false;
+
+        // AUDIT FIX : borner les angles servo à [0, SERVO_MAX_ANGLE]
+        if (act.angle_initial > SERVO_MAX_ANGLE) act.angle_initial = SERVO_MAX_ANGLE;
+        if (act.angle_b > SERVO_MAX_ANGLE) act.angle_b = SERVO_MAX_ANGLE;
+        if (act.amplitude > SERVO_MAX_ANGLE) act.amplitude = SERVO_MAX_ANGLE;
     } else {
         if (strcmp(behavior_str, "hit_and_hold") == 0) act.behavior = SOL_HIT_AND_HOLD;
         else act.behavior = SOL_FRAPPE;
 
+        act.pulse_min_ms = obj["pulse_min_ms"] | SOLENOID_MIN_PULSE_MS;
         act.pulse_ms = obj["pulse_ms"] | 20;
         act.pwm_initial = obj["pwm_initial"] | 4095;
         act.pwm_hold = obj["pwm_hold"] | 2048;
         act.ramp_ms = obj["ramp_ms"] | 50;
+
+        // AUDIT FIX : borner les valeurs PWM solénoïde à [0, SOLENOID_PWM_MAX]
+        if (act.pwm_initial > SOLENOID_PWM_MAX) act.pwm_initial = SOLENOID_PWM_MAX;
+        if (act.pwm_hold > SOLENOID_PWM_MAX) act.pwm_hold = SOLENOID_PWM_MAX;
     }
 
     // Initialiser l'état runtime

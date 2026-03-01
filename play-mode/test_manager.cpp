@@ -57,7 +57,6 @@ bool TestManager::startBurst(uint8_t actuator_id, uint8_t count,
     if (_mode != TEST_IDLE) return false;
 
     // Vérifier que l'actionneur existe
-    uint8_t dummy;
     bool found = false;
     ActuatorConfig* acts  = _config.getActuators();
     uint8_t         total = _config.getActuatorCount();

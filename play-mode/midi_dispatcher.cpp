@@ -11,13 +11,18 @@ MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
       _powerManager(nullptr),
       _dispatched_count(0),
       _dropped_count(0),
-      _power_rejected_count(0) {
+      _power_rejected_count(0),
+      _ws_log_head(0),
+      _ws_log_count(0) {
     memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
     memset(_routing_cache, 0, sizeof(_routing_cache));
+    memset(_ws_log, 0, sizeof(_ws_log));
 }
 
 void MidiDispatcher::dispatch(const MidiMessage& msg) {
+    uint32_t dispatched_before = _dispatched_count;
+
     switch (msg.type) {
         case MIDI_NOTE_ON:
             // Note On avec vélocité 0 = Note Off (convention MIDI)
@@ -39,6 +44,10 @@ void MidiDispatcher::dispatch(const MidiMessage& msg) {
         default:
             break;
     }
+
+    // AUDIT FIX : logger le message pour le relay WebSocket (log MIDI temps réel)
+    bool routed = (_dispatched_count > dispatched_before);
+    pushWsLog(msg, routed);
 }
 
 void MidiDispatcher::refreshConfig() {
@@ -227,6 +236,9 @@ void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
                 break;
             }
 
+            // NOTE AUDIT : ces écritures uint16_t depuis Core 0 sont lues par
+            // Core 1 (actuator_engine). Sur Xtensa LX6, les stores 16 bits alignés
+            // sont atomiques ; la cohérence est garantie au prochain tick scheduler (≤1 ms).
             case CC_TARGET_AMPLITUDE:
                 act->amplitude = mapped_value;
                 dispatched_any = true;
@@ -354,4 +366,36 @@ uint16_t MidiDispatcher::computeMaxLatency(const InstrumentConfig& inst) {
     }
 
     return max_lat;
+}
+
+// ============================================================================
+// AUDIT FIX : Ring buffer MIDI pour le relay WebSocket
+// ============================================================================
+
+void MidiDispatcher::pushWsLog(const MidiMessage& msg, bool routed) {
+    WsLogEntry& entry = _ws_log[_ws_log_head];
+    entry.msg = msg;
+    entry.routed = routed;
+    _ws_log_head = (_ws_log_head + 1) % MIDI_WS_LOG_SIZE;
+    if (_ws_log_count < MIDI_WS_LOG_SIZE) _ws_log_count++;
+}
+
+uint8_t MidiDispatcher::getWsLogCount() const {
+    return _ws_log_count;
+}
+
+uint8_t MidiDispatcher::drainWsLog(WsLogEntry* out, uint8_t max_count) {
+    if (_ws_log_count == 0) return 0;
+
+    uint8_t start = (_ws_log_head + MIDI_WS_LOG_SIZE - _ws_log_count) % MIDI_WS_LOG_SIZE;
+    uint8_t n = (_ws_log_count < max_count) ? _ws_log_count : max_count;
+
+    for (uint8_t i = 0; i < n; i++) {
+        uint8_t idx = (start + i) % MIDI_WS_LOG_SIZE;
+        out[i] = _ws_log[idx];
+    }
+
+    _ws_log_count = 0;
+    _ws_log_head = 0;
+    return n;
 }

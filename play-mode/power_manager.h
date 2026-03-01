@@ -103,9 +103,6 @@ private:
     // Estime la consommation d'un actionneur selon son type et la vélocité
     uint16_t estimateCurrent(const ActuatorConfig& actuator, uint8_t velocity) const;
 
-    // Recalcule servo_bus_ma et solenoid_bus_ma depuis les allocations actives
-    void recalculateBusTotals();
-
     // Recalcule budget_used_percent et degradation_active
     void updateDerivedStats();
 };

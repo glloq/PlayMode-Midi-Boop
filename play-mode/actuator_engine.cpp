@@ -181,8 +181,11 @@ void ActuatorEngine::solenoidFrappe(ActuatorConfig& act, const SchedulerEvent& e
         setSolenoidPWM(act, SOLENOID_PWM_MAX);
         act.state.active = true;
 
-        // Planifier la désactivation après la durée de pulse
-        uint16_t pulse = velocityToPulseMs(event.velocity);
+        // AUDIT FIX : utiliser act.pulse_min_ms / act.pulse_ms (configurable par
+        // actionneur) au lieu des constantes globales SOLENOID_MIN/MAX_PULSE_MS.
+        uint16_t min_pulse = (act.pulse_min_ms > 0) ? act.pulse_min_ms : SOLENOID_MIN_PULSE_MS;
+        uint16_t max_pulse = (act.pulse_ms > 0) ? act.pulse_ms : SOLENOID_MAX_PULSE_MS;
+        uint16_t pulse = map(event.velocity, 0, 127, min_pulse, max_pulse);
         scheduleReturn(act, pulse, 0);
 
     } else if (event.action == ACTION_PWM_SET) {
@@ -228,11 +231,6 @@ void ActuatorEngine::setServoAngle(ActuatorConfig& act, uint16_t angle) {
 void ActuatorEngine::setSolenoidPWM(ActuatorConfig& act, uint16_t pwm) {
     _pca.setActuatorPWM(act, pwm);
     act.state.current_position = pwm;
-}
-
-uint16_t ActuatorEngine::velocityToPulseMs(uint8_t velocity) {
-    // Mapper vélocité MIDI (0-127) → durée pulse (min-max ms)
-    return map(velocity, 0, 127, SOLENOID_MIN_PULSE_MS, SOLENOID_MAX_PULSE_MS);
 }
 
 uint16_t ActuatorEngine::velocityToAmplitude(const ActuatorConfig& act, uint8_t velocity) {

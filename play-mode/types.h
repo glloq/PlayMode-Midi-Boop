@@ -64,7 +64,8 @@ struct ActuatorConfig {
     bool     hit_reverse;        // Sens de frappe : false = horaire (+), true = anti-horaire (-)
 
     // Paramètres solénoïde
-    uint16_t pulse_ms;           // Durée frappe (ms)
+    uint16_t pulse_min_ms;       // Durée frappe min (ms) — vélocité 0
+    uint16_t pulse_ms;           // Durée frappe max (ms) — vélocité 127
     uint16_t pwm_initial;        // PWM initial hit-and-hold (0-4095)
     uint16_t pwm_hold;           // PWM maintien hit-and-hold (0-4095)
     uint16_t ramp_ms;            // Durée rampe initial → hold (ms)

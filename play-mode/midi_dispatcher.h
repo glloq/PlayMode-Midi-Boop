@@ -44,6 +44,23 @@ public:
     // Enregistre le PowerManager (optionnel — peut être null)
     void setPowerManager(PowerManager* pm);
 
+    // --- AUDIT FIX : ring buffer pour relayer les messages MIDI via WebSocket ---
+    // Taille max du buffer (messages récents). Adapté au broadcast WS à 200 ms.
+    static const uint8_t MIDI_WS_LOG_SIZE = 16;
+
+    // Entrée du log WS (message + flag de routage)
+    struct WsLogEntry {
+        MidiMessage msg;
+        bool routed;
+    };
+
+    // Retourne le nombre de messages en attente dans le log WS
+    uint8_t getWsLogCount() const;
+
+    // Copie les entrées en attente dans `out` (max `max_count`), retourne le
+    // nombre effectivement copiés, et vide le buffer.
+    uint8_t drainWsLog(WsLogEntry* out, uint8_t max_count);
+
 private:
     Scheduler& _scheduler;
     ConfigManager& _config;
@@ -51,6 +68,12 @@ private:
     uint32_t _dispatched_count;
     uint32_t _dropped_count;
     uint32_t _power_rejected_count;
+
+    // Ring buffer WS log
+    WsLogEntry _ws_log[MIDI_WS_LOG_SIZE];
+    uint8_t _ws_log_head;
+    uint8_t _ws_log_count;
+    void pushWsLog(const MidiMessage& msg, bool routed);
 
     // Table de lookup rapide : [canal MIDI] → index instrument (-1 = non mappé)
     int8_t _channel_to_instrument[16];

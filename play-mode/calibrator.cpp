@@ -205,7 +205,15 @@ void Calibrator::update() {
     case CAL_PAUSING: {
         uint32_t elapsed_ms = (now_us - _state_enter_us) / 1000;
         if (elapsed_ms >= CAL_INTER_RETRY_MS) {
-            enterState(CAL_TRIGGERING);
+            // AUDIT FIX : si on vient de changer d'actionneur (advanceToNext
+            // remet _ambient_sample_count à 0), re-mesurer le bruit ambiant
+            // pour recalculer le seuil d'onset. Entre retries du même actionneur,
+            // _ambient_sample_count > 0 donc on va directement au trigger.
+            if (_ambient_sample_count == 0) {
+                enterState(CAL_AMBIENT);
+            } else {
+                enterState(CAL_TRIGGERING);
+            }
         }
         break;
     }
@@ -231,6 +239,11 @@ void Calibrator::finishCurrent() {
     // Mettre à jour ou créer l'entrée de résultat
     CalibrationResult* res = findResult(_cur_act_id);
     if (!res) {
+        // AUDIT FIX : vérifier que le buffer n'est pas plein
+        if (_result_count >= MAX_ACTUATORS) {
+            Serial.printf("[CAL] Buffer résultats plein (%d)\n", _result_count);
+            return;
+        }
         res = &_results[_result_count++];
     }
     res->actuator_id         = _cur_act_id;
