@@ -367,6 +367,7 @@ void ConfigManager::serializeActuator(const ActuatorConfig& act, JsonObject& obj
     } else {
         const char* behaviors[] = {"frappe", "hit_and_hold"};
         obj["behavior"] = behaviors[act.behavior % 2];
+        obj["pulse_min_ms"] = act.pulse_min_ms;
         obj["pulse_ms"] = act.pulse_ms;
         obj["pwm_initial"] = act.pwm_initial;
         obj["pwm_hold"] = act.pwm_hold;
@@ -415,6 +416,7 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
         if (strcmp(behavior_str, "hit_and_hold") == 0) act.behavior = SOL_HIT_AND_HOLD;
         else act.behavior = SOL_FRAPPE;
 
+        act.pulse_min_ms = obj["pulse_min_ms"] | SOLENOID_MIN_PULSE_MS;
         act.pulse_ms = obj["pulse_ms"] | 20;
         act.pwm_initial = obj["pwm_initial"] | 4095;
         act.pwm_hold = obj["pwm_hold"] | 2048;

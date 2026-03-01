@@ -307,6 +307,25 @@ void WebServer::setupAPIRoutes() {
     killHandler->setMethod(HTTP_POST);
     _server.addHandler(killHandler);
 
+    // AUDIT FIX : Bus PWM frequency (endpoint manquant — appelé par le frontend)
+    auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            if (!_pca || !_config) { req->send(500); return; }
+            uint8_t bus_id = json["bus_id"] | 0xFF;
+            uint16_t freq  = json["freq_pwm"] | 0;
+            if (bus_id > 1 || freq == 0) {
+                req->send(400, "application/json",
+                          "{\"error\":\"invalid bus_id or freq_pwm\"}");
+                return;
+            }
+            _pca->setFrequency(bus_id, freq);
+            // Mettre à jour la config pour persistance
+            _config->getBuses()[bus_id].pwm_frequency = freq;
+            req->send(200, "application/json", "{\"ok\":true}");
+        });
+    busPwmHandler->setMethod(HTTP_POST);
+    _server.addHandler(busPwmHandler);
+
     // --- Calibration acoustique (Phase 7) ---
     _server.on("/api/calibrate/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
         handleGetCalibrateStatus(req);
@@ -452,6 +471,7 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
         }
         // Paramètres solénoïde
         else {
+            obj["pulse_min_ms"] = actuators[i].pulse_min_ms;
             obj["pulse_ms"]    = actuators[i].pulse_ms;
             obj["pwm_initial"] = actuators[i].pwm_initial;
             obj["pwm_hold"]    = actuators[i].pwm_hold;
@@ -740,6 +760,7 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     act.hit_reverse   = doc["hit_reverse"] | false;
 
     // Paramètres solénoïde
+    act.pulse_min_ms  = doc["pulse_min_ms"] | SOLENOID_MIN_PULSE_MS;
     act.pulse_ms      = doc["pulse_ms"] | 20;
     act.pwm_initial   = doc["pwm_initial"] | 4095;
     act.pwm_hold      = doc["pwm_hold"] | 2048;
@@ -1195,8 +1216,8 @@ void WebServer::broadcastStatus() {
 // ============================================================================
 
 void WebServer::buildStatusJSON(String& output) {
-    // AUDIT FIX : taille augmentée à 2048 (active_actuators + power + safety + log_count)
-    StaticJsonDocument<2048> doc;
+    // AUDIT FIX : taille augmentée à 4096 (active_actuators + power + safety + midi_msgs + log_count)
+    StaticJsonDocument<4096> doc;
 
     doc["uptime_s"] = millis() / 1000;
     doc["heap"]     = ESP.getFreeHeap();
@@ -1240,11 +1261,15 @@ void WebServer::buildStatusJSON(String& output) {
     if (_power) {
         JsonObject pwr = doc.createNestedObject("power");
         const PowerStats& ps = _power->getStats();
-        pwr["total_ma"]    = ps.total_estimated_ma;
-        pwr["servo_ma"]    = ps.servo_bus_ma;
-        pwr["sol_ma"]      = ps.solenoid_bus_ma;
-        pwr["budget_pct"]  = ps.budget_used_percent;
-        pwr["degradation"] = ps.degradation_active;
+        const PowerBudget& pb = _power->getBudget();
+        pwr["total_ma"]      = ps.total_estimated_ma;
+        pwr["servo_ma"]      = ps.servo_bus_ma;
+        pwr["sol_ma"]        = ps.solenoid_bus_ma;
+        pwr["budget_pct"]    = ps.budget_used_percent;
+        pwr["degradation"]   = ps.degradation_active;
+        // AUDIT FIX : champs attendus par le frontend pour la jauge de polyphonie
+        pwr["active_count"]  = ps.global_active_count;
+        pwr["max_polyphony"] = pb.global_max_polyphony;
     }
 
     // Actuators actifs (résumé compact)
@@ -1265,6 +1290,26 @@ void WebServer::buildStatusJSON(String& output) {
     JsonObject wifi = doc.createNestedObject("wifi");
     wifi["connected"] = WiFi.isConnected();
     wifi["rssi"]      = WiFi.RSSI();
+
+    // AUDIT FIX : relayer les messages MIDI récents via WebSocket
+    if (_dispatcher) {
+        static const uint8_t MAX_WS_MIDI = 16;
+        MidiDispatcher::WsLogEntry entries[MAX_WS_MIDI];
+        uint8_t n = _dispatcher->drainWsLog(entries, MAX_WS_MIDI);
+        if (n > 0) {
+            static const char* SRC_NAMES[] = {"serial", "udp", "rtp"};
+            JsonArray msgs = doc.createNestedArray("midi_msgs");
+            for (uint8_t i = 0; i < n; i++) {
+                JsonObject m = msgs.createNestedObject();
+                m["type"]   = (uint8_t)entries[i].msg.type | entries[i].msg.channel;
+                m["d1"]     = entries[i].msg.data1;
+                m["d2"]     = entries[i].msg.data2;
+                m["src"]    = SRC_NAMES[entries[i].msg.source % 3];
+                m["t"]      = (uint32_t)(entries[i].msg.timestamp_us / 1000);
+                m["routed"] = entries[i].routed;
+            }
+        }
+    }
 
     // Log count (Phase 9) — permet à l'UI de détecter de nouvelles entrées
     doc["log_count"] = logger.getCount();
