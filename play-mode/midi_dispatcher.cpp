@@ -227,6 +227,9 @@ void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
                 break;
             }
 
+            // NOTE AUDIT : ces écritures uint16_t depuis Core 0 sont lues par
+            // Core 1 (actuator_engine). Sur Xtensa LX6, les stores 16 bits alignés
+            // sont atomiques ; la cohérence est garantie au prochain tick scheduler (≤1 ms).
             case CC_TARGET_AMPLITUDE:
                 act->amplitude = mapped_value;
                 dispatched_any = true;

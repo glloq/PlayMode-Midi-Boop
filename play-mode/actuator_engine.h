@@ -55,9 +55,6 @@ private:
     // Utilitaire : applique un PWM solénoïde
     void setSolenoidPWM(ActuatorConfig& act, uint16_t pwm);
 
-    // Utilitaire : calcule la durée de frappe solénoïde selon vélocité
-    uint16_t velocityToPulseMs(uint8_t velocity);
-
     // Utilitaire : calcule l'amplitude servo selon vélocité
     uint16_t velocityToAmplitude(const ActuatorConfig& act, uint8_t velocity);
 

@@ -133,7 +133,9 @@ void PCADriver::setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uin
     Adafruit_PWMServoDriver* driver = getDriver(bus_id, pca_address);
     if (driver) {
         if (value == 0) {
-            driver->setPWM(channel, 0, 0);
+            // AUDIT FIX : utiliser le bit 12 "full OFF" du PCA9685 (datasheet §7.3.3)
+            // au lieu de on=0,off=0 qui peut produire un glitch par cycle PWM.
+            driver->setPWM(channel, 0, 4096);
         } else if (value >= 4095) {
             driver->setPWM(channel, 4096, 0);
         } else {
