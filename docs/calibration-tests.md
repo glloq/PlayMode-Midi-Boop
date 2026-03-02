@@ -1,175 +1,175 @@
-# Calibration et Tests
+# Calibration and Tests
 
-> Voir aussi : [API REST](api-rest.md) — [Architecture](architecture.md) — [Modèle de données](modele-donnees.md)
+> See also: [REST API](api-rest.md) — [Architecture](architecture.md) — [Data Model](data-model.md)
 
 ---
 
-## 1. Calibration acoustique (Phase 7 — `calibrator.h/.cpp`)
+## 1. Acoustic Calibration (Phase 7 — `calibrator.h/.cpp`)
 
-### Principe
+### Principle
 
-Le calibrateur mesure la latence mécanique réelle de chaque actionneur grâce à un microphone I²S (INMP441).
-Il compare le moment du déclenchement MIDI avec le moment de l'impact sonore détecté.
+The calibrator measures the actual mechanical latency of each actuator using an I²S microphone (INMP441).
+It compares the MIDI trigger moment with the detected sound impact moment.
 
-### Matériel requis
+### Required Hardware
 
-* Microphone INMP441 connecté en I²S :
+* INMP441 microphone connected via I²S:
   * WS (Word Select) = GPIO 15
   * SCK (Bit Clock) = GPIO 14
   * SD (Data) = GPIO 32
-* Sampling : 16 kHz, DMA (8 buffers × 128 samples)
+* Sampling: 16 kHz, DMA (8 buffers × 128 samples)
 
-### Procédure par actionneur (automatique)
+### Per-Actuator Procedure (automatic)
 
-1. **Mesure bruit ambiant** (`CAL_AMBIENT`) — durée 80 ms
-   * Calcul de la valeur absolue moyenne des échantillons
-   * Seuil onset = moyenne × 4 (multiplicateur configurable)
-   * Seuil minimum absolu : 500 LSB (24 bits)
+1. **Ambient noise measurement** (`CAL_AMBIENT`) — duration 80 ms
+   * Compute mean absolute value of samples
+   * Onset threshold = mean × 4 (configurable multiplier)
+   * Absolute minimum threshold: 500 LSB (24 bits)
 
-2. **Flush DMA + déclenchement** (`CAL_TRIGGERING`)
-   * Vidange du buffer DMA I²S pour éviter les données périmées
-   * Envoi d'un NOTE_ON au scheduler (vélocité 110)
+2. **DMA flush + trigger** (`CAL_TRIGGERING`)
+   * Drain I²S DMA buffer to avoid stale data
+   * Send NOTE_ON to scheduler (velocity 110)
 
-3. **Enregistrement + détection onset** (`CAL_RECORDING`)
-   * Lecture streaming des échantillons I²S par chunks de 64 samples
-   * Détection du premier sample dépassant le seuil
-   * Fenêtre maximum de détection : 350 ms
-   * Latence = nombre de samples avant onset / fréquence d'échantillonnage
+3. **Recording + onset detection** (`CAL_RECORDING`)
+   * Streaming read of I²S samples in 64-sample chunks
+   * Detect first sample exceeding threshold
+   * Maximum detection window: 350 ms
+   * Latency = samples before onset / sample rate
 
-4. **Pause inter-essais** (`CAL_PAUSING`) — 600 ms entre chaque essai
+4. **Inter-trial pause** (`CAL_PAUSING`) — 600 ms between each trial
 
-5. **Moyennage** : 3 mesures par actionneur, résultat = moyenne des mesures valides
+5. **Averaging**: 3 measurements per actuator, result = mean of valid measurements
 
-### États de la machine
+### State Machine
 
-| État | Description |
-|------|-------------|
-| `CAL_IDLE` | En attente |
-| `CAL_AMBIENT` | Mesure bruit ambiant (baseline) |
-| `CAL_TRIGGERING` | Flush DMA + déclenchement actionneur |
-| `CAL_RECORDING` | Enregistrement + détection onset |
-| `CAL_PAUSING` | Pause inter-essais / inter-actionneurs |
-| `CAL_COMPLETE` | Calibration terminée avec succès |
-| `CAL_ERROR` | Erreur (timeout, pas de son, init échouée) |
+| State | Description |
+|-------|-------------|
+| `CAL_IDLE` | Idle |
+| `CAL_AMBIENT` | Ambient noise measurement (baseline) |
+| `CAL_TRIGGERING` | DMA flush + actuator trigger |
+| `CAL_RECORDING` | Recording + onset detection |
+| `CAL_PAUSING` | Inter-trial / inter-actuator pause |
+| `CAL_COMPLETE` | Calibration completed successfully |
+| `CAL_ERROR` | Error (timeout, no sound, init failed) |
 
-### Modes de démarrage
+### Start Modes
 
-* `startCalibration(actuator_id)` — calibrer un actionneur spécifique
-* `startCalibrationAll()` — calibrer tous les actionneurs actifs (file d'attente interne)
+* `startCalibration(actuator_id)` — calibrate a specific actuator
+* `startCalibrationAll()` — calibrate all enabled actuators (internal queue)
 
-### Résultats
+### Results
 
-Chaque résultat (`CalibrationResult`) contient :
-* `actuator_id` — ID de l'actionneur
-* `measured_latency_ms` — latence moyenne mesurée (ms)
-* `samples_taken` — nombre de mesures valides (sur 3)
-* `success` — true si ≥ 1 mesure valide
-* `timestamp_ms` — horodatage de complétion
+Each result (`CalibrationResult`) contains:
+* `actuator_id` — actuator ID
+* `measured_latency_ms` — measured average latency (ms)
+* `samples_taken` — number of valid measurements (out of 3)
+* `success` — true if ≥ 1 valid measurement
+* `timestamp_ms` — completion timestamp
 
-`applyResults()` écrit les latences mesurées directement dans les `ActuatorConfig`.
+`applyResults()` writes measured latencies directly into `ActuatorConfig`.
 
-### API REST associée
+### Associated REST API
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/calibrate/status` | État de la calibration (state, progress, actuator courant) |
-| `GET /api/calibrate/results` | Résultats de calibration (latences mesurées) |
-| `POST /api/calibrate` | Lancer une calibration (body JSON : actuator_id ou "all") |
-| `POST /api/calibrate/apply` | Appliquer les résultats aux actionneurs |
-| `POST /api/calibrate/stop` | Arrêter la calibration en cours |
+| `GET /api/calibrate/status` | Calibration state (state, progress, current actuator) |
+| `GET /api/calibrate/results` | Calibration results (measured latencies) |
+| `POST /api/calibrate` | Start a calibration (JSON body: actuator_id or "all") |
+| `POST /api/calibrate/apply` | Apply results to actuators |
+| `POST /api/calibrate/stop` | Stop current calibration |
 
 ---
 
-## 2. Tests actionneurs (Phase 8 — `test_manager.h/.cpp`)
+## 2. Actuator Tests (Phase 8 — `test_manager.h/.cpp`)
 
-### Principe
+### Principle
 
-Le Test Manager pilote des séquences de test sans MIDI externe.
-Les événements sont injectés directement dans le Scheduler (bypass MIDI).
-Safety Manager et Power Manager restent actifs pendant les tests.
+The Test Manager drives test sequences without external MIDI.
+Events are injected directly into the Scheduler (MIDI bypass).
+Safety Manager and Power Manager remain active during tests.
 
-### Trois modes de test
+### Three Test Modes
 
-| Mode | Description | Paramètres |
+| Mode | Description | Parameters |
 |------|-------------|------------|
-| **Sweep** | Parcourt tous les actionneurs actifs un par un | vélocité (défaut 100), intervalle (400 ms), durée hold (120 ms), loop |
-| **Burst** | Rafale rapide sur un seul actionneur | actuator_id, nombre de frappes (5), vélocité (100), intervalle (150 ms) |
-| **Stress** | Déclenche tous les actionneurs simultanément | vélocité (100), durée hold (120 ms) |
+| **Sweep** | Cycles through all enabled actuators one by one | velocity (default 100), interval (400 ms), hold duration (120 ms), loop |
+| **Burst** | Rapid fire on a single actuator | actuator_id, strike count (5), velocity (100), interval (150 ms) |
+| **Stress** | Triggers all actuators simultaneously | velocity (100), hold duration (120 ms) |
 
-### Journal d'événements
+### Event Log
 
-Buffer circulaire de 64 entrées (`TestLogEntry`) :
-* `timestamp_ms` — horodatage millis()
-* `actuator_id` — ID de l'actionneur
-* `velocity` — vélocité envoyée
-* `mode` — mode de test (sweep/burst/stress)
-* `scheduled` — true si l'événement a été accepté par le scheduler
+Circular buffer of 64 entries (`TestLogEntry`):
+* `timestamp_ms` — millis() timestamp
+* `actuator_id` — actuator ID
+* `velocity` — sent velocity
+* `mode` — test mode (sweep/burst/stress)
+* `scheduled` — true if event was accepted by scheduler
 
-### API REST associée
+### Associated REST API
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/test/status` | État du test (mode, progress, actuator courant, events sent) |
-| `GET /api/test/log` | Journal des événements de test |
-| `POST /api/test/sweep` | Lancer un sweep (body JSON : velocity, interval_ms, hold_ms, loop) |
-| `POST /api/test/burst` | Lancer un burst (body JSON : actuator_id, count, velocity, interval_ms) |
-| `POST /api/test/stress` | Lancer un stress (body JSON : velocity, hold_ms) |
-| `POST /api/test/stop` | Arrêter le test en cours |
-| `POST /api/test/log/clear` | Effacer le journal de tests |
-| `POST /api/test/actuator` | Tester un actionneur individuellement (body JSON) |
+| `GET /api/test/status` | Test state (mode, progress, current actuator, events sent) |
+| `GET /api/test/log` | Test event log |
+| `POST /api/test/sweep` | Start a sweep (JSON body: velocity, interval_ms, hold_ms, loop) |
+| `POST /api/test/burst` | Start a burst (JSON body: actuator_id, count, velocity, interval_ms) |
+| `POST /api/test/stress` | Start a stress test (JSON body: velocity, hold_ms) |
+| `POST /api/test/stop` | Stop current test |
+| `POST /api/test/log/clear` | Clear test log |
+| `POST /api/test/actuator` | Test an individual actuator (JSON body) |
 
 ---
 
-## 3. Comportements des actionneurs
+## 3. Actuator Behaviors
 
-### 3.1 Servomoteurs (4 comportements)
+### 3.1 Servomotors (4 behaviors)
 
-| Comportement | Enum | Description | Paramètres à calibrer |
-|-------------|------|-------------|----------------------|
-| **Frappe** | `SERVO_FRAPPE` | A → A+X → retour | Angle initial (A), amplitude (X), vitesse/durée, sens de frappe |
-| **Alterné** | `SERVO_ALTERNE` | A → B → A → B | Angle A, Angle B, vitesse |
-| **Gratter** | `SERVO_GRATTER` | A → ±X alterné à chaque note | Angle A, amplitude X, vitesse |
-| **Touche** | `SERVO_TOUCHE` | A → A±δ jusqu'à note off | Angle A, delta, vitesse |
+| Behavior | Enum | Description | Parameters to calibrate |
+|----------|------|-------------|------------------------|
+| **Strike** | `SERVO_FRAPPE` | A → A+X → return | Initial angle (A), amplitude (X), speed/duration, strike direction |
+| **Alternate** | `SERVO_ALTERNE` | A → B → A → B | Angle A, Angle B, speed |
+| **Strum** | `SERVO_GRATTER` | A → ±X alternating on each note | Angle A, amplitude X, speed |
+| **Key** | `SERVO_TOUCHE` | A → A±δ until note off | Angle A, delta, speed |
 
-### 3.2 Solénoïdes (2 comportements)
+### 3.2 Solenoids (2 behaviors)
 
-| Comportement | Enum | Description | Paramètres à calibrer |
-|-------------|------|-------------|----------------------|
-| **Frappe** | `SOL_FRAPPE` | Activation 5–50 ms selon vélocité | Durée min/max (ms), scaling vélocité |
-| **Hit-and-Hold** | `SOL_HIT_AND_HOLD` | PWM initial → rampe → maintien jusqu'à note off | PWM initial (0-4095), PWM hold (0-4095), rampe (ms) |
+| Behavior | Enum | Description | Parameters to calibrate |
+|----------|------|-------------|------------------------|
+| **Strike** | `SOL_FRAPPE` | 5–50 ms activation based on velocity | Min/max duration (ms), velocity scaling |
+| **Hit-and-Hold** | `SOL_HIT_AND_HOLD` | Initial PWM → ramp → hold until note off | Initial PWM (0-4095), hold PWM (0-4095), ramp (ms) |
 
 ---
 
-## 4. Workflow de création d'un instrument
+## 4. Instrument Creation Workflow
 
-### Via le Wizard (4 étapes)
+### Via Wizard (4 steps)
 
-1. **Identité** — nom de l'instrument + canal MIDI (0=Omni, 1-16)
-2. **Type** — sélection type d'actionneurs (servo/solénoïde) + bus I²C
-3. **Notes MIDI** — attribution des actionneurs et mapping notes sur piano virtuel
-4. **Résumé** — vue récapitulative, confirmation et sauvegarde
+1. **Identity** — instrument name + MIDI channel (0=Omni, 1-16)
+2. **Type** — actuator type selection (servo/solenoid) + I²C bus
+3. **MIDI Notes** — actuator assignment and note mapping on virtual piano
+4. **Summary** — review, confirmation and save
 
-### Via création manuelle
+### Via Manual Creation
 
-Modal complet avec tous les champs :
-* Nom, canal MIDI, bus I²C, latence par défaut, calibration auto, activation
+Full modal with all fields:
+* Name, MIDI channel, I²C bus, default latency, auto-calibration, enable/disable
 
-### Après création
+### After Creation
 
-1. Configurer les actionneurs individuellement (type, comportement, paramètres)
-2. Mapper les notes MIDI (table ou piano virtuel)
-3. Optionnel : configurer le CC routing (amplitude, vitesse, position, PWM)
-4. Tester chaque actionneur (test individuel ou sweep)
-5. Optionnel : calibration acoustique (si micro INMP441 connecté)
-6. Sauvegarder la configuration (flash LittleFS)
+1. Configure actuators individually (type, behavior, parameters)
+2. Map MIDI notes (table or virtual piano)
+3. Optional: configure CC routing (amplitude, speed, position, PWM)
+4. Test each actuator (individual test or sweep)
+5. Optional: acoustic calibration (if INMP441 mic connected)
+6. Save configuration (LittleFS flash)
 
-### Persistance
+### Persistence
 
-Configuration complète en JSON sur LittleFS (ArduinoJson v7) :
-* Instruments : nom, canal MIDI, bus I²C, actionneurs associés
-* Actionneurs : type, PCA, canal, comportement, paramètres, latence calibrée
-* Routage MIDI : notes, CC, courbes de vélocité
-* WiFi : SSID, password, hostname
-* MIDI : transports activés, ports, jitter buffer
-* Power : budget énergie, polyphonie
-* Version de configuration : 7
+Complete configuration in JSON on LittleFS (ArduinoJson v7):
+* Instruments: name, MIDI channel, I²C bus, associated actuators
+* Actuators: type, PCA, channel, behavior, parameters, calibrated latency
+* MIDI routing: notes, CC, velocity curves
+* WiFi: SSID, password, hostname
+* MIDI: enabled transports, ports, jitter buffer
+* Power: energy budget, polyphony
+* Configuration version: 7

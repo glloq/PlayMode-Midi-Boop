@@ -15,50 +15,50 @@ class PowerManager;
 // PlayMode — MIDI Dispatcher (Phase 3+4+5)
 // ============================================================================
 //
-// Route les messages MIDI vers les actionneurs via le scheduler.
-// Lookup : canal MIDI → instrument → note → actionneur.
-// Applique la compensation de latence pour synchroniser les actionneurs.
-// Phase 4 : dispatch CC, courbes de vélocité.
-// Phase 5 : vérification PowerManager avant NOTE_ON.
+// Routes MIDI messages to actuators via the scheduler.
+// Lookup: MIDI channel -> instrument -> note -> actuator.
+// Applies latency compensation to synchronize actuators.
+// Phase 4: CC dispatch, velocity curves.
+// Phase 5: PowerManager check before NOTE_ON.
 //
 
 class MidiDispatcher {
 public:
     MidiDispatcher(Scheduler& scheduler, ConfigManager& config);
 
-    // Dispatch un message MIDI vers le scheduler
+    // Dispatches a MIDI message to the scheduler
     void dispatch(const MidiMessage& msg);
 
-    // Reconstruit les tables de lookup depuis la config
+    // Rebuilds lookup tables from config
     void refreshConfig();
 
-    // Nombre de messages dispatchés avec succès
+    // Number of successfully dispatched messages
     uint32_t getDispatchedCount() const;
 
-    // Nombre de messages ignorés (note non mappée, canal inconnu)
+    // Number of ignored messages (unmapped note, unknown channel)
     uint32_t getDroppedCount() const;
 
-    // Nombre de messages rejetés par le PowerManager (budget/polyphonie)
+    // Number of messages rejected by PowerManager (budget/polyphony)
     uint32_t getPowerRejectedCount() const;
 
-    // Enregistre le PowerManager (optionnel — peut être null)
+    // Registers the PowerManager (optional -- can be null)
     void setPowerManager(PowerManager* pm);
 
-    // --- AUDIT FIX : ring buffer pour relayer les messages MIDI via WebSocket ---
-    // Taille max du buffer (messages récents). Adapté au broadcast WS à 200 ms.
+    // --- AUDIT FIX: ring buffer to relay MIDI messages via WebSocket ---
+    // Max buffer size (recent messages). Suited for WS broadcast at 200 ms.
     static const uint8_t MIDI_WS_LOG_SIZE = 16;
 
-    // Entrée du log WS (message + flag de routage)
+    // WS log entry (message + routing flag)
     struct WsLogEntry {
         MidiMessage msg;
         bool routed;
     };
 
-    // Retourne le nombre de messages en attente dans le log WS
+    // Returns the number of pending messages in the WS log
     uint8_t getWsLogCount() const;
 
-    // Copie les entrées en attente dans `out` (max `max_count`), retourne le
-    // nombre effectivement copiés, et vide le buffer.
+    // Copies pending entries into `out` (max `max_count`), returns the
+    // number actually copied, and clears the buffer.
     uint8_t drainWsLog(WsLogEntry* out, uint8_t max_count);
 
 private:
@@ -75,38 +75,38 @@ private:
     uint8_t _ws_log_count;
     void pushWsLog(const MidiMessage& msg, bool routed);
 
-    // Table de lookup rapide : [canal MIDI] → index instrument (-1 = non mappé)
+    // Fast lookup table: [MIDI channel] -> instrument index (-1 = unmapped)
     int8_t _channel_to_instrument[16];
 
-    // Latence max par instrument (pour compensation)
+    // Max latency per instrument (for compensation)
     uint16_t _max_latency_ms[MAX_INSTRUMENTS];
 
-    // Cache des pointeurs vers routing configs par instrument index
+    // Cache of pointers to routing configs by instrument index
     MidiRoutingConfig* _routing_cache[MAX_INSTRUMENTS];
 
-    // Traite un Note On
+    // Handles a Note On
     void handleNoteOn(const MidiMessage& msg);
 
-    // Traite un Note Off
+    // Handles a Note Off
     void handleNoteOff(const MidiMessage& msg);
 
-    // Traite un Control Change
+    // Handles a Control Change
     void handleControlChange(const MidiMessage& msg);
 
-    // Applique la courbe de vélocité d'un instrument
+    // Applies the velocity curve of an instrument
     uint8_t applyVelocityCurve(uint8_t instrument_index, uint8_t velocity);
 
-    // Cherche l'actionneur correspondant à une note dans un instrument
-    // Retourne l'index dans actuator_ids ou -1
+    // Finds the actuator corresponding to a note in an instrument
+    // Returns the index in actuator_ids or -1
     int8_t findActuatorForNote(const InstrumentConfig& inst, uint8_t note);
 
-    // Retrouve la config d'un actionneur par ID
+    // Finds the config of an actuator by ID
     ActuatorConfig* findActuatorConfig(uint8_t actuator_id);
 
-    // Mappe une valeur CC (0-127) vers un range de sortie
+    // Maps a CC value (0-127) to an output range
     uint16_t mapCCValue(uint8_t cc_value, uint16_t range_min, uint16_t range_max);
 
-    // Calcule la latence max parmi les actionneurs d'un instrument
+    // Computes the max latency among the actuators of an instrument
     uint16_t computeMaxLatency(const InstrumentConfig& inst);
 };
 

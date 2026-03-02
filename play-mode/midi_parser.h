@@ -5,44 +5,44 @@
 #include "midi_types.h"
 
 // ============================================================================
-// PlayMode — Parseur MIDI byte-par-byte (Phase 3)
+// PlayMode — Byte-by-byte MIDI Parser (Phase 3)
 // ============================================================================
 //
-// Parseur MIDI stateful qui consomme un byte à la fois.
-// Supporte le running status et ignore les messages SysEx.
-// Utilisé par chaque transport (Serial, UDP) indépendamment.
+// Stateful MIDI parser that consumes one byte at a time.
+// Supports running status and ignores SysEx messages.
+// Used by each transport (Serial, UDP) independently.
 //
 
 class MidiParser {
 public:
     MidiParser();
 
-    // Réinitialise l'état du parseur
+    // Resets the parser state
     void reset();
 
-    // Alimente le parseur avec un byte.
-    // Retourne true quand un message complet est prêt.
+    // Feeds the parser with a byte.
+    // Returns true when a complete message is ready.
     bool feed(uint8_t byte);
 
-    // Récupère le dernier message parsé.
-    // Valide uniquement après que feed() a retourné true.
+    // Retrieves the last parsed message.
+    // Valid only after feed() has returned true.
     MidiMessage getMessage() const;
 
 private:
-    MidiMessage _message;        // Message en cours de construction
-    uint8_t _running_status;     // Dernier status byte (running status)
-    uint8_t _data_index;         // Index du data byte attendu (0 ou 1)
-    uint8_t _expected_length;    // Nombre de data bytes attendus (1 ou 2)
-    bool _in_sysex;              // En cours de réception SysEx (ignoré)
-    bool _ready;                 // Message prêt à être lu
+    MidiMessage _message;        // Message being constructed
+    uint8_t _running_status;     // Last status byte (running status)
+    uint8_t _data_index;         // Expected data byte index (0 or 1)
+    uint8_t _expected_length;    // Number of expected data bytes (1 or 2)
+    bool _in_sysex;              // Currently receiving SysEx (ignored)
+    bool _ready;                 // Message ready to be read
 
-    // Détermine le nombre de data bytes pour un status byte
+    // Determines the number of data bytes for a status byte
     uint8_t dataLengthForStatus(uint8_t status);
 
-    // Traite un status byte
+    // Processes a status byte
     void handleStatusByte(uint8_t byte);
 
-    // Traite un data byte
+    // Processes a data byte
     bool handleDataByte(uint8_t byte);
 };
 

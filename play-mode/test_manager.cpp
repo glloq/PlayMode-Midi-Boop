@@ -3,7 +3,7 @@
 #include <string.h>
 
 // ============================================================================
-// PlayMode — Test Manager Industriel (implémentation)
+// PlayMode — Industrial Test Manager (implementation)
 // ============================================================================
 
 TestManager::TestManager(Scheduler& scheduler, ConfigManager& config)
@@ -30,7 +30,7 @@ TestManager::TestManager(Scheduler& scheduler, ConfigManager& config)
 }
 
 // ============================================================================
-// Démarrage
+// Start
 // ============================================================================
 
 bool TestManager::startSweep(uint8_t velocity, uint16_t interval_ms,
@@ -47,8 +47,8 @@ bool TestManager::startSweep(uint8_t velocity, uint16_t interval_ms,
 
     _mode = TEST_SWEEP;
 
-    Serial.printf("[TEST] Sweep démarré : vel=%d, interval=%dms, hold=%dms, loop=%s\n",
-                  velocity, interval_ms, hold_ms, loop ? "oui" : "non");
+    Serial.printf("[TEST] Sweep started: vel=%d, interval=%dms, hold=%dms, loop=%s\n",
+                  velocity, interval_ms, hold_ms, loop ? "yes" : "no");
     return true;
 }
 
@@ -56,7 +56,7 @@ bool TestManager::startBurst(uint8_t actuator_id, uint8_t count,
                               uint8_t velocity, uint16_t interval_ms) {
     if (_mode != TEST_IDLE) return false;
 
-    // Vérifier que l'actionneur existe
+    // Verify that the actuator exists
     bool found = false;
     ActuatorConfig* acts  = _config.getActuators();
     uint8_t         total = _config.getActuatorCount();
@@ -75,7 +75,7 @@ bool TestManager::startBurst(uint8_t actuator_id, uint8_t count,
 
     _mode = TEST_BURST;
 
-    Serial.printf("[TEST] Burst démarré : act=%d, count=%d, vel=%d, interval=%dms\n",
+    Serial.printf("[TEST] Burst started: act=%d, count=%d, vel=%d, interval=%dms\n",
                   actuator_id, count, velocity, interval_ms);
     return true;
 }
@@ -90,7 +90,7 @@ bool TestManager::startStress(uint8_t velocity, uint16_t hold_ms) {
 
     Serial.printf("[TEST] Stress test : vel=%d, hold=%dms\n", velocity, hold_ms);
 
-    // Déclencher tous les actionneurs immédiatement
+    // Trigger all actuators immediately
     ActuatorConfig* acts  = _config.getActuators();
     uint8_t         total = _config.getActuatorCount();
 
@@ -100,8 +100,8 @@ bool TestManager::startStress(uint8_t velocity, uint16_t hold_ms) {
     }
 
     _tests_run++;
-    _mode = TEST_IDLE;  // Stress est instantané
-    Serial.printf("[TEST] Stress terminé — %d actionneurs déclenchés\n",
+    _mode = TEST_IDLE;  // Stress is instantaneous
+    Serial.printf("[TEST] Stress complete — %d actuators triggered\n",
                   getEnabledActuatorCount());
     return true;
 }
@@ -109,11 +109,11 @@ bool TestManager::startStress(uint8_t velocity, uint16_t hold_ms) {
 void TestManager::stop() {
     _mode = TEST_IDLE;
     _loop = false;
-    Serial.println("[TEST] Test arrêté");
+    Serial.println("[TEST] Test stopped");
 }
 
 // ============================================================================
-// update() — machine à états
+// update() — state machine
 // ============================================================================
 
 void TestManager::update() {
@@ -130,14 +130,14 @@ void TestManager::update() {
 
         uint8_t act_id;
         if (!getActuatorIdByIndex(_sweep_act_idx, act_id)) {
-            // Index invalide — fin du sweep
+            // Invalid index — end of sweep
             _tests_run++;
-            Serial.printf("[TEST] Sweep #%lu terminé (%d actionneurs)\n",
+            Serial.printf("[TEST] Sweep #%lu complete (%d actuators)\n",
                           (unsigned long)_tests_run,
                           (int)_sweep_act_idx);
 
             if (_loop) {
-                _sweep_act_idx = 0;  // Recommencer
+                _sweep_act_idx = 0;  // Restart
             } else {
                 _mode = TEST_IDLE;
             }
@@ -147,10 +147,10 @@ void TestManager::update() {
         triggerActuator(act_id);
         _sweep_act_idx++;
 
-        // Vérifier si on a atteint la fin
+        // Check if we reached the end
         if (!getActuatorIdByIndex(_sweep_act_idx, act_id)) {
             _tests_run++;
-            Serial.printf("[TEST] Sweep #%lu terminé (%d actionneurs)\n",
+            Serial.printf("[TEST] Sweep #%lu complete (%d actuators)\n",
                           (unsigned long)_tests_run,
                           (int)_sweep_act_idx);
             if (_loop) {
@@ -166,7 +166,7 @@ void TestManager::update() {
     case TEST_BURST: {
         if (_burst_remaining == 0) {
             _tests_run++;
-            Serial.printf("[TEST] Burst terminé (%d frappes sur act %d)\n",
+            Serial.printf("[TEST] Burst complete (%d strikes on act %d)\n",
                           (int)_burst_count, (int)_burst_act_id);
             _mode = TEST_IDLE;
             break;
@@ -261,7 +261,7 @@ bool TestManager::getActuatorIdByIndex(uint8_t idx, uint8_t& id_out) const {
 }
 
 // ============================================================================
-// Accesseurs
+// Accessors
 // ============================================================================
 
 TestMode TestManager::getMode()              const { return _mode; }
@@ -300,7 +300,7 @@ uint8_t TestManager::getProgress() const {
 }
 
 const TestLogEntry& TestManager::getLogEntry(uint8_t idx) const {
-    // idx 0 = entrée la plus récente
+    // idx 0 = most recent entry
     int8_t pos = (int8_t)_log_head - 1 - (int8_t)idx;
     if (pos < 0) pos += TEST_LOG_SIZE;
     return _log[(uint8_t)pos % TEST_LOG_SIZE];

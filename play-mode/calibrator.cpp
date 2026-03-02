@@ -4,13 +4,13 @@
 #include <math.h>
 
 // ============================================================================
-// PlayMode — Calibrateur Acoustique (implémentation)
+// PlayMode — Acoustic Calibrator (implementation)
 // ============================================================================
 
 static const i2s_port_t I2S_PORT = (i2s_port_t)CAL_I2S_PORT;
 
 // ============================================================================
-// Constructeur / Cycle de vie
+// Constructor / Lifecycle
 // ============================================================================
 
 Calibrator::Calibrator(Scheduler& scheduler, ConfigManager& config)
@@ -46,11 +46,11 @@ void Calibrator::stop() {
     _state = CAL_IDLE;
     _queue_count = 0;
     _queue_idx = 0;
-    Serial.println("[CAL] Arrêt calibration");
+    Serial.println("[CAL] Calibration stopped");
 }
 
 // ============================================================================
-// Démarrage
+// Start
 // ============================================================================
 
 bool Calibrator::startCalibration(uint8_t actuator_id) {
@@ -70,7 +70,7 @@ bool Calibrator::startCalibration(uint8_t actuator_id) {
     _samples_after_trigger = 0;
 
     enterState(CAL_AMBIENT);
-    Serial.printf("[CAL] Calibration démarrée — actionneur %d\n", actuator_id);
+    Serial.printf("[CAL] Calibration started — actuator %d\n", actuator_id);
     return true;
 }
 
@@ -99,12 +99,12 @@ bool Calibrator::startCalibrationAll() {
     _samples_after_trigger = 0;
 
     enterState(CAL_AMBIENT);
-    Serial.printf("[CAL] Calibration all démarrée — %d actionneurs\n", _queue_count);
+    Serial.printf("[CAL] Calibration all started — %d actuators\n", _queue_count);
     return true;
 }
 
 // ============================================================================
-// update() — machine à états, appeler chaque loop()
+// update() — state machine, call each loop()
 // ============================================================================
 
 void Calibrator::update() {
@@ -118,17 +118,17 @@ void Calibrator::update() {
 
     // -------------------------------------------------------------------------
     case CAL_AMBIENT: {
-        // Lire des samples pour mesurer le bruit ambiant (mean |sample|)
+        // Read samples to measure ambient noise (mean |sample|)
         if (!readChunk() || _chunk_samples == 0) break;
 
         for (uint32_t i = 0; i < _chunk_samples; i++) {
-            // INMP441 : 24-bit left-justified dans mot 32-bit → shift >>8 pour 24 bits
+            // INMP441: 24-bit left-justified in 32-bit word → shift >>8 for 24 bits
             int32_t s = _i2s_buf[i] >> 8;
             _ambient_abs_sum += (uint32_t)(s < 0 ? -s : s);
         }
         _ambient_sample_count += _chunk_samples;
 
-        // Nombre de samples cibles pour CAL_AMBIENT_MS
+        // Target number of samples for CAL_AMBIENT_MS
         const uint32_t needed = (uint32_t)CAL_AMBIENT_MS * CAL_SAMPLE_RATE / 1000;
         if (_ambient_sample_count >= needed) {
             uint32_t mean_abs = _ambient_abs_sum / _ambient_sample_count;
@@ -136,7 +136,7 @@ void Calibrator::update() {
             if (_onset_threshold < CAL_ONSET_MIN_THRESHOLD) {
                 _onset_threshold = CAL_ONSET_MIN_THRESHOLD;
             }
-            Serial.printf("[CAL] Ambiant mean_abs=%lu, seuil onset=%ld\n",
+            Serial.printf("[CAL] Ambient mean_abs=%lu, onset threshold=%ld\n",
                           (unsigned long)mean_abs, (long)_onset_threshold);
             enterState(CAL_TRIGGERING);
         }
@@ -145,7 +145,7 @@ void Calibrator::update() {
 
     // -------------------------------------------------------------------------
     case CAL_TRIGGERING: {
-        // Flush DMA, puis déclencher l'actionneur
+        // Flush DMA, then trigger the actuator
         flushI2S();
         _samples_after_trigger = 0;
         triggerActuator();
@@ -160,13 +160,13 @@ void Calibrator::update() {
         if (_chunk_samples > 0) {
             int32_t onset_idx = detectOnset();
             if (onset_idx >= 0) {
-                // Onset détecté — calculer la latence en samples depuis le trigger
+                // Onset detected — calculate latency in samples since trigger
                 uint32_t onset_sample = _samples_after_trigger
                                         - _chunk_samples
                                         + (uint32_t)onset_idx;
                 uint32_t latency_us   = onset_sample * 1000000UL / CAL_SAMPLE_RATE;
 
-                Serial.printf("[CAL] Act %d essai %d/%d : onset sample=%lu → %lu µs (%lu ms)\n",
+                Serial.printf("[CAL] Act %d attempt %d/%d: onset sample=%lu -> %lu us (%lu ms)\n",
                               _cur_act_id, _cur_try + 1, CAL_RETRIES,
                               (unsigned long)onset_sample,
                               (unsigned long)latency_us,
@@ -185,10 +185,10 @@ void Calibrator::update() {
             }
         }
 
-        // Vérifier le timeout
+        // Check for timeout
         uint32_t elapsed_us = now_us - _trigger_time_us;
         if (elapsed_us > (uint32_t)CAL_MEASURE_WINDOW_MS * 1000UL) {
-            Serial.printf("[CAL] Act %d essai %d/%d : timeout (%lu ms)\n",
+            Serial.printf("[CAL] Act %d attempt %d/%d: timeout (%lu ms)\n",
                           _cur_act_id, _cur_try + 1, CAL_RETRIES,
                           (unsigned long)(elapsed_us / 1000));
             _cur_try++;
@@ -205,10 +205,10 @@ void Calibrator::update() {
     case CAL_PAUSING: {
         uint32_t elapsed_ms = (now_us - _state_enter_us) / 1000;
         if (elapsed_ms >= CAL_INTER_RETRY_MS) {
-            // AUDIT FIX : si on vient de changer d'actionneur (advanceToNext
-            // remet _ambient_sample_count à 0), re-mesurer le bruit ambiant
-            // pour recalculer le seuil d'onset. Entre retries du même actionneur,
-            // _ambient_sample_count > 0 donc on va directement au trigger.
+            // AUDIT FIX: if we just changed actuator (advanceToNext
+            // resets _ambient_sample_count to 0), re-measure ambient noise
+            // to recalculate the onset threshold. Between retries of the same actuator,
+            // _ambient_sample_count > 0 so we go directly to trigger.
             if (_ambient_sample_count == 0) {
                 enterState(CAL_AMBIENT);
             } else {
@@ -236,12 +236,12 @@ void Calibrator::finishCurrent() {
         avg_ms = (uint16_t)(avg_us / 1000);
     }
 
-    // Mettre à jour ou créer l'entrée de résultat
+    // Update or create the result entry
     CalibrationResult* res = findResult(_cur_act_id);
     if (!res) {
-        // AUDIT FIX : vérifier que le buffer n'est pas plein
+        // AUDIT FIX: check that the buffer is not full
         if (_result_count >= MAX_ACTUATORS) {
-            Serial.printf("[CAL] Buffer résultats plein (%d)\n", _result_count);
+            Serial.printf("[CAL] Results buffer full (%d)\n", _result_count);
             return;
         }
         res = &_results[_result_count++];
@@ -252,16 +252,16 @@ void Calibrator::finishCurrent() {
     res->success             = success;
     res->timestamp_ms        = millis();
 
-    Serial.printf("[CAL] Act %d terminé : %s, latence=%d ms (%d/%d mesures)\n",
+    Serial.printf("[CAL] Act %d finished: %s, latency=%d ms (%d/%d measurements)\n",
                   _cur_act_id,
-                  success ? "OK" : "ECHEC",
+                  success ? "OK" : "FAILED",
                   avg_ms,
                   _latency_count,
                   CAL_RETRIES);
 
     if (!advanceToNext()) {
         enterState(CAL_COMPLETE);
-        Serial.printf("[CAL] Calibration complète (%d/%d actionneurs)\n",
+        Serial.printf("[CAL] Calibration complete (%d/%d actuators)\n",
                       _queue_idx, _queue_count);
     }
 }
@@ -278,7 +278,7 @@ bool Calibrator::advanceToNext() {
     _ambient_sample_count = 0;
     _samples_after_trigger = 0;
 
-    // Pause courte avant le prochain actionneur, puis re-mesure de l'ambiant
+    // Short pause before the next actuator, then re-measure ambient
     enterState(CAL_PAUSING);
     return true;
 }
@@ -298,13 +298,13 @@ uint8_t Calibrator::applyResults() {
             if (acts[i].id == _results[r].actuator_id) {
                 acts[i].latency_ms = _results[r].measured_latency_ms;
                 applied++;
-                Serial.printf("[CAL] Act %d latency_ms mis à jour : %d ms\n",
+                Serial.printf("[CAL] Act %d latency_ms updated: %d ms\n",
                               acts[i].id, acts[i].latency_ms);
                 break;
             }
         }
     }
-    Serial.printf("[CAL] %d latences appliquées\n", applied);
+    Serial.printf("[CAL] %d latencies applied\n", applied);
     return applied;
 }
 
@@ -328,7 +328,7 @@ bool Calibrator::initI2S() {
 
     esp_err_t err = i2s_driver_install(I2S_PORT, &cfg, 0, nullptr);
     if (err != ESP_OK) {
-        Serial.printf("[CAL] Erreur install I²S : %d\n", (int)err);
+        Serial.printf("[CAL] I2S install error: %d\n", (int)err);
         return false;
     }
 
@@ -341,21 +341,21 @@ bool Calibrator::initI2S() {
     err = i2s_set_pin(I2S_PORT, &pins);
     if (err != ESP_OK) {
         i2s_driver_uninstall(I2S_PORT);
-        Serial.printf("[CAL] Erreur config pins I²S : %d\n", (int)err);
+        Serial.printf("[CAL] I2S pin config error: %d\n", (int)err);
         return false;
     }
 
     i2s_zero_dma_buffer(I2S_PORT);
 
-    // Vérification physique : lire des samples pour détecter un micro réel
+    // Physical check: read samples to detect an actual microphone
     if (!probeMic()) {
         i2s_driver_uninstall(I2S_PORT);
-        Serial.println("[CAL] Aucun microphone détecté (signal absent)");
+        Serial.println("[CAL] No microphone detected (signal absent)");
         return false;
     }
 
     _i2s_ready = true;
-    Serial.printf("[CAL] Microphone I²S prêt (port %d, WS=%d, SCK=%d, SD=%d, %dHz)\n",
+    Serial.printf("[CAL] I2S microphone ready (port %d, WS=%d, SCK=%d, SD=%d, %dHz)\n",
                   CAL_I2S_PORT, CAL_I2S_WS_PIN,
                   CAL_I2S_SCK_PIN, CAL_I2S_SD_PIN,
                   CAL_SAMPLE_RATE);
@@ -363,15 +363,15 @@ bool Calibrator::initI2S() {
 }
 
 bool Calibrator::probeMic() {
-    // Lire quelques blocs de samples et vérifier qu'il y a un signal non-nul.
-    // Sans micro branché, le bus I2S retourne des zéros ou des valeurs saturées identiques.
+    // Read a few blocks of samples and verify there is a non-zero signal.
+    // Without a mic connected, the I2S bus returns zeros or identical saturated values.
     const int PROBE_READS = 3;
     uint32_t non_zero = 0;
     uint32_t total = 0;
     int32_t first_val = 0;
     uint32_t identical = 0;
 
-    // Attente courte pour que le DMA se remplisse
+    // Short wait for DMA buffers to fill
     vTaskDelay(pdMS_TO_TICKS(20));
 
     for (int r = 0; r < PROBE_READS; r++) {
@@ -393,24 +393,24 @@ bool Calibrator::probeMic() {
     }
 
     if (total == 0) {
-        Serial.println("[CAL] Probe : aucun sample lu");
+        Serial.println("[CAL] Probe: no samples read");
         return false;
     }
 
-    // Aucun sample non-nul → pas de micro (bus flottant = zéros)
+    // No non-zero samples → no mic (floating bus = zeros)
     if (non_zero == 0) {
-        Serial.printf("[CAL] Probe : %lu samples tous à zéro\n", (unsigned long)total);
+        Serial.printf("[CAL] Probe: %lu samples all zero\n", (unsigned long)total);
         return false;
     }
 
-    // Tous les samples identiques → pas de micro (valeur figée)
+    // All samples identical → no mic (stuck value)
     if (identical >= total - 1) {
-        Serial.printf("[CAL] Probe : %lu samples identiques (0x%08lX)\n",
+        Serial.printf("[CAL] Probe: %lu identical samples (0x%08lX)\n",
                       (unsigned long)total, (unsigned long)(uint32_t)first_val);
         return false;
     }
 
-    Serial.printf("[CAL] Probe OK : %lu/%lu samples non-nuls\n",
+    Serial.printf("[CAL] Probe OK: %lu/%lu non-zero samples\n",
                   (unsigned long)non_zero, (unsigned long)total);
     return true;
 }
@@ -423,7 +423,7 @@ void Calibrator::deinitI2S() {
 }
 
 void Calibrator::flushI2S() {
-    // Vider les buffers DMA en lisant et jetant tout le contenu disponible
+    // Drain DMA buffers by reading and discarding all available content
     size_t bytes = 0;
     do {
         i2s_read(I2S_PORT, _i2s_buf, sizeof(_i2s_buf), &bytes, 0);
@@ -433,7 +433,7 @@ void Calibrator::flushI2S() {
 
 bool Calibrator::readChunk() {
     size_t bytes_read = 0;
-    // Timeout 5ms : on attend un peu pour laisser les DMA buffers se remplir
+    // Timeout 5ms: wait a bit to let DMA buffers fill
     esp_err_t err = i2s_read(I2S_PORT,
                               _i2s_buf, sizeof(_i2s_buf),
                               &bytes_read,
@@ -448,7 +448,7 @@ bool Calibrator::readChunk() {
 }
 
 int32_t Calibrator::detectOnset() const {
-    // Cherche le premier sample dont |valeur 24-bit| dépasse le seuil
+    // Finds the first sample whose |24-bit value| exceeds the threshold
     for (uint32_t i = 0; i < _chunk_samples; i++) {
         int32_t s    = _i2s_buf[i] >> 8;   // 32 → 24 bits
         int32_t abs_s = (s < 0) ? -s : s;
@@ -468,7 +468,7 @@ void Calibrator::triggerActuator() {
         if (acts[i].id == _cur_act_id) { act_cfg = &acts[i]; break; }
     }
     if (!act_cfg) {
-        Serial.printf("[CAL] Actionneur %d introuvable !\n", _cur_act_id);
+        Serial.printf("[CAL] Actuator %d not found!\n", _cur_act_id);
         _state = CAL_ERROR;
         return;
     }
@@ -483,18 +483,18 @@ void Calibrator::triggerActuator() {
     on_evt.priority        = 0;
     _scheduler.pushEvent(on_evt);
 
-    // Pour les solénoïdes : planifier le NOTE_OFF automatique
+    // For solenoids: schedule automatic NOTE_OFF
     if (act_cfg->type == ACT_SOLENOID) {
         SchedulerEvent off_evt = on_evt;
         off_evt.action          = ACTION_NOTE_OFF;
         off_evt.velocity        = 0;
         off_evt.trigger_time_us = _trigger_time_us
                                   + (uint32_t)act_cfg->pulse_ms * 1000UL
-                                  + 50000UL;  // +50ms de marge
+                                  + 50000UL;  // +50ms margin
         _scheduler.pushEvent(off_evt);
     }
 
-    Serial.printf("[CAL] Trigger act %d (essai %d/%d) @ %lu µs\n",
+    Serial.printf("[CAL] Trigger act %d (attempt %d/%d) @ %lu us\n",
                   _cur_act_id, _cur_try + 1, CAL_RETRIES,
                   (unsigned long)_trigger_time_us);
 }
@@ -523,7 +523,7 @@ const CalibrationResult* Calibrator::findResult(uint8_t actuator_id) const {
 }
 
 // ============================================================================
-// Accesseurs
+// Accessors
 // ============================================================================
 
 CalibrationState Calibrator::getState()             const { return _state; }

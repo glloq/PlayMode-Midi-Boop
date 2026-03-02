@@ -2,10 +2,10 @@
 #include "safety_manager.h"
 
 // ============================================================================
-// PlayMode — Real-Time Scheduler (implémentation)
+// PlayMode — Real-Time Scheduler (implementation)
 // ============================================================================
 
-// Queue globale accessible par l'actuator_engine pour planifier des retours
+// Global queue accessible by actuator_engine for scheduling return events
 QueueHandle_t g_scheduler_queue = NULL;
 
 Scheduler::Scheduler(ActuatorEngine& engine)
@@ -22,34 +22,34 @@ Scheduler::Scheduler(ActuatorEngine& engine)
 }
 
 bool Scheduler::begin() {
-    // Créer la queue FreeRTOS pour les événements entrants
+    // Create the FreeRTOS queue for incoming events
     _input_queue = xQueueCreate(SCHEDULER_QUEUE_SIZE, sizeof(SchedulerEvent));
     if (_input_queue == NULL) {
-        Serial.println("[SCHED] Erreur création queue");
+        Serial.println("[SCHED] Error creating queue");
         return false;
     }
 
-    // Exposer la queue globalement pour l'actuator_engine
+    // Expose the queue globally for actuator_engine
     g_scheduler_queue = _input_queue;
 
-    // Créer la tâche sur Core 1
+    // Create the task on Core 1
     BaseType_t result = xTaskCreatePinnedToCore(
-        schedulerTask,          // Fonction
-        "Scheduler",            // Nom
+        schedulerTask,          // Function
+        "Scheduler",            // Name
         SCHEDULER_STACK_SIZE,   // Stack
-        this,                   // Paramètre (pointeur vers instance)
-        SCHEDULER_PRIORITY,     // Priorité
+        this,                   // Parameter (pointer to instance)
+        SCHEDULER_PRIORITY,     // Priority
         &_task_handle,          // Handle
         SCHEDULER_CORE          // Core 1
     );
 
     if (result != pdPASS) {
-        Serial.println("[SCHED] Erreur création tâche Core 1");
+        Serial.println("[SCHED] Error creating Core 1 task");
         return false;
     }
 
     _running = true;
-    Serial.printf("[SCHED] Démarré sur Core %d (priorité %d, stack %d)\n",
+    Serial.printf("[SCHED] Started on Core %d (priority %d, stack %d)\n",
                   SCHEDULER_CORE, SCHEDULER_PRIORITY, SCHEDULER_STACK_SIZE);
     return true;
 }
@@ -65,12 +65,12 @@ void Scheduler::stop() {
         _input_queue = NULL;
         g_scheduler_queue = NULL;
     }
-    Serial.println("[SCHED] Arrêté");
+    Serial.println("[SCHED] Stopped");
 }
 
 bool Scheduler::pushEvent(const SchedulerEvent& event) {
     if (_input_queue == NULL) return false;
-    // Envoi non-bloquant dans la queue
+    // Non-blocking send to the queue
     return xQueueSend(_input_queue, &event, 0) == pdTRUE;
 }
 
@@ -78,9 +78,9 @@ void Scheduler::registerActuator(ActuatorConfig* actuator) {
     if (_actuator_count < MAX_ACTUATORS && actuator != nullptr) {
         _actuators[_actuator_count] = actuator;
         _actuator_count++;
-        Serial.printf("[SCHED] Actionneur %d enregistré (%s)\n",
+        Serial.printf("[SCHED] Actuator %d registered (%s)\n",
                       actuator->id,
-                      actuator->type == ACT_SERVO ? "servo" : "solénoïde");
+                      actuator->type == ACT_SERVO ? "servo" : "solenoid");
     }
 }
 
@@ -102,11 +102,11 @@ bool Scheduler::isRunning() const {
 
 void Scheduler::setSafetyManager(SafetyManager* safety) {
     _safety_manager = safety;
-    Serial.printf("[SCHED] Safety Manager %s\n", safety ? "enregistré" : "désactivé");
+    Serial.printf("[SCHED] Safety Manager %s\n", safety ? "registered" : "disabled");
 }
 
 // ============================================================================
-// Tâche FreeRTOS — Point d'entrée statique
+// FreeRTOS Task — Static entry point
 // ============================================================================
 void Scheduler::schedulerTask(void* param) {
     Scheduler* self = (Scheduler*)param;
@@ -114,24 +114,24 @@ void Scheduler::schedulerTask(void* param) {
 }
 
 // ============================================================================
-// Boucle principale du scheduler
+// Main scheduler loop
 // ============================================================================
 void Scheduler::run() {
-    Serial.println("[SCHED] Boucle principale démarrée");
+    Serial.println("[SCHED] Main loop started");
 
     while (_running) {
-        // 1. Drainer les événements de la queue FreeRTOS
+        // 1. Drain events from the FreeRTOS queue
         drainInputQueue();
 
-        // 2. Traiter les événements dont le timestamp est atteint
+        // 2. Process events whose timestamp has been reached
         processReadyEvents();
 
-        // 3. Mise à jour périodique de la sécurité
+        // 3. Periodic safety update
         if (_safety_manager != nullptr) {
             _safety_manager->update(_actuators, _actuator_count);
         }
 
-        // 4. Attendre le prochain tick
+        // 4. Wait for the next tick
         vTaskDelay(SCHEDULER_TICK_MS / portTICK_PERIOD_MS);
     }
 
@@ -139,27 +139,27 @@ void Scheduler::run() {
 }
 
 // ============================================================================
-// Transfert queue FreeRTOS → priority queue interne
+// Transfer FreeRTOS queue -> internal priority queue
 // ============================================================================
 void Scheduler::drainInputQueue() {
     SchedulerEvent event;
 
-    // Lire tous les événements disponibles dans la queue (non-bloquant)
+    // Read all available events from the queue (non-blocking)
     while (xQueueReceive(_input_queue, &event, 0) == pdTRUE) {
         insertEvent(event);
     }
 }
 
 // ============================================================================
-// Insertion triée dans la priority queue (tri par timestamp croissant)
+// Sorted insertion into the priority queue (ascending timestamp order)
 // ============================================================================
 void Scheduler::insertEvent(const SchedulerEvent& event) {
     if (_event_count >= SCHEDULER_MAX_EVENTS) {
-        Serial.println("[SCHED] ATTENTION : priority queue pleine, événement ignoré");
+        Serial.println("[SCHED] WARNING: priority queue full, event dropped");
         return;
     }
 
-    // Trouver la position d'insertion (tri croissant par timestamp)
+    // Find insertion position (ascending order by timestamp)
     uint16_t pos = _event_count;
     for (uint16_t i = 0; i < _event_count; i++) {
         if (event.trigger_time_us < _event_buffer[i].trigger_time_us ||
@@ -170,35 +170,35 @@ void Scheduler::insertEvent(const SchedulerEvent& event) {
         }
     }
 
-    // Décaler les éléments pour faire de la place
+    // Shift elements to make room
     for (uint16_t i = _event_count; i > pos; i--) {
         _event_buffer[i] = _event_buffer[i - 1];
     }
 
-    // Insérer l'événement
+    // Insert the event
     _event_buffer[pos] = event;
     _event_count++;
 }
 
 // ============================================================================
-// Traitement des événements prêts
+// Processing ready events
 // ============================================================================
 void Scheduler::processReadyEvents() {
     if (_event_count == 0) return;
 
     uint32_t now_us = (uint32_t)esp_timer_get_time();
 
-    // Traiter tous les événements dont le timestamp est passé.
-    // Utilise la soustraction signée pour gérer correctement le débordement uint32_t
-    // (après ~71 min, esp_timer_get_time() tronqué à uint32 repasse à 0).
+    // Process all events whose timestamp has passed.
+    // Uses signed subtraction to correctly handle uint32_t overflow
+    // (after ~71 min, esp_timer_get_time() truncated to uint32 wraps around to 0).
     while (_event_count > 0 &&
            (int32_t)(now_us - _event_buffer[0].trigger_time_us) >= 0) {
         SchedulerEvent& event = _event_buffer[0];
 
-        // Trouver l'actionneur cible
+        // Find the target actuator
         ActuatorConfig* actuator = findActuator(event.actuator_id);
         if (actuator != nullptr) {
-            // Vérification sécurité avant exécution
+            // Safety check before execution
             bool safe = true;
             if (_safety_manager != nullptr) {
                 safe = _safety_manager->checkEvent(*actuator, event);
@@ -208,12 +208,12 @@ void Scheduler::processReadyEvents() {
                 _engine.processEvent(*actuator, event);
                 _processed_count++;
             }
-            // Événement bloqué par sécurité : silencieusement ignoré
+            // Event blocked by safety: silently ignored
         } else {
-            Serial.printf("[SCHED] Actionneur %d non trouvé\n", event.actuator_id);
+            Serial.printf("[SCHED] Actuator %d not found\n", event.actuator_id);
         }
 
-        // Supprimer l'événement traité (décalage)
+        // Remove the processed event (shift)
         for (uint16_t i = 0; i < _event_count - 1; i++) {
             _event_buffer[i] = _event_buffer[i + 1];
         }
@@ -222,7 +222,7 @@ void Scheduler::processReadyEvents() {
 }
 
 // ============================================================================
-// Recherche d'actionneur par ID
+// Find actuator by ID
 // ============================================================================
 ActuatorConfig* Scheduler::findActuator(uint8_t id) {
     for (uint8_t i = 0; i < _actuator_count; i++) {

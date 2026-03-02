@@ -9,71 +9,71 @@
 // PlayMode — Power Manager (Phase 5)
 // ============================================================================
 //
-// Gère le budget énergétique par bus (servo/solénoïde) et par instrument.
-// Appelé par l'EventNormalizer avant toute activation d'actionneur.
+// Manages the energy budget per bus (servo/solenoid) and per instrument.
+// Called by the EventNormalizer before any actuator activation.
 //
-// Fonctionnement :
-//   - canActivate()       : vérifie si l'activation respecte les budgets
-//   - notifyActivation()  : comptabilise un actionneur activé
-//   - notifyDeactivation(): décrémente les compteurs lors d'un NOTE_OFF
-//   - update()            : mise à jour périodique des statistiques
+// Operation:
+//   - canActivate()       : checks if activation respects the budgets
+//   - notifyActivation()  : accounts for an activated actuator
+//   - notifyDeactivation(): decrements the counters on NOTE_OFF
+//   - update()            : periodic statistics update
 //
-// Les limites du SafetyManager (watchdog, duty cycle, fréquence) restent
-// distinctes : le PowerManager agit en amont, au niveau polyphonie/énergie.
+// The SafetyManager limits (watchdog, duty cycle, frequency) remain
+// separate: the PowerManager acts upstream, at the polyphony/energy level.
 //
 
 class PowerManager {
 public:
     PowerManager();
 
-    // Initialise avec le budget configuré
-    // Appelé une fois dans setup()
+    // Initialize with the configured budget
+    // Called once in setup()
     void begin(const PowerBudget& budget);
 
     // -------------------------------------------------------------------------
-    // Décision d'activation (appelé par EventNormalizer avant push scheduler)
+    // Activation decision (called by EventNormalizer before scheduler push)
     // -------------------------------------------------------------------------
 
-    // Vérifie si l'actionneur peut être activé sans dépasser les budgets.
-    // instrument_index : index de l'instrument dans la config (MAX_INSTRUMENTS = inconnu)
-    // velocity         : vélocité MIDI (0-127), utilisée pour estimer la consommation
-    // Retourne true si l'activation est autorisée.
+    // Checks if the actuator can be activated without exceeding the budgets.
+    // instrument_index : instrument index in the config (MAX_INSTRUMENTS = unknown)
+    // velocity         : MIDI velocity (0-127), used to estimate power consumption
+    // Returns true if activation is allowed.
     bool canActivate(const ActuatorConfig& actuator, uint8_t instrument_index,
                      uint8_t velocity);
 
-    // Enregistre l'activation effective d'un actionneur (après push scheduler réussi)
+    // Records the effective activation of an actuator (after successful scheduler push)
     void notifyActivation(const ActuatorConfig& actuator, uint8_t instrument_index,
                           uint8_t velocity);
 
-    // Enregistre la désactivation d'un actionneur (NOTE_OFF reçu)
+    // Records the deactivation of an actuator (NOTE_OFF received)
     void notifyDeactivation(const ActuatorConfig& actuator, uint8_t instrument_index);
 
     // -------------------------------------------------------------------------
-    // Mise à jour périodique (appelé depuis loop() Core 0)
+    // Periodic update (called from loop() Core 0)
     // -------------------------------------------------------------------------
 
-    // Recalcule les statistiques de consommation depuis l'état des actionneurs.
-    // actuators[] : tableau de pointeurs vers les configs actionneurs enregistrés
-    // count       : nombre d'actionneurs
+    // Recalculates power consumption statistics from actuator states.
+    // actuators[] : array of pointers to registered actuator configs
+    // count       : number of actuators
     void update(ActuatorConfig* actuators[], uint8_t count);
 
     // -------------------------------------------------------------------------
-    // Accesseurs statistiques (pour monitoring et futur Web UI)
+    // Statistics accessors (for monitoring and future Web UI)
     // -------------------------------------------------------------------------
 
     const PowerStats& getStats() const;
 
-    // Budget restant en mA (global)
+    // Remaining budget in mA (global)
     uint32_t getBudgetRemainingMA() const;
 
-    // Pourcentage du budget global utilisé (0–100)
+    // Percentage of global budget used (0-100)
     uint8_t getBudgetUsedPercent() const;
 
-    // Indique si la dégradation gracieuse est active (>= POWER_DEGRADATION_THRESHOLD_PCT %)
+    // Indicates if graceful degradation is active (>= POWER_DEGRADATION_THRESHOLD_PCT %)
     bool isDegradationActive() const;
 
     // -------------------------------------------------------------------------
-    // Configuration runtime (modifiable depuis Web UI Phase 6)
+    // Runtime configuration (modifiable from Web UI Phase 6)
     // -------------------------------------------------------------------------
 
     void setGlobalMaxMA(uint32_t ma);
@@ -82,28 +82,28 @@ public:
     void setGlobalMaxPolyphony(uint8_t max);
     void setInstrumentMaxPolyphony(uint8_t instrument_index, uint8_t max);
 
-    // Retourne le budget courant (lecture seule)
+    // Returns the current budget (read-only)
     const PowerBudget& getBudget() const;
 
 private:
     PowerBudget _budget;
     PowerStats  _stats;
 
-    // Suivi par actionneur : courant alloué (0 = inactif)
+    // Per-actuator tracking: allocated current (0 = inactive)
     uint16_t _actuator_allocated_ma[MAX_ACTUATORS];
     bool     _actuator_tracked[MAX_ACTUATORS];
 
-    // Timestamp de dernière mise à jour complète
+    // Timestamp of last full update
     uint32_t _last_update_us;
 
     // -------------------------------------------------------------------------
-    // Méthodes internes
+    // Internal methods
     // -------------------------------------------------------------------------
 
-    // Estime la consommation d'un actionneur selon son type et la vélocité
+    // Estimates an actuator's power consumption based on its type and velocity
     uint16_t estimateCurrent(const ActuatorConfig& actuator, uint8_t velocity) const;
 
-    // Recalcule budget_used_percent et degradation_active
+    // Recalculates budget_used_percent and degradation_active
     void updateDerivedStats();
 };
 

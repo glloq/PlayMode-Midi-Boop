@@ -23,45 +23,45 @@ class TestManager;
 // PlayMode — Web Server (Phase 6)
 // ============================================================================
 //
-// Serveur web embarqué avec :
-//   - API REST JSON pour configuration CRUD
-//   - WebSocket pour monitoring temps réel
-//   - Interface HTML/CSS/JS intégrée (PROGMEM)
+// Embedded web server with:
+//   - REST JSON API for CRUD configuration
+//   - WebSocket for real-time monitoring
+//   - Integrated HTML/CSS/JS interface (PROGMEM)
 //
-// Tourne sur Core 0 avec le pipeline MIDI.
-// Utilise ESPAsyncWebServer pour gestion non-bloquante.
+// Runs on Core 0 with the MIDI pipeline.
+// Uses ESPAsyncWebServer for non-blocking handling.
 //
 
 class WebServer {
 public:
     WebServer(uint16_t port = WEB_SERVER_PORT);
 
-    // Enregistre les références aux modules du système
+    // Registers references to system modules
     void setModules(ConfigManager* config, Scheduler* scheduler,
                     SafetyManager* safety, PowerManager* power,
                     MidiDispatcher* dispatcher, MidiTransport* transport,
                     PCADriver* pca, ActuatorEngine* engine);
 
-    // Enregistre le calibrateur (Phase 7, optionnel)
+    // Registers the calibrator (Phase 7, optional)
     void setCalibrator(Calibrator* calibrator);
 
-    // Enregistre le test manager (Phase 8, optionnel)
+    // Registers the test manager (Phase 8, optional)
     void setTestManager(TestManager* testManager);
 
-    // Démarre le serveur HTTP + WebSocket
+    // Starts the HTTP + WebSocket server
     bool begin();
 
-    // Arrête le serveur
+    // Stops the server
     void stop();
 
-    // Mise à jour périodique — envoie les stats WebSocket
-    // Appeler depuis loop()
+    // Periodic update — sends WebSocket stats
+    // Call from loop()
     void update();
 
-    // Vérifie si le serveur est actif
+    // Checks if the server is active
     bool isRunning() const;
 
-    // Nombre de clients WebSocket connectés
+    // Number of connected WebSocket clients
     uint8_t getClientCount() const;
 
 private:
@@ -70,7 +70,7 @@ private:
     uint16_t _port;
     bool _running;
 
-    // Références modules (non possédés)
+    // Module references (not owned)
     ConfigManager*   _config;
     Scheduler*       _scheduler;
     SafetyManager*   _safety;
@@ -86,7 +86,7 @@ private:
     uint32_t _last_ws_broadcast_ms;
 
     // -------------------------------------------------------------------------
-    // Routes statiques (pages HTML)
+    // Static routes (HTML pages)
     // -------------------------------------------------------------------------
     void setupStaticRoutes();
 
@@ -95,7 +95,7 @@ private:
     // -------------------------------------------------------------------------
     void setupAPIRoutes();
 
-    // GET — lecture état / config
+    // GET — read state / config
     void handleGetStatus(AsyncWebServerRequest* request);
     void handleGetConfig(AsyncWebServerRequest* request);
     void handleGetInstruments(AsyncWebServerRequest* request);
@@ -107,7 +107,7 @@ private:
     void handleGetPower(AsyncWebServerRequest* request);
     void handleGetSafety(AsyncWebServerRequest* request);
 
-    // POST — écriture config
+    // POST — write config
     void handlePostInstrument(AsyncWebServerRequest* request,
                               uint8_t* data, size_t len);
     void handlePostActuator(AsyncWebServerRequest* request,
@@ -132,7 +132,7 @@ private:
                               uint8_t* data, size_t len);
     void handlePostScanI2C(AsyncWebServerRequest* request);
 
-    // --- Calibration acoustique (Phase 7) ---
+    // --- Acoustic calibration (Phase 7) ---
     void handleGetCalibrateStatus(AsyncWebServerRequest* request);
     void handleGetCalibrateResults(AsyncWebServerRequest* request);
     void handlePostCalibrate(AsyncWebServerRequest* request,
@@ -140,7 +140,7 @@ private:
     void handlePostCalibrateApply(AsyncWebServerRequest* request);
     void handlePostCalibrateStop(AsyncWebServerRequest* request);
 
-    // --- Test Manager industriel (Phase 8) ---
+    // --- Industrial Test Manager (Phase 8) ---
     void handleGetTestStatus(AsyncWebServerRequest* request);
     void handleGetTestLog(AsyncWebServerRequest* request);
     void handlePostTestSweep(AsyncWebServerRequest* request,
@@ -156,7 +156,7 @@ private:
     void handleGetLogs(AsyncWebServerRequest* request);
     void handlePostLogsClear(AsyncWebServerRequest* request);
 
-    // DELETE — suppression
+    // DELETE — deletion
     void handleDeleteInstrument(AsyncWebServerRequest* request);
     void handleDeleteActuator(AsyncWebServerRequest* request);
 

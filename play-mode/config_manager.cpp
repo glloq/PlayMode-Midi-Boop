@@ -1,7 +1,7 @@
 #include "config_manager.h"
 
 // ============================================================================
-// PlayMode — Config Manager (implémentation)
+// PlayMode — Config Manager (implementation)
 // ============================================================================
 
 ConfigManager::ConfigManager()
@@ -17,20 +17,20 @@ ConfigManager::ConfigManager()
 }
 
 bool ConfigManager::begin() {
-    if (!LittleFS.begin(true)) {  // true = format si échec
-        Serial.println("[CONFIG] Erreur montage LittleFS");
+    if (!LittleFS.begin(true)) {  // true = format on failure
+        Serial.println("[CONFIG] LittleFS mount error");
         return false;
     }
-    Serial.println("[CONFIG] LittleFS monté");
+    Serial.println("[CONFIG] LittleFS mounted");
 
-    // Charger la config si elle existe, sinon charger les défauts
+    // Load config if it exists, otherwise load defaults
     if (configExists()) {
         if (!load()) {
-            Serial.println("[CONFIG] Erreur chargement, utilisation des défauts");
+            Serial.println("[CONFIG] Load error, using defaults");
             loadDefaults();
         }
     } else {
-        Serial.println("[CONFIG] Aucune config trouvée, chargement des défauts");
+        Serial.println("[CONFIG] No config found, loading defaults");
         loadDefaults();
         save();
     }
@@ -41,17 +41,17 @@ bool ConfigManager::begin() {
 bool ConfigManager::load() {
     File file = LittleFS.open(CONFIG_FILE_PATH, "r");
     if (!file) {
-        Serial.println("[CONFIG] Impossible d'ouvrir le fichier config");
+        Serial.println("[CONFIG] Unable to open config file");
         return false;
     }
 
-    // Allouer le document JSON (taille adaptée)
+    // Allocate JSON document (appropriate size)
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
 
     if (error) {
-        Serial.printf("[CONFIG] Erreur JSON : %s\n", error.c_str());
+        Serial.printf("[CONFIG] JSON error: %s\n", error.c_str());
         return false;
     }
 
@@ -79,7 +79,7 @@ bool ConfigManager::load() {
         busIdx++;
     }
 
-    // Actionneurs
+    // Actuators
     _actuator_count = 0;
     JsonArray actArray = doc["actuators"].as<JsonArray>();
     for (JsonObject actObj : actArray) {
@@ -97,7 +97,7 @@ bool ConfigManager::load() {
         _instrument_count++;
     }
 
-    // Routage MIDI
+    // MIDI Routing
     _routing_count = 0;
     if (doc.containsKey("routing")) {
         JsonArray routeArray = doc["routing"].as<JsonArray>();
@@ -108,7 +108,7 @@ bool ConfigManager::load() {
         }
     }
 
-    Serial.printf("[CONFIG] Chargé : %d actionneurs, %d instruments, %d routages\n",
+    Serial.printf("[CONFIG] Loaded: %d actuators, %d instruments, %d routings\n",
                   _actuator_count, _instrument_count, _routing_count);
     return true;
 }
@@ -133,7 +133,7 @@ bool ConfigManager::save() {
         serializeBus(_buses[i], busObj);
     }
 
-    // Actionneurs
+    // Actuators
     JsonArray actArray = doc["actuators"].to<JsonArray>();
     for (uint8_t i = 0; i < _actuator_count; i++) {
         JsonObject actObj = actArray.add<JsonObject>();
@@ -147,7 +147,7 @@ bool ConfigManager::save() {
         serializeInstrument(_instruments[i], instObj);
     }
 
-    // Routage MIDI
+    // MIDI Routing
     JsonArray routeArray = doc["routing"].to<JsonArray>();
     for (uint8_t i = 0; i < _routing_count; i++) {
         JsonObject routeObj = routeArray.add<JsonObject>();
@@ -156,14 +156,14 @@ bool ConfigManager::save() {
 
     File file = LittleFS.open(CONFIG_FILE_PATH, "w");
     if (!file) {
-        Serial.println("[CONFIG] Impossible d'écrire le fichier config");
+        Serial.println("[CONFIG] Unable to write config file");
         return false;
     }
 
     serializeJsonPretty(doc, file);
     file.close();
 
-    Serial.println("[CONFIG] Configuration sauvegardée");
+    Serial.println("[CONFIG] Configuration saved");
     return true;
 }
 
@@ -178,7 +178,7 @@ void ConfigManager::loadDefaults() {
     _buses[0].enabled = true;
     _buses[0].pca_count = 0;
 
-    // Bus 1 — Solénoïdes
+    // Bus 1 — Solenoids
     _buses[1].id = 1;
     _buses[1].sda_pin = I2C1_SDA_PIN;
     _buses[1].scl_pin = I2C1_SCL_PIN;
@@ -193,14 +193,14 @@ void ConfigManager::loadDefaults() {
     _routing_count = 0;
     _version = CONFIG_VERSION;
 
-    // WiFi défauts — AP activé d'emblée pour premier accès sans configuration
+    // WiFi defaults — AP enabled by default for first access without configuration
     strlcpy(_wifi_config.ssid, "", sizeof(_wifi_config.ssid));
     strlcpy(_wifi_config.password, "", sizeof(_wifi_config.password));
     strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
     _wifi_config.enabled = true;
     _wifi_config.ap_fallback = true;
 
-    // MIDI Input défauts
+    // MIDI Input defaults
     _midi_input_config.serial_enabled = true;
     _midi_input_config.udp_enabled = true;
     _midi_input_config.rtp_enabled = true;
@@ -209,7 +209,7 @@ void ConfigManager::loadDefaults() {
     _midi_input_config.jitter_buffer_ms = MIDI_JITTER_BUFFER_MS;
     _midi_input_config.serial_rx_pin = MIDI_SERIAL_RX_PIN;
 
-    Serial.println("[CONFIG] Défauts chargés");
+    Serial.println("[CONFIG] Defaults loaded");
 }
 
 bool ConfigManager::configExists() {
@@ -241,14 +241,14 @@ uint8_t ConfigManager::getInstrumentCount() const {
 }
 
 bool ConfigManager::addActuator(const ActuatorConfig& actuator) {
-    // Si un actionneur avec le même ID existe, mettre à jour en place
+    // If an actuator with the same ID exists, update in place
     for (uint8_t i = 0; i < _actuator_count; i++) {
         if (_actuators[i].id == actuator.id) {
             _actuators[i] = actuator;
             return true;
         }
     }
-    // Nouveau slot
+    // New slot
     if (_actuator_count >= MAX_ACTUATORS) return false;
     _actuators[_actuator_count] = actuator;
     _actuator_count++;
@@ -258,7 +258,7 @@ bool ConfigManager::addActuator(const ActuatorConfig& actuator) {
 bool ConfigManager::removeActuator(uint8_t id) {
     for (uint8_t i = 0; i < _actuator_count; i++) {
         if (_actuators[i].id == id) {
-            // Décaler les actionneurs suivants
+            // Shift subsequent actuators
             for (uint8_t j = i; j < _actuator_count - 1; j++) {
                 _actuators[j] = _actuators[j + 1];
             }
@@ -279,14 +279,14 @@ bool ConfigManager::addInstrument(const InstrumentConfig& instrument) {
 
 bool ConfigManager::removeInstrument(uint8_t index) {
     if (index >= _instrument_count) return false;
-    // Décaler les instruments suivants
+    // Shift subsequent instruments
     for (uint8_t i = index; i < _instrument_count - 1; i++) {
         _instruments[i] = _instruments[i + 1];
     }
     _instruments[_instrument_count - 1] = {};
     _instrument_count--;
 
-    // Décaler les routages correspondants et mettre à jour les instrument_index
+    // Shift corresponding routings and update instrument_index values
     if (index < _routing_count) {
         for (uint8_t i = index; i < _routing_count - 1; i++) {
             _routing_configs[i] = _routing_configs[i + 1];
@@ -344,7 +344,7 @@ MidiRoutingConfig* ConfigManager::getRoutingForInstrument(uint8_t instrument_ind
 }
 
 // ============================================================================
-// Sérialisation / Désérialisation — Actionneurs
+// Serialization / Deserialization — Actuators
 // ============================================================================
 
 void ConfigManager::serializeActuator(const ActuatorConfig& act, JsonObject& obj) {
@@ -383,7 +383,7 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
     act.enabled = obj["enabled"] | true;
     act.latency_ms = obj["latency_ms"] | 0;
 
-    // AUDIT FIX : valider bus_id, pca_address et pca_channel
+    // AUDIT FIX: validate bus_id, pca_address and pca_channel
     if (act.bus_id > 1) act.bus_id = 0;
     if (act.pca_address < PCA_BASE_ADDRESS ||
         act.pca_address >= PCA_BASE_ADDRESS + PCA_MAX_PER_BUS) {
@@ -408,7 +408,7 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
         act.angle_b = obj["angle_b"] | 135;
         act.hit_reverse = obj["hit_reverse"] | false;
 
-        // AUDIT FIX : borner les angles servo à [0, SERVO_MAX_ANGLE]
+        // AUDIT FIX: clamp servo angles to [0, SERVO_MAX_ANGLE]
         if (act.angle_initial > SERVO_MAX_ANGLE) act.angle_initial = SERVO_MAX_ANGLE;
         if (act.angle_b > SERVO_MAX_ANGLE) act.angle_b = SERVO_MAX_ANGLE;
         if (act.amplitude > SERVO_MAX_ANGLE) act.amplitude = SERVO_MAX_ANGLE;
@@ -422,17 +422,17 @@ void ConfigManager::deserializeActuator(ActuatorConfig& act, const JsonObject& o
         act.pwm_hold = obj["pwm_hold"] | 2048;
         act.ramp_ms = obj["ramp_ms"] | 50;
 
-        // AUDIT FIX : borner les valeurs PWM solénoïde à [0, SOLENOID_PWM_MAX]
+        // AUDIT FIX: clamp solenoid PWM values to [0, SOLENOID_PWM_MAX]
         if (act.pwm_initial > SOLENOID_PWM_MAX) act.pwm_initial = SOLENOID_PWM_MAX;
         if (act.pwm_hold > SOLENOID_PWM_MAX) act.pwm_hold = SOLENOID_PWM_MAX;
     }
 
-    // Initialiser l'état runtime
+    // Initialize runtime state
     memset(&act.state, 0, sizeof(ActuatorState));
 }
 
 // ============================================================================
-// Sérialisation / Désérialisation — Bus
+// Serialization / Deserialization — Bus
 // ============================================================================
 
 void ConfigManager::serializeBus(const BusConfig& bus, JsonObject& obj) {
@@ -457,7 +457,7 @@ void ConfigManager::deserializeBus(BusConfig& bus, const JsonObject& obj) {
 }
 
 // ============================================================================
-// Sérialisation / Désérialisation — Instruments
+// Serialization / Deserialization — Instruments
 // ============================================================================
 
 void ConfigManager::serializeInstrument(const InstrumentConfig& inst, JsonObject& obj) {
@@ -496,7 +496,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
         }
     }
 
-    // Charger les notes MIDI mappées
+    // Load mapped MIDI notes
     memset(inst.midi_notes, MIDI_NOTE_UNMAPPED, sizeof(inst.midi_notes));
     JsonArray noteIds = obj["midi_notes"].as<JsonArray>();
     uint8_t noteIdx = 0;
@@ -509,7 +509,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
 }
 
 // ============================================================================
-// Sérialisation / Désérialisation — WiFi
+// Serialization / Deserialization — WiFi
 // ============================================================================
 
 void ConfigManager::serializeWiFi(const WiFiConfig& wifi, JsonObject& obj) {
@@ -529,7 +529,7 @@ void ConfigManager::deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj) {
 }
 
 // ============================================================================
-// Sérialisation / Désérialisation — MIDI Input
+// Serialization / Deserialization — MIDI Input
 // ============================================================================
 
 void ConfigManager::serializeMidiInput(const MidiInputConfig& midi, JsonObject& obj) {
@@ -553,7 +553,7 @@ void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject
 }
 
 // ============================================================================
-// Sérialisation / Désérialisation — Routage MIDI
+// Serialization / Deserialization — MIDI Routing
 // ============================================================================
 
 void ConfigManager::serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj) {

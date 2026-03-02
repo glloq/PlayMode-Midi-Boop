@@ -15,46 +15,46 @@ class ConfigManager {
 public:
     ConfigManager();
 
-    // Initialise LittleFS
+    // Initializes LittleFS
     bool begin();
 
-    // Charge la configuration depuis le fichier JSON
+    // Loads configuration from the JSON file
     bool load();
 
-    // Sauvegarde la configuration dans le fichier JSON
+    // Saves configuration to the JSON file
     bool save();
 
-    // Remet la configuration par défaut
+    // Resets configuration to defaults
     void loadDefaults();
 
-    // Vérifie si une config existe sur le filesystem
+    // Checks if a config exists on the filesystem
     bool configExists();
 
-    // --- Accesseurs bus ---
+    // --- Bus accessors ---
 
     BusConfig* getBuses();
     uint8_t getBusCount() const;
 
-    // --- Accesseurs actionneurs ---
+    // --- Actuator accessors ---
 
     ActuatorConfig* getActuators();
     uint8_t getActuatorCount() const;
 
-    // Ajoute ou met à jour un actionneur (update si même ID existe)
+    // Adds or updates an actuator (updates if same ID exists)
     bool addActuator(const ActuatorConfig& actuator);
 
-    // Supprime un actionneur par ID (décrémente le compteur)
+    // Removes an actuator by ID (decrements the counter)
     bool removeActuator(uint8_t id);
 
-    // --- Accesseurs instruments ---
+    // --- Instrument accessors ---
 
     InstrumentConfig* getInstruments();
     uint8_t getInstrumentCount() const;
 
-    // Ajoute un instrument (crée toujours un nouveau slot)
+    // Adds an instrument (always creates a new slot)
     bool addInstrument(const InstrumentConfig& instrument);
 
-    // Supprime un instrument par index (décrémente le compteur)
+    // Removes an instrument by index (decrements the counter)
     bool removeInstrument(uint8_t index);
 
     // --- WiFi + MIDI ---
@@ -65,16 +65,16 @@ public:
     MidiInputConfig* getMidiInputConfig();
     void setMidiInputConfig(const MidiInputConfig& config);
 
-    // --- Routage MIDI ---
+    // --- MIDI Routing ---
 
     MidiRoutingConfig* getRoutingConfigs();
     uint8_t getRoutingCount() const;
     bool addRoutingConfig(const MidiRoutingConfig& routing);
 
-    // Cherche le routage pour un instrument donné (par index)
+    // Finds the routing for a given instrument (by index)
     MidiRoutingConfig* getRoutingForInstrument(uint8_t instrument_index);
 
-    // Version de la config
+    // Config version
     uint8_t getVersion() const;
 
 private:
@@ -89,40 +89,40 @@ private:
     uint8_t _routing_count;
     uint8_t _version;
 
-    // Sérialise un actionneur en JSON
+    // Serializes an actuator to JSON
     void serializeActuator(const ActuatorConfig& act, JsonObject& obj);
 
-    // Désérialise un actionneur depuis JSON
+    // Deserializes an actuator from JSON
     void deserializeActuator(ActuatorConfig& act, const JsonObject& obj);
 
-    // Sérialise un bus en JSON
+    // Serializes a bus to JSON
     void serializeBus(const BusConfig& bus, JsonObject& obj);
 
-    // Désérialise un bus depuis JSON
+    // Deserializes a bus from JSON
     void deserializeBus(BusConfig& bus, const JsonObject& obj);
 
-    // Sérialise un instrument en JSON
+    // Serializes an instrument to JSON
     void serializeInstrument(const InstrumentConfig& inst, JsonObject& obj);
 
-    // Désérialise un instrument depuis JSON
+    // Deserializes an instrument from JSON
     void deserializeInstrument(InstrumentConfig& inst, const JsonObject& obj);
 
-    // Sérialise la config WiFi en JSON
+    // Serializes the WiFi config to JSON
     void serializeWiFi(const WiFiConfig& wifi, JsonObject& obj);
 
-    // Désérialise la config WiFi depuis JSON
+    // Deserializes the WiFi config from JSON
     void deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj);
 
-    // Sérialise la config MIDI Input en JSON
+    // Serializes the MIDI Input config to JSON
     void serializeMidiInput(const MidiInputConfig& midi, JsonObject& obj);
 
-    // Désérialise la config MIDI Input depuis JSON
+    // Deserializes the MIDI Input config from JSON
     void deserializeMidiInput(MidiInputConfig& midi, const JsonObject& obj);
 
-    // Sérialise un routage MIDI en JSON
+    // Serializes a MIDI routing to JSON
     void serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj);
 
-    // Désérialise un routage MIDI depuis JSON
+    // Deserializes a MIDI routing from JSON
     void deserializeRouting(MidiRoutingConfig& routing, const JsonObject& obj);
 };
 

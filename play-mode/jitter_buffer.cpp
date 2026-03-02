@@ -1,7 +1,7 @@
 #include "jitter_buffer.h"
 
 // ============================================================================
-// PlayMode — Jitter Buffer MIDI (implémentation)
+// PlayMode — MIDI Jitter Buffer (implementation)
 // ============================================================================
 
 JitterBuffer::JitterBuffer()
@@ -25,7 +25,7 @@ uint16_t JitterBuffer::getDepth() const {
 
 bool JitterBuffer::insert(const MidiMessage& msg) {
     if (_count >= JITTER_BUFFER_SIZE) {
-        // Buffer plein — le message le plus récent est perdu
+        // Buffer full -- the most recent message is lost
         return false;
     }
 
@@ -43,7 +43,7 @@ bool JitterBuffer::pop(MidiMessage& msg) {
     uint32_t now_us = (uint32_t)esp_timer_get_time();
     uint32_t hold_us = (uint32_t)_depth_ms * 1000;
 
-    // Vérifier si le message le plus ancien a été retenu assez longtemps
+    // Check if the oldest message has been held long enough
     uint32_t age_us = now_us - _buffer[_tail].timestamp_us;
     if (age_us >= hold_us) {
         msg = _buffer[_tail];
