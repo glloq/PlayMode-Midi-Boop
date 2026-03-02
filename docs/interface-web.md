@@ -1,5 +1,8 @@
+# Interface Web
 
-# 1. Objectifs principaux de l'UI
+> Voir aussi : [API REST](api-rest.md) — [Architecture](architecture.md) — [Calibration & Tests](calibration-tests.md)
+
+## 1. Objectifs principaux de l'UI
 
 * **Clarté immédiate** → l'utilisateur comprend ce qu'il peut faire dès la page principale
 * **No-code / adaptable** → ajouter/modifier actionneurs, instruments, CC facilement
@@ -128,7 +131,7 @@ Thème sombre GitHub-style (#0d1117 bg, #58a6ff accent, #3fb950 succès, #f85149
 # 5. API REST backend
 
 38+ endpoints organisés en 4 verbes HTTP (GET, POST, DELETE) + WebSocket.
-Voir README.md pour la liste complète des endpoints.
+Voir [api-rest.md](api-rest.md) pour la liste complète des endpoints.
 
 Backend inchangé par le refactoring UI — toutes les routes API sont identiques.
 
