@@ -1,5 +1,8 @@
 # PlayMode Midi B∞p
 
+> [!WARNING]
+> this is a BETA, not tested yet
+
 **No-code MIDI controller for ESP32** — drives servos and solenoids to play real instruments (percussion, mechanical piano, bells, xylophone…). All configuration is done from a web interface, without writing a single line of code.
 
 ## Features
