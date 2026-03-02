@@ -1,10 +1,10 @@
 #include "actuator_engine.h"
 
 // ============================================================================
-// PlayMode — Moteur d'actionneurs (implémentation)
+// PlayMode — Actuator Engine (implementation)
 // ============================================================================
 
-// Référence externe au scheduler pour planifier des événements de retour
+// External reference to the scheduler for scheduling return events
 extern QueueHandle_t g_scheduler_queue;
 
 ActuatorEngine::ActuatorEngine(PCADriver& pca) : _pca(pca) {}
@@ -38,7 +38,7 @@ void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent
         }
     }
 
-    // Mettre à jour le timestamp du dernier déclenchement
+    // Update the last trigger timestamp
     actuator.state.last_trigger_us = (uint32_t)esp_timer_get_time();
 }
 
@@ -50,10 +50,10 @@ void ActuatorEngine::initActuator(ActuatorConfig& actuator) {
     actuator.state.trigger_count = 0;
 
     if (actuator.type == ACT_SERVO) {
-        // Positionner le servo à l'angle initial
+        // Set the servo to its initial angle
         setServoAngle(actuator, actuator.angle_initial);
     } else {
-        // Solénoïde au repos (PWM = 0)
+        // Solenoid at rest (PWM = 0)
         setSolenoidPWM(actuator, 0);
     }
 }
@@ -69,39 +69,39 @@ void ActuatorEngine::resetAll(ActuatorConfig actuators[], uint8_t count) {
 }
 
 // ============================================================================
-// Servo — Frappe : A → A+X → retour à A
+// Servo — Strike: A -> A+X -> return to A
 // ============================================================================
 void ActuatorEngine::servoFrappe(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
-        // Calculer amplitude selon vélocité
+        // Calculate amplitude based on velocity
         uint16_t amp = velocityToAmplitude(act, event.velocity);
         uint16_t target_angle;
         if (act.hit_reverse) {
-            // Anti-horaire : angle_initial - amplitude
+            // Counter-clockwise: angle_initial - amplitude
             int16_t t = (int16_t)act.angle_initial - (int16_t)amp;
             target_angle = (t < SERVO_MIN_ANGLE) ? SERVO_MIN_ANGLE : (uint16_t)t;
         } else {
-            // Horaire : angle_initial + amplitude
+            // Clockwise: angle_initial + amplitude
             target_angle = act.angle_initial + amp;
             if (target_angle > SERVO_MAX_ANGLE) target_angle = SERVO_MAX_ANGLE;
         }
 
-        // Mouvement vers position de frappe
+        // Move to strike position
         setServoAngle(act, target_angle);
         act.state.active = true;
 
-        // Planifier le retour à la position initiale
+        // Schedule return to initial position
         scheduleReturn(act, act.speed_ms, act.angle_initial);
 
     } else if (event.action == ACTION_POSITION_SET) {
-        // Retour à la position spécifiée (position initiale)
+        // Return to specified position (initial position)
         setServoAngle(act, event.value);
         act.state.active = false;
     }
 }
 
 // ============================================================================
-// Servo — Alterné : A → B → A → B (toggle à chaque note)
+// Servo — Alternate: A -> B -> A -> B (toggle on each note)
 // ============================================================================
 void ActuatorEngine::servoAlterne(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
@@ -119,7 +119,7 @@ void ActuatorEngine::servoAlterne(ActuatorConfig& act, const SchedulerEvent& eve
 }
 
 // ============================================================================
-// Servo — Gratter : A → +X ou A → -X (alternance de direction)
+// Servo — Strum: A -> +X or A -> -X (alternating direction)
 // ============================================================================
 void ActuatorEngine::servoGratter(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
@@ -138,7 +138,7 @@ void ActuatorEngine::servoGratter(ActuatorConfig& act, const SchedulerEvent& eve
         setServoAngle(act, target);
         act.state.active = true;
 
-        // Retour à la position initiale
+        // Return to initial position
         scheduleReturn(act, act.speed_ms, act.angle_initial);
 
     } else if (event.action == ACTION_POSITION_SET) {
@@ -148,11 +148,11 @@ void ActuatorEngine::servoGratter(ActuatorConfig& act, const SchedulerEvent& eve
 }
 
 // ============================================================================
-// Servo — Touche : maintien décalé sur note on, retour sur note off
+// Servo — Key press: hold offset on note on, return on note off
 // ============================================================================
 void ActuatorEngine::servoTouche(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
-        // Décaler de ±δ (amplitude) depuis position initiale
+        // Offset by +/-delta (amplitude) from initial position
         uint16_t target;
         if (act.hit_reverse) {
             int16_t t = (int16_t)act.angle_initial - (int16_t)act.amplitude;
@@ -166,60 +166,60 @@ void ActuatorEngine::servoTouche(ActuatorConfig& act, const SchedulerEvent& even
         act.state.active = true;
 
     } else if (event.action == ACTION_NOTE_OFF) {
-        // Retour à position initiale
+        // Return to initial position
         setServoAngle(act, act.angle_initial);
         act.state.active = false;
     }
 }
 
 // ============================================================================
-// Solénoïde — Frappe : pulse courte (5-50 ms selon vélocité)
+// Solenoid — Strike: short pulse (5-50 ms based on velocity)
 // ============================================================================
 void ActuatorEngine::solenoidFrappe(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
-        // Activer le solénoïde à pleine puissance
+        // Activate the solenoid at full power
         setSolenoidPWM(act, SOLENOID_PWM_MAX);
         act.state.active = true;
 
-        // AUDIT FIX : utiliser act.pulse_min_ms / act.pulse_ms (configurable par
-        // actionneur) au lieu des constantes globales SOLENOID_MIN/MAX_PULSE_MS.
+        // AUDIT FIX: use act.pulse_min_ms / act.pulse_ms (configurable per
+        // actuator) instead of global constants SOLENOID_MIN/MAX_PULSE_MS.
         uint16_t min_pulse = (act.pulse_min_ms > 0) ? act.pulse_min_ms : SOLENOID_MIN_PULSE_MS;
         uint16_t max_pulse = (act.pulse_ms > 0) ? act.pulse_ms : SOLENOID_MAX_PULSE_MS;
         uint16_t pulse = map(event.velocity, 0, 127, min_pulse, max_pulse);
         scheduleReturn(act, pulse, 0);
 
     } else if (event.action == ACTION_PWM_SET) {
-        // Désactivation (retour programmé)
+        // Deactivation (scheduled return)
         setSolenoidPWM(act, event.value);
         act.state.active = false;
     }
 }
 
 // ============================================================================
-// Solénoïde — Hit-and-Hold : PWM initial → réduction → maintien
+// Solenoid — Hit-and-Hold: initial PWM -> ramp down -> hold
 // ============================================================================
 void ActuatorEngine::solenoidHitAndHold(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
-        // Phase 1 : activation PWM initial (pleine puissance)
+        // Phase 1: initial PWM activation (full power)
         setSolenoidPWM(act, act.pwm_initial);
         act.state.active = true;
 
-        // Planifier la transition vers PWM hold après la rampe
+        // Schedule transition to hold PWM after ramp
         scheduleReturn(act, act.ramp_ms, act.pwm_hold);
 
     } else if (event.action == ACTION_PWM_SET) {
-        // Phase 2 : passer au PWM de maintien
+        // Phase 2: switch to hold PWM
         setSolenoidPWM(act, event.value);
 
     } else if (event.action == ACTION_NOTE_OFF) {
-        // Relâchement : couper le solénoïde
+        // Release: turn off the solenoid
         setSolenoidPWM(act, 0);
         act.state.active = false;
     }
 }
 
 // ============================================================================
-// Utilitaires
+// Utilities
 // ============================================================================
 
 void ActuatorEngine::setServoAngle(ActuatorConfig& act, uint16_t angle) {
@@ -234,7 +234,7 @@ void ActuatorEngine::setSolenoidPWM(ActuatorConfig& act, uint16_t pwm) {
 }
 
 uint16_t ActuatorEngine::velocityToAmplitude(const ActuatorConfig& act, uint8_t velocity) {
-    // Mapper vélocité MIDI (0-127) → amplitude (0 à act.amplitude)
+    // Map MIDI velocity (0-127) -> amplitude (0 to act.amplitude)
     return map(velocity, 0, 127, 0, act.amplitude);
 }
 
@@ -248,13 +248,13 @@ void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint
     return_event.value = target_value;
     return_event.priority = 1;
 
-    // Déterminer le type d'action de retour
+    // Determine the return action type
     if (act.type == ACT_SERVO) {
         return_event.action = ACTION_POSITION_SET;
     } else {
         return_event.action = ACTION_PWM_SET;
     }
 
-    // Envoyer dans la queue (non bloquant)
+    // Send to queue (non-blocking)
     xQueueSend(g_scheduler_queue, &return_event, 0);
 }

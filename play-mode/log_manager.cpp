@@ -3,13 +3,13 @@
 #include <string.h>
 
 // ============================================================================
-// PlayMode — Log Manager Temps Réel (implémentation)
+// PlayMode — Real-Time Log Manager (implementation)
 // ============================================================================
 
 // Singleton global
 LogManager logger;
 
-// Entrée vide pour index invalide
+// Empty entry for invalid index
 const LogEntry LogManager::_empty = {};
 
 // ============================================================================
@@ -29,11 +29,11 @@ void LogManager::begin() {
 }
 
 // ============================================================================
-// Enregistrement
+// Recording
 // ============================================================================
 
 void LogManager::log(LogLevel level, LogCategory cat, const char* fmt, ...) {
-    // Prépare l'entrée
+    // Prepare the entry
     LogEntry entry;
     entry.timestamp_ms = millis();
     entry.level        = level;
@@ -45,7 +45,7 @@ void LogManager::log(LogLevel level, LogCategory cat, const char* fmt, ...) {
     va_end(args);
     entry.message[LOG_MAX_MSG_LEN - 1] = '\0';
 
-    // Miroir sur Serial avec préfixe niveau
+    // Mirror to Serial with level prefix
     const char* lvl_tag = "?";
     switch (level) {
         case LOG_DEBUG:    lvl_tag = "DBG"; break;
@@ -56,20 +56,20 @@ void LogManager::log(LogLevel level, LogCategory cat, const char* fmt, ...) {
     }
     Serial.printf("[LOG/%s] %s\n", lvl_tag, entry.message);
 
-    // Écriture thread-safe dans le buffer circulaire
-    // AUDIT FIX : timeout augmenté à 10ms (au lieu de 5ms) pour réduire les pertes.
+    // Thread-safe write to the circular buffer
+    // AUDIT FIX: timeout increased to 10ms (from 5ms) to reduce losses.
     if (_mutex && xSemaphoreTake(_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         _buf[_head] = entry;
         _head = (_head + 1) % LOG_BUFFER_SIZE;
         if (_count < LOG_BUFFER_SIZE) _count++;
         xSemaphoreGive(_mutex);
     }
-    // Si le mutex n'est pas disponible, l'entrée est quand même émise sur Serial
-    // (miroir ci-dessus) — la perte de buffer est acceptable pour les cas extrêmes.
+    // If the mutex is not available, the entry is still emitted to Serial
+    // (mirror above) — buffer loss is acceptable for extreme cases.
 }
 
 // ============================================================================
-// Accesseurs
+// Accessors
 // ============================================================================
 
 uint8_t LogManager::getCount() const {
@@ -78,7 +78,7 @@ uint8_t LogManager::getCount() const {
 
 const LogEntry& LogManager::getEntry(uint8_t idx) const {
     if (idx >= _count) return _empty;
-    // idx 0 = entrée la plus récente (_head - 1)
+    // idx 0 = most recent entry (_head - 1)
     int16_t pos = (int16_t)_head - 1 - (int16_t)idx;
     if (pos < 0) pos += LOG_BUFFER_SIZE;
     return _buf[(uint8_t)(pos % LOG_BUFFER_SIZE)];
@@ -90,7 +90,7 @@ void LogManager::getAllEntries(LogEntry* out_buf, uint8_t& count_out) const {
 
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
         uint8_t n = _count;
-        // Copie triée : index 0 = plus récente
+        // Sorted copy: index 0 = most recent
         for (uint8_t i = 0; i < n; i++) {
             int16_t pos = (int16_t)_head - 1 - (int16_t)i;
             if (pos < 0) pos += LOG_BUFFER_SIZE;

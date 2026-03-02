@@ -2,7 +2,7 @@
 #include "power_manager.h"
 
 // ============================================================================
-// PlayMode — MIDI Dispatcher (implémentation)
+// PlayMode — MIDI Dispatcher (implementation)
 // ============================================================================
 
 MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
@@ -25,7 +25,7 @@ void MidiDispatcher::dispatch(const MidiMessage& msg) {
 
     switch (msg.type) {
         case MIDI_NOTE_ON:
-            // Note On avec vélocité 0 = Note Off (convention MIDI)
+            // Note On with velocity 0 = Note Off (MIDI convention)
             if (msg.data2 == 0) {
                 handleNoteOff(msg);
             } else {
@@ -45,13 +45,13 @@ void MidiDispatcher::dispatch(const MidiMessage& msg) {
             break;
     }
 
-    // AUDIT FIX : logger le message pour le relay WebSocket (log MIDI temps réel)
+    // AUDIT FIX: log the message for WebSocket relay (real-time MIDI log)
     bool routed = (_dispatched_count > dispatched_before);
     pushWsLog(msg, routed);
 }
 
 void MidiDispatcher::refreshConfig() {
-    // Réinitialiser les tables de lookup
+    // Reset lookup tables
     memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
     memset(_routing_cache, 0, sizeof(_routing_cache));
@@ -67,14 +67,14 @@ void MidiDispatcher::refreshConfig() {
             _channel_to_instrument[ch] = (int8_t)i;
         }
 
-        // Calculer la latence max pour cet instrument
+        // Compute the max latency for this instrument
         _max_latency_ms[i] = computeMaxLatency(instruments[i]);
 
-        // Mettre en cache le pointeur vers la config de routage
+        // Cache the pointer to the routing config
         _routing_cache[i] = _config.getRoutingForInstrument(i);
     }
 
-    Serial.printf("[MIDI-DISP] Config rechargée : %d instruments mappés\n", count);
+    Serial.printf("[MIDI-DISP] Config reloaded: %d instruments mapped\n", count);
 }
 
 uint32_t MidiDispatcher::getDispatchedCount() const {
@@ -94,7 +94,7 @@ void MidiDispatcher::setPowerManager(PowerManager* pm) {
 }
 
 // ============================================================================
-// Gestion Note On
+// Note On handling
 // ============================================================================
 void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
     int8_t inst_idx = _channel_to_instrument[msg.channel];
@@ -113,18 +113,18 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 
     uint8_t actuator_id = inst.actuator_ids[act_slot];
 
-    // Compensation de latence
-    // AUDIT FIX : utiliser arithmetic signée pour éviter l'underflow uint16_t
-    // si actuator_latency > _max_latency_ms (config invalide), compensation = 0.
+    // Latency compensation
+    // AUDIT FIX: use signed arithmetic to avoid uint16_t underflow
+    // if actuator_latency > _max_latency_ms (invalid config), compensation = 0.
     ActuatorConfig* act_config = findActuatorConfig(actuator_id);
     uint16_t actuator_latency = act_config ? act_config->latency_ms : inst.default_latency_ms;
     int32_t compensation_signed = ((int32_t)_max_latency_ms[inst_idx] - (int32_t)actuator_latency) * 1000;
     uint32_t compensation_us = (compensation_signed > 0) ? (uint32_t)compensation_signed : 0;
 
-    // Appliquer la courbe de vélocité
+    // Apply the velocity curve
     uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);
 
-    // Phase 5 : vérifier le budget énergétique avant activation
+    // Phase 5: check energy budget before activation
     if (_powerManager && act_config) {
         if (!_powerManager->canActivate(*act_config, inst_idx, velocity)) {
             _power_rejected_count++;
@@ -141,7 +141,7 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
-        // Notifier le PowerManager de l'activation
+        // Notify the PowerManager of activation
         if (_powerManager && act_config) {
             _powerManager->notifyActivation(*act_config, inst_idx, velocity);
         }
@@ -151,7 +151,7 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 }
 
 // ============================================================================
-// Gestion Note Off
+// Note Off handling
 // ============================================================================
 void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
     int8_t inst_idx = _channel_to_instrument[msg.channel];
@@ -179,7 +179,7 @@ void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
-        // Notifier le PowerManager de la désactivation
+        // Notify the PowerManager of deactivation
         if (_powerManager) {
             ActuatorConfig* act_config = findActuatorConfig(actuator_id);
             if (act_config) {
@@ -192,7 +192,7 @@ void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
 }
 
 // ============================================================================
-// Gestion Control Change — Phase 4
+// Control Change handling -- Phase 4
 // ============================================================================
 void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
     int8_t inst_idx = _channel_to_instrument[msg.channel];
@@ -220,7 +220,7 @@ void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
 
         switch (cc.target) {
             case CC_TARGET_POSITION: {
-                // Positionnement direct du servo via scheduler
+                // Direct servo positioning via scheduler
                 SchedulerEvent evt = {};
                 evt.trigger_time_us = (uint32_t)esp_timer_get_time();
                 evt.actuator_id = cc.actuator_id;
@@ -236,9 +236,9 @@ void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
                 break;
             }
 
-            // NOTE AUDIT : ces écritures uint16_t depuis Core 0 sont lues par
-            // Core 1 (actuator_engine). Sur Xtensa LX6, les stores 16 bits alignés
-            // sont atomiques ; la cohérence est garantie au prochain tick scheduler (≤1 ms).
+            // AUDIT NOTE: these uint16_t writes from Core 0 are read by
+            // Core 1 (actuator_engine). On Xtensa LX6, aligned 16-bit stores
+            // are atomic; coherence is guaranteed by the next scheduler tick (<=1 ms).
             case CC_TARGET_AMPLITUDE:
                 act->amplitude = mapped_value;
                 dispatched_any = true;
@@ -262,7 +262,7 @@ void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
 }
 
 // ============================================================================
-// Courbe de vélocité — Phase 4
+// Velocity curve -- Phase 4
 // ============================================================================
 uint8_t MidiDispatcher::applyVelocityCurve(uint8_t instrument_index, uint8_t velocity) {
     if (instrument_index >= MAX_INSTRUMENTS) return velocity;
@@ -275,17 +275,17 @@ uint8_t MidiDispatcher::applyVelocityCurve(uint8_t instrument_index, uint8_t vel
     VelocityCurvePoint* curve = routing->velocity_curve;
     uint8_t count = routing->velocity_curve_count;
 
-    // En dessous du premier point
+    // Below the first point
     if (velocity <= curve[0].input) {
         return curve[0].output;
     }
 
-    // Au dessus du dernier point
+    // Above the last point
     if (velocity >= curve[count - 1].input) {
         return curve[count - 1].output;
     }
 
-    // Interpolation linéaire entre les segments
+    // Linear interpolation between segments
     for (uint8_t i = 0; i < count - 1; i++) {
         if (velocity >= curve[i].input && velocity <= curve[i + 1].input) {
             uint8_t in_range = curve[i + 1].input - curve[i].input;
@@ -309,7 +309,7 @@ uint8_t MidiDispatcher::applyVelocityCurve(uint8_t instrument_index, uint8_t vel
 }
 
 // ============================================================================
-// Recherche d'actionneur par note MIDI dans un instrument
+// Actuator lookup by MIDI note in an instrument
 // ============================================================================
 int8_t MidiDispatcher::findActuatorForNote(const InstrumentConfig& inst, uint8_t note) {
     for (uint8_t i = 0; i < inst.actuator_count; i++) {
@@ -321,7 +321,7 @@ int8_t MidiDispatcher::findActuatorForNote(const InstrumentConfig& inst, uint8_t
 }
 
 // ============================================================================
-// Recherche de config actionneur par ID
+// Actuator config lookup by ID
 // ============================================================================
 ActuatorConfig* MidiDispatcher::findActuatorConfig(uint8_t actuator_id) {
     ActuatorConfig* actuators = _config.getActuators();
@@ -336,7 +336,7 @@ ActuatorConfig* MidiDispatcher::findActuatorConfig(uint8_t actuator_id) {
 }
 
 // ============================================================================
-// Mapping valeur CC (0-127) vers range min/max
+// CC value mapping (0-127) to min/max range
 // ============================================================================
 uint16_t MidiDispatcher::mapCCValue(uint8_t cc_value, uint16_t range_min, uint16_t range_max) {
     if (range_min == range_max) return range_min;
@@ -348,7 +348,7 @@ uint16_t MidiDispatcher::mapCCValue(uint8_t cc_value, uint16_t range_min, uint16
 }
 
 // ============================================================================
-// Calcul de la latence max d'un instrument
+// Max latency computation for an instrument
 // ============================================================================
 uint16_t MidiDispatcher::computeMaxLatency(const InstrumentConfig& inst) {
     uint16_t max_lat = inst.default_latency_ms;
@@ -369,7 +369,7 @@ uint16_t MidiDispatcher::computeMaxLatency(const InstrumentConfig& inst) {
 }
 
 // ============================================================================
-// AUDIT FIX : Ring buffer MIDI pour le relay WebSocket
+// AUDIT FIX: MIDI ring buffer for WebSocket relay
 // ============================================================================
 
 void MidiDispatcher::pushWsLog(const MidiMessage& msg, bool routed) {

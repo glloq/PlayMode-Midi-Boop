@@ -9,31 +9,31 @@
 #include "jitter_buffer.h"
 
 // ============================================================================
-// PlayMode — Couche Transport MIDI (Phase 3)
+// PlayMode — MIDI Transport Layer (Phase 3)
 // ============================================================================
 //
-// Gère les trois sources d'entrée MIDI :
+// Manages the three MIDI input sources:
 //   - Serial MIDI (31250 baud via Serial2)
 //   - UDP MIDI (raw bytes over WiFi)
 //   - RTP-MIDI (AppleMIDI via lathoub/Arduino-AppleMIDI-Library)
 //
-// Chaque transport a son propre parseur MIDI.
-// Les messages parsés sont insérés dans le JitterBuffer.
+// Each transport has its own MIDI parser.
+// Parsed messages are inserted into the JitterBuffer.
 //
 
 class MidiTransport {
 public:
     MidiTransport(JitterBuffer& jitterBuffer);
 
-    // Initialise les transports configurés.
-    // Doit être appelé après la connexion WiFi (pour les transports réseau).
+    // Initializes the configured transports.
+    // Must be called after WiFi connection (for network transports).
     bool begin(const MidiInputConfig& config);
 
-    // Lit les données de tous les transports actifs.
-    // Appeler à chaque itération de loop().
+    // Reads data from all active transports.
+    // Call on each iteration of loop().
     void poll();
 
-    // Arrête tous les transports
+    // Stops all transports
     void stop();
 
     // Stats
@@ -41,7 +41,7 @@ public:
     uint32_t getUdpPacketCount() const;
     uint32_t getRtpPacketCount() const;
 
-    // Délivre un message parsé au jitter buffer (public pour callbacks AppleMIDI)
+    // Delivers a parsed message to the jitter buffer (public for AppleMIDI callbacks)
     void deliverMessage(MidiMessage& msg, MidiTransportSource source);
 
 private:
@@ -65,12 +65,12 @@ private:
     uint32_t _udpPackets;
     uint32_t _rtpPackets;
 
-    // Poll individuel par transport
+    // Per-transport individual poll
     void pollSerial();
     void pollUDP();
     void pollRTP();
 
-    // Initialisation par transport
+    // Per-transport initialization
     bool initSerial();
     bool initUDP();
     bool initRTP();

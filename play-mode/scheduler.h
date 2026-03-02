@@ -20,65 +20,65 @@ class Scheduler {
 public:
     Scheduler(ActuatorEngine& engine);
 
-    // Démarre la tâche scheduler sur Core 1
+    // Start the scheduler task on Core 1
     bool begin();
 
-    // Arrête le scheduler
+    // Stop the scheduler
     void stop();
 
-    // Ajoute un événement dans la queue (thread-safe, appelé depuis Core 0)
+    // Add an event to the queue (thread-safe, called from Core 0)
     bool pushEvent(const SchedulerEvent& event);
 
-    // Enregistre un actionneur dans le scheduler
+    // Register an actuator with the scheduler
     void registerActuator(ActuatorConfig* actuator);
 
-    // Nombre d'événements en attente dans la priority queue
+    // Number of pending events in the priority queue
     uint16_t getQueuedEventCount() const;
 
-    // Nombre d'événements traités depuis le démarrage
+    // Number of events processed since startup
     uint32_t getProcessedCount() const;
 
-    // Retourne le handle de la queue FreeRTOS (pour usage externe)
+    // Return the FreeRTOS queue handle (for external use)
     QueueHandle_t getQueueHandle() const;
 
-    // Vérifie si le scheduler tourne
+    // Check if the scheduler is running
     bool isRunning() const;
 
-    // Enregistre le safety manager pour pré-vérification
+    // Register the safety manager for pre-event checks
     void setSafetyManager(SafetyManager* safety);
 
 private:
     ActuatorEngine& _engine;
-    SafetyManager* _safety_manager;  // Pointeur safety (peut être null)
+    SafetyManager* _safety_manager;  // Safety pointer (can be null)
     TaskHandle_t _task_handle;
-    QueueHandle_t _input_queue;     // Queue FreeRTOS pour événements entrants
+    QueueHandle_t _input_queue;     // FreeRTOS queue for incoming events
     bool _running;
     uint32_t _processed_count;
 
-    // Tableau des actionneurs enregistrés
+    // Array of registered actuators
     ActuatorConfig* _actuators[MAX_ACTUATORS];
     uint8_t _actuator_count;
 
-    // Priority queue interne (triée par timestamp)
+    // Internal priority queue (sorted by timestamp)
     SchedulerEvent _event_buffer[SCHEDULER_MAX_EVENTS];
     uint16_t _event_count;
 
-    // Tâche FreeRTOS statique (point d'entrée)
+    // Static FreeRTOS task (entry point)
     static void schedulerTask(void* param);
 
-    // Boucle principale du scheduler
+    // Main scheduler loop
     void run();
 
-    // Transfère les événements de la queue FreeRTOS vers la priority queue
+    // Transfer events from the FreeRTOS queue to the priority queue
     void drainInputQueue();
 
-    // Insère un événement dans la priority queue (tri par timestamp)
+    // Insert an event into the priority queue (sorted by timestamp)
     void insertEvent(const SchedulerEvent& event);
 
-    // Traite les événements dont le timestamp est atteint
+    // Process events whose timestamp has been reached
     void processReadyEvents();
 
-    // Retrouve l'actuator config par ID
+    // Find the actuator config by ID
     ActuatorConfig* findActuator(uint8_t id);
 };
 

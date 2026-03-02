@@ -7,18 +7,18 @@
 // PlayMode — Embedded Web UI (Phase 6)
 // ============================================================================
 //
-// Interface HTML/CSS/JS intégrée en PROGMEM.
-// Single-page app avec :
-//   - Dashboard temps réel (WebSocket)
-//   - Gestion instruments / actionneurs / MIDI mapping
-//   - Piano virtuel interactif
-//   - Monitoring power / safety
-//   - Configuration avancée
+// HTML/CSS/JS interface embedded in PROGMEM.
+// Single-page app with:
+//   - Real-time dashboard (WebSocket)
+//   - Instrument / actuator / MIDI mapping management
+//   - Interactive virtual piano
+//   - Power / safety monitoring
+//   - Advanced configuration
 //
 
 const char WEB_UI_HTML[] PROGMEM = R"rawhtml(
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -124,7 +124,7 @@ tr:hover td{background:var(--bg2)}
   padding:24px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto}
 .modal h2{font-size:16px;margin-bottom:16px}
 
-/* Piano — touches plus larges pour le tactile */
+/* Piano — wider keys for touch */
 .piano-scroll-wrap{display:flex;align-items:center;gap:4px}
 .piano-scroll-wrap .piano-nav{display:none;background:var(--bg3);border:none;color:var(--fg);
   font-size:20px;padding:8px 6px;border-radius:6px;cursor:pointer;flex-shrink:0;
@@ -148,7 +148,7 @@ tr:hover td{background:var(--bg2)}
 .piano .black.active{background:var(--accent)}
 .piano .black.muted{display:none}
 
-/* Section titles — flexbox pour alignement mobile */
+/* Section titles — flexbox for mobile alignment */
 .section-title{font-size:16px;font-weight:600;margin-bottom:16px;
   padding-bottom:8px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
@@ -302,42 +302,42 @@ tr:hover td{background:var(--bg2)}
   <div class="status">
     <span class="dot" id="ws-dot"></span>
   </div>
-  <button class="gear-btn" onclick="showPage('settings')" title="R&eacute;glages syst&egrave;me">&#9881;</button>
+  <button class="gear-btn" onclick="showPage('settings')" title="System settings">&#9881;</button>
 </div>
 
 <!-- Navigation -->
 <nav id="main-nav">
   <button class="active" onclick="showPage('instrument')">Instrument</button>
   <button onclick="showPage('midi')">MIDI</button>
-  <button onclick="showPage('actuators')">Actionneurs</button>
+  <button onclick="showPage('actuators')">Actuators</button>
   <button onclick="showPage('calibration')" id="nav-cal" style="display:none">Calibration</button>
 </nav>
 
 <!-- ============ WELCOME (First-run) ============ -->
 <div class="page" id="page-welcome">
   <div class="welcome">
-    <h2>Bienvenue sur Midi <span>B&infin;p</span></h2>
-    <p class="subtitle">Transformez n'importe quel objet en instrument de musique MIDI.<br>
-    Servos, sol&eacute;no&iuml;des, percussions... tout est possible.</p>
+    <h2>Welcome to Midi <span>B&infin;p</span></h2>
+    <p class="subtitle">Turn any object into a MIDI musical instrument.<br>
+    Servos, solenoids, percussion... anything is possible.</p>
     <div class="welcome-steps">
       <div class="welcome-step">
         <div class="step-num">1</div>
-        <h3>Cr&eacute;er</h3>
-        <p>D&eacute;finissez votre instrument et ses actionneurs</p>
+        <h3>Create</h3>
+        <p>Define your instrument and its actuators</p>
       </div>
       <div class="welcome-step">
         <div class="step-num">2</div>
-        <h3>Connecter</h3>
-        <p>Branchez vos servos ou sol&eacute;no&iuml;des via PCA9685</p>
+        <h3>Connect</h3>
+        <p>Plug in your servos or solenoids via PCA9685</p>
       </div>
       <div class="welcome-step">
         <div class="step-num">3</div>
-        <h3>Jouer</h3>
-        <p>Envoyez du MIDI et laissez la musique op&eacute;rer</p>
+        <h3>Play</h3>
+        <p>Send MIDI and let the music do its thing</p>
       </div>
     </div>
-    <button class="btn primary btn-big" onclick="openWizard()">Cr&eacute;er mon premier instrument</button>
-    <p style="color:var(--fg2);font-size:12px;margin-top:16px">Ou <a href="#" onclick="showPage('instrument');return false">passer &agrave; la configuration manuelle</a></p>
+    <button class="btn primary btn-big" onclick="openWizard()">Create my first instrument</button>
+    <p style="color:var(--fg2);font-size:12px;margin-top:16px">Or <a href="#" onclick="showPage('instrument');return false">skip to manual configuration</a></p>
   </div>
 </div>
 
@@ -345,16 +345,16 @@ tr:hover td{background:var(--bg2)}
 <div class="page active" id="page-instrument">
   <div id="alert-zone"></div>
 
-  <div class="section-title"><span>Mes instruments</span>
+  <div class="section-title"><span>My instruments</span>
     <div style="display:flex;gap:8px">
-      <button class="btn primary sm" onclick="openWizard()">+ Assistant</button>
-      <button class="btn sm" onclick="openInstrumentModal()">+ Manuel</button>
+      <button class="btn primary sm" onclick="openWizard()">+ Wizard</button>
+      <button class="btn sm" onclick="openInstrumentModal()">+ Manual</button>
     </div>
   </div>
   <div class="table-responsive">
   <table>
-    <thead><tr><th>Nom</th><th>Canal</th><th>Type</th><th>Actionneurs</th><th>&Eacute;tat</th><th>Actions</th></tr></thead>
-    <tbody id="home-instruments-table"><tr><td colspan="6" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+    <thead><tr><th>Name</th><th>Channel</th><th>Type</th><th>Actuators</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody id="home-instruments-table"><tr><td colspan="6" style="color:var(--fg2)">Loading...</td></tr></tbody>
   </table>
   </div>
 
@@ -371,18 +371,18 @@ tr:hover td{background:var(--bg2)}
     <div class="card">
       <h3>MIDI</h3>
       <div class="val" id="d-midi-recv">0</div>
-      <div class="sub">Rout&eacute;s: <span id="d-midi-routed">0</span> | Rejet&eacute;s: <span id="d-midi-unmapped">0</span></div>
+      <div class="sub">Routed: <span id="d-midi-routed">0</span> | Rejected: <span id="d-midi-unmapped">0</span></div>
     </div>
     <div class="card">
-      <h3>Polyphonie</h3>
+      <h3>Polyphony</h3>
       <div class="val"><span id="d-active">0</span><span class="unit">/ <span id="p-poly-max">12</span></span></div>
       <div class="bar"><div class="bar-fill" id="p-total-bar" style="width:0%;background:var(--green)"></div></div>
-      <div class="sub">Rejet&eacute;s: <span id="p-rejected">0</span></div>
+      <div class="sub">Rejected: <span id="p-rejected">0</span></div>
     </div>
     <div class="card">
       <h3>Scheduler</h3>
       <div class="val" id="d-sched-queued">0</div>
-      <div class="sub">en file | <span id="d-sched-processed">0</span> trait&eacute;s</div>
+      <div class="sub">queued | <span id="d-sched-processed">0</span> processed</div>
     </div>
     <div class="card">
       <h3>WiFi</h3>
@@ -391,17 +391,17 @@ tr:hover td{background:var(--bg2)}
     </div>
   </div>
 
-  <!-- Polyphonie & Sécurité -->
-  <div class="section-title" style="margin-top:24px">Polyphonie &amp; S&eacute;curit&eacute;</div>
+  <!-- Polyphony & Safety -->
+  <div class="section-title" style="margin-top:24px">Polyphony &amp; Safety</div>
   <div id="safety-alert-zone"></div>
   <div class="form-row" style="margin-bottom:12px">
     <div class="form-group">
-      <label>Polyphonie max</label>
+      <label>Max polyphony</label>
       <input type="number" id="pw-poly" value="12" min="1" max="64">
-      <div class="help">Nombre max d'actionneurs actifs simultan&eacute;ment</div>
+      <div class="help">Maximum number of simultaneously active actuators</div>
     </div>
     <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:18px">
-      <button class="btn primary sm" onclick="savePowerBudget()">Appliquer</button>
+      <button class="btn primary sm" onclick="savePowerBudget()">Apply</button>
     </div>
   </div>
   <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px">
@@ -410,8 +410,8 @@ tr:hover td{background:var(--bg2)}
       <div class="val" id="s-kill" style="color:var(--green)">OFF</div>
     </div>
     <div class="card">
-      <h3>D&eacute;gradation</h3>
-      <div class="val" id="s-degrad" style="color:var(--green)">Non</div>
+      <h3>Degradation</h3>
+      <div class="val" id="s-degrad" style="color:var(--green)">No</div>
     </div>
   </div>
   <div class="btn-row" style="margin-bottom:12px">
@@ -421,7 +421,7 @@ tr:hover td{background:var(--bg2)}
 
   <div class="section-collapse">
     <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
-      <span>Limites de s&eacute;curit&eacute; (avanc&eacute;)</span>
+      <span>Safety limits (advanced)</span>
     </button>
     <div class="section-collapse-body">
       <div class="form-row tri">
@@ -430,7 +430,7 @@ tr:hover td{background:var(--bg2)}
           <input type="number" id="sf-duty" value="80" min="10" max="100">
         </div>
         <div class="form-group">
-          <label>Fr&eacute;quence max (Hz)</label>
+          <label>Max frequency (Hz)</label>
           <input type="number" id="sf-freq" value="50" min="1" max="200">
         </div>
         <div class="form-group">
@@ -438,15 +438,15 @@ tr:hover td{background:var(--bg2)}
           <input type="number" id="sf-watchdog" value="5000" min="1000" max="30000">
         </div>
       </div>
-      <button class="btn primary sm" onclick="saveSafetyConfig()">Appliquer limites</button>
+      <button class="btn primary sm" onclick="saveSafetyConfig()">Apply limits</button>
     </div>
   </div>
 
   <!-- Logs -->
-  <div class="section-title" style="margin-top:24px"><span>Journal syst&egrave;me</span>
+  <div class="section-title" style="margin-top:24px"><span>System log</span>
     <div style="display:flex;gap:6px">
-      <button class="btn sm" onclick="loadLogs()">Actualiser</button>
-      <button class="btn sm" onclick="clearLogs()">Effacer</button>
+      <button class="btn sm" onclick="loadLogs()">Refresh</button>
+      <button class="btn sm" onclick="clearLogs()">Clear</button>
     </div>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;font-size:12px">
@@ -457,8 +457,8 @@ tr:hover td{background:var(--bg2)}
       <option value="3">ERROR+</option>
     </select>
     <select id="log-cat-filter" onchange="renderLogs()" class="form-select" style="font-size:12px">
-      <option value="-1">Toutes</option>
-      <option value="0">Syst&egrave;me</option>
+      <option value="-1">All</option>
+      <option value="0">System</option>
       <option value="1">MIDI</option>
       <option value="2">Scheduler</option>
       <option value="3">Safety</option>
@@ -471,22 +471,22 @@ tr:hover td{background:var(--bg2)}
   <div class="log-container">
     <div class="table-responsive">
     <table>
-      <thead><tr><th style="width:80px">Temps</th><th style="width:50px">Niveau</th><th style="width:65px">Cat</th><th>Message</th></tr></thead>
-      <tbody id="log-table"><tr><td colspan="4" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+      <thead><tr><th style="width:80px">Time</th><th style="width:50px">Level</th><th style="width:65px">Cat</th><th>Message</th></tr></thead>
+      <tbody id="log-table"><tr><td colspan="4" style="color:var(--fg2)">Loading...</td></tr></tbody>
     </table>
     </div>
   </div>
   <div id="log-count-info" style="color:var(--fg2);font-size:12px;margin-top:6px;text-align:right"></div>
 
   <!-- WiFi -->
-  <div class="section-title" style="margin-top:24px">Connexion WiFi</div>
+  <div class="section-title" style="margin-top:24px">WiFi Connection</div>
   <div class="form-row">
     <div class="form-group">
-      <label>SSID du r&eacute;seau</label>
-      <input type="text" id="set-ssid" maxlength="32" placeholder="Nom du WiFi">
+      <label>Network SSID</label>
+      <input type="text" id="set-ssid" maxlength="32" placeholder="WiFi name">
     </div>
     <div class="form-group">
-      <label>Mot de passe</label>
+      <label>Password</label>
       <input type="password" id="set-pass" maxlength="64">
     </div>
   </div>
@@ -494,65 +494,65 @@ tr:hover td{background:var(--bg2)}
     <div class="form-group">
       <label>Hostname</label>
       <input type="text" id="set-hostname" value="play-mode" maxlength="31">
-      <div class="help">Accessible via hostname.local sur le r&eacute;seau</div>
+      <div class="help">Accessible via hostname.local on the network</div>
     </div>
     <div class="form-group">
       <label>AP Fallback</label>
       <select id="set-ap-fallback">
-        <option value="1">Oui &mdash; cr&eacute;e un point d'acc&egrave;s si WiFi &eacute;choue</option>
-        <option value="0">Non</option>
+        <option value="1">Yes &mdash; creates an access point if WiFi fails</option>
+        <option value="0">No</option>
       </select>
     </div>
   </div>
-  <button class="btn primary" onclick="saveWiFiConfig()">Sauvegarder WiFi</button>
+  <button class="btn primary" onclick="saveWiFiConfig()">Save WiFi</button>
 
-  <!-- Bus I&sup2;C -->
+  <!-- I&sup2;C Bus -->
   <div class="section-collapse" style="margin-top:24px">
     <button class="section-collapse-toggle" onclick="toggleCollapse(this)">
-      <span>Bus I&sup2;C (avanc&eacute;)</span>
+      <span>I&sup2;C Bus (advanced)</span>
     </button>
     <div class="section-collapse-body">
       <div class="table-responsive">
       <table>
-        <thead><tr><th>Bus</th><th>SDA</th><th>SCL</th><th>OE</th><th>Freq I&sup2;C</th><th>Freq PWM</th><th>PCA d&eacute;tect&eacute;s</th><th>&Eacute;tat</th></tr></thead>
-        <tbody id="buses-table"><tr><td colspan="8" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+        <thead><tr><th>Bus</th><th>SDA</th><th>SCL</th><th>OE</th><th>Freq I&sup2;C</th><th>Freq PWM</th><th>PCA detected</th><th>Status</th></tr></thead>
+        <tbody id="buses-table"><tr><td colspan="8" style="color:var(--fg2)">Loading...</td></tr></tbody>
       </table>
       </div>
-      <button class="btn" onclick="scanI2C()">Scanner bus I&sup2;C</button>
+      <button class="btn" onclick="scanI2C()">Scan I&sup2;C bus</button>
     </div>
   </div>
 
   <!-- Config -->
   <div class="section-title" style="margin-top:24px">Configuration</div>
   <div class="btn-row">
-    <button class="btn primary" onclick="saveConfig()">Sauvegarder sur flash</button>
-    <button class="btn danger" onclick="confirmResetDefaults()">R&eacute;initialiser</button>
+    <button class="btn primary" onclick="saveConfig()">Save to flash</button>
+    <button class="btn danger" onclick="confirmResetDefaults()">Reset</button>
   </div>
-  <div class="sub" style="margin-top:8px">Version config: <span id="set-version">-</span></div>
+  <div class="sub" style="margin-top:8px">Config version: <span id="set-version">-</span></div>
 </div>
 
-<!-- ============ MIDI (Entr&eacute;es MIDI + Messages re&ccedil;us) ============ -->
+<!-- ============ MIDI (MIDI Inputs + Received Messages) ============ -->
 <div class="page" id="page-midi">
-  <div class="section-title">Entr&eacute;es MIDI</div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Choisissez comment PlayMode re&ccedil;oit les messages MIDI. Plusieurs entr&eacute;es peuvent &ecirc;tre actives en m&ecirc;me temps.</p>
+  <div class="section-title">MIDI Inputs</div>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">Choose how PlayMode receives MIDI messages. Multiple inputs can be active at the same time.</p>
   <div class="cards" style="margin-bottom:16px">
     <div class="card">
-      <h3>C&acirc;ble MIDI (DIN / TRS)</h3>
-      <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Connexion filaire classique via prise MIDI 5 broches ou jack TRS.</div>
+      <h3>MIDI Cable (DIN / TRS)</h3>
+      <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Active</label>
+      <div class="sub">Classic wired connection via 5-pin MIDI jack or TRS jack.</div>
       <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">GPIO <span id="midi-rx-pin">4</span> &mdash; 31250 baud</div>
     </div>
     <div class="card">
-      <h3>WiFi &mdash; envoi direct (UDP)</h3>
-      <label><input type="checkbox" id="midi-udp" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Envoyer des messages MIDI depuis un logiciel vers l'IP de PlayMode. Simple mais sans synchronisation.</div>
-      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-udp-port">5004</span> &mdash; N&eacute;cessite WiFi</div>
+      <h3>WiFi &mdash; direct send (UDP)</h3>
+      <label><input type="checkbox" id="midi-udp" onchange="updateMidiConfig()"> Active</label>
+      <div class="sub">Send MIDI messages from software to PlayMode's IP address. Simple but without synchronization.</div>
+      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-udp-port">5004</span> &mdash; Requires WiFi</div>
     </div>
     <div class="card">
       <h3>WiFi &mdash; Apple / RTP-MIDI</h3>
-      <label><input type="checkbox" id="midi-rtp" onchange="updateMidiConfig()"> Actif</label>
-      <div class="sub">Compatible macOS, iOS, rtpMIDI (Windows). Appara&icirc;t automatiquement dans les logiciels MIDI. Synchronis&eacute;.</div>
-      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-rtp-port">5004</span> &mdash; N&eacute;cessite WiFi</div>
+      <label><input type="checkbox" id="midi-rtp" onchange="updateMidiConfig()"> Active</label>
+      <div class="sub">Compatible with macOS, iOS, rtpMIDI (Windows). Appears automatically in MIDI software. Synchronized.</div>
+      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-rtp-port">5004</span> &mdash; Requires WiFi</div>
     </div>
     <div class="card">
       <h3>Jitter Buffer</h3>
@@ -560,21 +560,21 @@ tr:hover td{background:var(--bg2)}
       <input type="range" id="midi-jitter" min="10" max="80" value="30" style="width:100%;margin-top:8px"
         oninput="document.getElementById('midi-jitter-val').textContent=this.value"
         onchange="updateMidiConfig()">
-      <div class="help">Tampon anti-gigue pour le MIDI r&eacute;seau (UDP / RTP). Augmentez si les notes arrivent dans le d&eacute;sordre.</div>
+      <div class="help">Anti-jitter buffer for network MIDI (UDP / RTP). Increase if notes arrive out of order.</div>
     </div>
   </div>
 
-  <!-- Derniers messages MIDI re&ccedil;us -->
-  <div class="section-title" style="margin-top:24px"><span>Messages MIDI re&ccedil;us</span>
+  <!-- Latest received MIDI messages -->
+  <div class="section-title" style="margin-top:24px"><span>Received MIDI messages</span>
     <div style="display:flex;gap:6px;align-items:center">
       <label style="font-size:12px;display:flex;align-items:center;gap:4px;color:var(--fg2)"><input type="checkbox" id="midi-log-pause"> Pause</label>
-      <button class="btn sm" onclick="clearMidiLog()">Effacer</button>
+      <button class="btn sm" onclick="clearMidiLog()">Clear</button>
     </div>
   </div>
   <div class="table-responsive" style="max-height:320px;overflow-y:auto" id="midi-log-scroll">
   <table>
-    <thead><tr><th style="width:70px">Temps</th><th>Source</th><th>Canal</th><th>Type</th><th>Donn&eacute;es</th><th>Rout&eacute;</th></tr></thead>
-    <tbody id="midi-log-table"><tr><td colspan="6" style="color:var(--fg2)">En attente de messages MIDI...</td></tr></tbody>
+    <thead><tr><th style="width:70px">Time</th><th>Source</th><th>Channel</th><th>Type</th><th>Data</th><th>Routed</th></tr></thead>
+    <tbody id="midi-log-table"><tr><td colspan="6" style="color:var(--fg2)">Waiting for MIDI messages...</td></tr></tbody>
   </table>
   </div>
   <div id="midi-log-count" style="color:var(--fg2);font-size:11px;margin-top:4px;text-align:right"></div>
@@ -588,7 +588,7 @@ tr:hover td{background:var(--bg2)}
 <div class="modal-overlay" id="modal-confirm">
   <div class="modal" style="max-width:380px;text-align:center">
     <div id="confirm-icon" style="font-size:32px;margin-bottom:8px"></div>
-    <h2 id="confirm-title" style="text-align:center">Confirmer</h2>
+    <h2 id="confirm-title" style="text-align:center">Confirm</h2>
     <p id="confirm-message" style="color:var(--fg2);margin-bottom:20px;white-space:pre-line"></p>
     <div class="btn-row" id="confirm-buttons" style="justify-content:center"></div>
   </div>
@@ -597,39 +597,39 @@ tr:hover td{background:var(--bg2)}
 <!-- Modal Instrument -->
 <div class="modal-overlay" id="modal-instrument">
   <div class="modal">
-    <h2 id="modal-inst-title">Nouvel instrument</h2>
+    <h2 id="modal-inst-title">New instrument</h2>
     <div class="form-group">
-      <label>Nom de l'instrument</label>
-      <input type="text" id="mi-name" maxlength="31" placeholder="Ex: Xylophone, Caisse claire...">
-      <div class="help">Nom libre pour identifier cet instrument dans l'interface</div>
+      <label>Instrument name</label>
+      <input type="text" id="mi-name" maxlength="31" placeholder="E.g.: Xylophone, Snare drum...">
+      <div class="help">Free-form name to identify this instrument in the interface</div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Canal MIDI (0=Omni, 1-16)</label>
+        <label>MIDI Channel (0=Omni, 1-16)</label>
         <input type="number" id="mi-channel" min="0" max="16" value="0">
-        <div class="help">0 = &eacute;coute tous les canaux, 1-16 = canal sp&eacute;cifique</div>
+        <div class="help">0 = listens on all channels, 1-16 = specific channel</div>
       </div>
       <div class="form-group">
         <label>Bus I&sup2;C</label>
-        <select id="mi-bus"><option value="0">Bus 0 (Servos)</option><option value="1">Bus 1 (Sol&eacute;no&iuml;des)</option></select>
-        <div class="help">Bus physique auquel sont connect&eacute;s les actionneurs</div>
+        <select id="mi-bus"><option value="0">Bus 0 (Servos)</option><option value="1">Bus 1 (Solenoids)</option></select>
+        <div class="help">Physical bus to which the actuators are connected</div>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Latence (ms)</label>
+        <label>Latency (ms)</label>
         <input type="number" id="mi-latency" value="10" min="0" max="500">
-        <div class="help">D&eacute;lai de compensation entre r&eacute;ception MIDI et d&eacute;clenchement</div>
+        <div class="help">Compensation delay between MIDI reception and triggering</div>
       </div>
       <div class="form-group">
-        <label>Auto-calibration micro</label>
-        <select id="mi-autocal"><option value="0">Non</option><option value="1">Oui</option></select>
-        <div class="help">Mesure automatique de la latence via microphone I&sup2;S</div>
+        <label>Microphone auto-calibration</label>
+        <select id="mi-autocal"><option value="0">No</option><option value="1">Yes</option></select>
+        <div class="help">Automatic latency measurement via I&sup2;S microphone</div>
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn primary" onclick="saveInstrument()">Sauvegarder</button>
-      <button class="btn" onclick="closeModal('modal-instrument')">Annuler</button>
+      <button class="btn primary" onclick="saveInstrument()">Save</button>
+      <button class="btn" onclick="closeModal('modal-instrument')">Cancel</button>
     </div>
   </div>
 </div>
@@ -637,44 +637,44 @@ tr:hover td{background:var(--bg2)}
 <!-- Modal Actuator -->
 <div class="modal-overlay" id="modal-actuator">
   <div class="modal">
-    <h2 id="modal-act-title">Nouvel actionneur</h2>
+    <h2 id="modal-act-title">New actuator</h2>
     <div class="form-row">
       <div class="form-group">
-        <label>ID actionneur</label>
+        <label>Actuator ID</label>
         <input type="number" id="ma-id" min="0" max="31" value="0">
-        <div class="help">Identifiant unique (0-31), attribu&eacute; automatiquement</div>
+        <div class="help">Unique identifier (0-31), automatically assigned</div>
       </div>
       <div class="form-group">
-        <label>Type d'actionneur</label>
-        <select id="ma-type" onchange="toggleActuatorFields()"><option value="0">Servo-moteur</option><option value="1">Sol&eacute;no&iuml;de</option></select>
-        <div class="help">Servo = mouvement rotatif | Sol&eacute;no&iuml;de = frappe lin&eacute;aire</div>
+        <label>Actuator type</label>
+        <select id="ma-type" onchange="toggleActuatorFields()"><option value="0">Servo motor</option><option value="1">Solenoid</option></select>
+        <div class="help">Servo = rotary motion | Solenoid = linear strike</div>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label>Bus I&sup2;C</label>
         <select id="ma-bus"><option value="0">Bus 0</option><option value="1">Bus 1</option></select>
-        <div class="help">Bus I&sup2;C physique (fr&eacute;quence PWM configurable dans MIDI &gt; I&sup2;C)</div>
+        <div class="help">Physical I&sup2;C bus (PWM frequency configurable in MIDI &gt; I&sup2;C)</div>
       </div>
       <div class="form-group">
-        <label>Carte PCA9685</label>
-        <select id="ma-pca"><option value="64">0x40 (carte 1)</option><option value="65">0x41 (carte 2)</option><option value="66">0x42 (carte 3)</option><option value="67">0x43 (carte 4)</option></select>
-        <div class="help">Adresse I&sup2;C de la carte PWM (16 canaux chacune)</div>
+        <label>PCA9685 board</label>
+        <select id="ma-pca"><option value="64">0x40 (board 1)</option><option value="65">0x41 (board 2)</option><option value="66">0x42 (board 3)</option><option value="67">0x43 (board 4)</option></select>
+        <div class="help">I&sup2;C address of the PWM board (16 channels each)</div>
       </div>
     </div>
     <div class="form-group">
-      <label>Canal PCA (0-15)</label>
+      <label>PCA Channel (0-15)</label>
       <input type="number" id="ma-ch" min="0" max="15" value="0">
-      <div class="help">Sortie PWM sur la carte (auto-incr&eacute;ment&eacute;)</div>
+      <div class="help">PWM output on the board (auto-incremented)</div>
     </div>
 
     <div class="expert-section">
-      <button type="button" class="expert-toggle" onclick="toggleExpert(this)">R&eacute;glages avanc&eacute;s</button>
+      <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Advanced settings</button>
       <div class="expert-body">
         <div class="form-group">
-          <label>Latence (ms)</label>
+          <label>Latency (ms)</label>
           <input type="number" id="ma-latency" min="0" max="500" value="10">
-          <div class="help">D&eacute;lai de compensation m&eacute;canique (d&eacute;faut : 10ms)</div>
+          <div class="help">Mechanical compensation delay (default: 10ms)</div>
         </div>
       </div>
     </div>
@@ -682,34 +682,34 @@ tr:hover td{background:var(--bg2)}
     <!-- Servo fields -->
     <div id="servo-fields">
       <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:8px">R&eacute;glages servo</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Servo settings</div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Mode de jeu</label>
-          <select id="ma-servo-behavior" onchange="toggleServoDirection()"><option value="0">Frappe (aller-retour rapide)</option><option value="1">Altern&eacute; (bascule A/B)</option><option value="2">Gratter (mouvement continu)</option><option value="3">Touche (maintien appuy&eacute;)</option></select>
-          <div class="help">Frappe : percussion | Altern&eacute; : bascule entre 2 positions | Gratter : va-et-vient | Touche : maintien</div>
+          <label>Play mode</label>
+          <select id="ma-servo-behavior" onchange="toggleServoDirection()"><option value="0">Strike (quick back-and-forth)</option><option value="1">Alternate (A/B toggle)</option><option value="2">Strum (continuous motion)</option><option value="3">Key (hold down)</option></select>
+          <div class="help">Strike: percussion | Alternate: toggle between 2 positions | Strum: back-and-forth | Key: hold</div>
         </div>
         <div class="form-group" id="servo-direction-group">
-          <label>Sens de frappe</label>
+          <label>Strike direction</label>
           <select id="ma-hit-reverse" onchange="updateAnglePreview()">
-            <option value="0">Horaire (+) &mdash; repos &rarr; repos + amplitude</option>
-            <option value="1">Anti-horaire (&minus;) &mdash; repos &rarr; repos &minus; amplitude</option>
+            <option value="0">Clockwise (+) &mdash; rest &rarr; rest + amplitude</option>
+            <option value="1">Counter-clockwise (&minus;) &mdash; rest &rarr; rest &minus; amplitude</option>
           </select>
-          <div class="help">Direction du mouvement par rapport &agrave; l'angle de repos</div>
+          <div class="help">Direction of motion relative to the rest angle</div>
         </div>
       </div>
       <div id="servo-standard-fields">
         <div class="form-row">
           <div class="form-group">
-            <label>Angle de repos (&deg;)</label>
+            <label>Rest angle (&deg;)</label>
             <input type="number" id="ma-angle-init" min="0" max="180" value="90" oninput="updateAnglePreview()">
-            <div class="help">Position du bras au repos (0&deg; &agrave; 180&deg;)</div>
+            <div class="help">Arm position at rest (0&deg; to 180&deg;)</div>
           </div>
           <div class="form-group">
             <label>Amplitude (&deg;)</label>
             <input type="number" id="ma-amplitude" min="0" max="180" value="45" oninput="updateAnglePreview()">
-            <div class="help">Course du mouvement en degr&eacute;s</div>
+            <div class="help">Range of motion in degrees</div>
           </div>
         </div>
       </div>
@@ -718,19 +718,19 @@ tr:hover td{background:var(--bg2)}
           <div class="form-group">
             <label>Angle A (&deg;)</label>
             <input type="number" id="ma-angle-a-alt" min="0" max="180" value="90" oninput="updateAnglePreview()">
-            <div class="help">Premi&egrave;re position de bascule</div>
+            <div class="help">First toggle position</div>
           </div>
           <div class="form-group">
             <label>Angle B (&deg;)</label>
             <input type="number" id="ma-angle-b" min="0" max="180" value="120" oninput="updateAnglePreview()">
-            <div class="help">Seconde position de bascule</div>
+            <div class="help">Second toggle position</div>
           </div>
         </div>
       </div>
       <div class="form-group">
-        <label>Dur&eacute;e du mouvement (ms)</label>
+        <label>Movement duration (ms)</label>
         <input type="number" id="ma-speed" min="10" max="2000" value="150">
-        <div class="help">Temps pour un aller simple (10=rapide, 500=lent)</div>
+        <div class="help">Time for a single stroke (10=fast, 500=slow)</div>
       </div>
       <!-- Angle visual preview -->
       <div class="angle-preview" id="angle-preview"></div>
@@ -739,45 +739,45 @@ tr:hover td{background:var(--bg2)}
     <!-- Solenoid fields -->
     <div id="solenoid-fields" style="display:none">
       <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:8px">R&eacute;glages sol&eacute;no&iuml;de</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Solenoid settings</div>
       </div>
       <div class="form-group">
-        <label>Mode de frappe</label>
-        <select id="ma-sol-behavior" onchange="toggleHitHoldFields()"><option value="0">Frappe (impulsion courte)</option><option value="1">Hit-and-Hold (frappe puis maintien)</option></select>
-        <div class="help">Frappe : impulsion br&egrave;ve | Hit-and-Hold : frappe forte puis maintien doux</div>
+        <label>Strike mode</label>
+        <select id="ma-sol-behavior" onchange="toggleHitHoldFields()"><option value="0">Strike (short pulse)</option><option value="1">Hit-and-Hold (strike then hold)</option></select>
+        <div class="help">Strike: short pulse | Hit-and-Hold: strong strike then soft hold</div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Impulsion min (ms) &mdash; v&eacute;locit&eacute; 1</label>
+          <label>Min pulse (ms) &mdash; velocity 1</label>
           <input type="number" id="ma-pulse-min" min="2" max="100" value="5">
-          <div class="help">Dur&eacute;e la plus courte (v&eacute;locit&eacute; faible, frappe douce)</div>
+          <div class="help">Shortest duration (low velocity, soft strike)</div>
         </div>
         <div class="form-group">
-          <label>Impulsion max (ms) &mdash; v&eacute;locit&eacute; 127</label>
+          <label>Max pulse (ms) &mdash; velocity 127</label>
           <input type="number" id="ma-pulse-max" min="5" max="200" value="30">
-          <div class="help">Dur&eacute;e la plus longue (v&eacute;locit&eacute; forte, frappe dure)</div>
+          <div class="help">Longest duration (high velocity, hard strike)</div>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>PWM d'attaque (0-4095)</label>
+          <label>Attack PWM (0-4095)</label>
           <input type="number" id="ma-pwm-init" min="0" max="4095" value="4095">
-          <div class="help">Puissance initiale de frappe. 4095 = maximum</div>
+          <div class="help">Initial strike power. 4095 = maximum</div>
         </div>
       </div>
       <div id="hit-hold-fields" class="expert-section" style="display:none">
-        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Hit-and-Hold (avanc&eacute;)</button>
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Hit-and-Hold (advanced)</button>
         <div class="expert-body">
           <div class="form-row">
             <div class="form-group">
-              <label>PWM de maintien (0-4095)</label>
+              <label>Hold PWM (0-4095)</label>
               <input type="number" id="ma-pwm-hold" min="0" max="4095" value="2048">
-              <div class="help">Puissance r&eacute;duite apr&egrave;s la frappe</div>
+              <div class="help">Reduced power after the strike</div>
             </div>
             <div class="form-group">
-              <label>Rampe de transition (ms)</label>
+              <label>Transition ramp (ms)</label>
               <input type="number" id="ma-ramp" min="10" max="500" value="50">
-              <div class="help">Dur&eacute;e du passage attaque &rarr; maintien</div>
+              <div class="help">Duration of attack &rarr; hold transition</div>
             </div>
           </div>
         </div>
@@ -785,8 +785,8 @@ tr:hover td{background:var(--bg2)}
     </div>
 
     <div class="btn-row">
-      <button class="btn primary" onclick="saveActuator()">Sauvegarder</button>
-      <button class="btn" onclick="closeModal('modal-actuator')">Annuler</button>
+      <button class="btn primary" onclick="saveActuator()">Save</button>
+      <button class="btn" onclick="closeModal('modal-actuator')">Cancel</button>
     </div>
   </div>
 </div>
@@ -794,18 +794,18 @@ tr:hover td{background:var(--bg2)}
 <!-- Modal Add/Edit CC Mapping -->
 <div class="modal-overlay" id="modal-cc">
   <div class="modal" style="max-width:460px">
-    <h2 id="modal-cc-title">Ajouter un CC Mapping</h2>
+    <h2 id="modal-cc-title">Add CC Mapping</h2>
     <div class="form-row">
       <div class="form-group">
-        <label>Num&eacute;ro CC (0-127)</label>
+        <label>CC Number (0-127)</label>
         <input type="number" id="cc-num" min="0" max="127" value="1">
-        <div class="help">Ex : CC1 = Modulation, CC7 = Volume, CC11 = Expression</div>
+        <div class="help">E.g.: CC1 = Modulation, CC7 = Volume, CC11 = Expression</div>
       </div>
       <div class="form-group">
-        <label>Type de contr&ocirc;le</label>
+        <label>Control type</label>
         <select id="cc-category" class="form-select" onchange="toggleCCCategory()">
-          <option value="position">Position servo (d&eacute;placement direct)</option>
-          <option value="modifier">Modificateur (amplitude / vitesse)</option>
+          <option value="position">Servo position (direct movement)</option>
+          <option value="modifier">Modifier (amplitude / speed)</option>
         </select>
       </div>
     </div>
@@ -813,24 +813,24 @@ tr:hover td{background:var(--bg2)}
     <!-- Category: Position — free servo -->
     <div id="cc-cat-position">
       <div class="form-group">
-        <label>Servo d&eacute;di&eacute;</label>
+        <label>Dedicated servo</label>
         <select id="cc-actuator-free" class="form-select"></select>
-        <div class="help">Seuls les servos non assign&eacute;s &agrave; un instrument sont list&eacute;s</div>
+        <div class="help">Only servos not assigned to an instrument are listed</div>
       </div>
       <div id="cc-create-servo-hint" style="display:none;margin:-4px 0 10px">
-        <span style="color:var(--yellow);font-size:12px">Aucun servo libre.</span>
-        <button class="btn sm" onclick="quickCreateServoForCC()" style="margin-left:6px">Cr&eacute;er un servo</button>
+        <span style="color:var(--yellow);font-size:12px">No free servo.</span>
+        <button class="btn sm" onclick="quickCreateServoForCC()" style="margin-left:6px">Create a servo</button>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>Angle min (&deg;)</label>
           <input type="number" id="cc-pos-min" min="0" max="180" value="0">
-          <div class="help">Position quand CC = 0</div>
+          <div class="help">Position when CC = 0</div>
         </div>
         <div class="form-group">
           <label>Angle max (&deg;)</label>
           <input type="number" id="cc-pos-max" min="0" max="180" value="180">
-          <div class="help">Position quand CC = 127</div>
+          <div class="help">Position when CC = 127</div>
         </div>
       </div>
     </div>
@@ -838,36 +838,36 @@ tr:hover td{background:var(--bg2)}
     <!-- Category: Modifier — instrument servo -->
     <div id="cc-cat-modifier" style="display:none">
       <div class="form-group">
-        <label>Servo de l'instrument</label>
+        <label>Instrument servo</label>
         <select id="cc-actuator-inst" class="form-select" onchange="updateCCServoInfo()"></select>
-        <div class="help">Servos assign&eacute;s &agrave; l'instrument s&eacute;lectionn&eacute;</div>
+        <div class="help">Servos assigned to the selected instrument</div>
       </div>
       <div id="cc-servo-info" style="display:none;background:var(--bg3);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:var(--fg2)"></div>
       <div class="form-group">
-        <label>Param&egrave;tre &agrave; modifier</label>
+        <label>Parameter to modify</label>
         <select id="cc-mod-target" class="form-select" onchange="updateCCModRangeHints()">
-          <option value="1">Amplitude &mdash; course de frappe (&deg;)</option>
-          <option value="2">Vitesse &mdash; dur&eacute;e du mouvement (ms)</option>
+          <option value="1">Amplitude &mdash; strike range (&deg;)</option>
+          <option value="2">Speed &mdash; movement duration (ms)</option>
         </select>
-        <div class="help" id="cc-mod-help">Modifie la course de frappe en temps r&eacute;el pour les prochaines notes</div>
+        <div class="help" id="cc-mod-help">Modifies the strike range in real time for upcoming notes</div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Valeur min <span id="cc-mod-min-unit">(&deg;)</span></label>
+          <label>Min value <span id="cc-mod-min-unit">(&deg;)</span></label>
           <input type="number" id="cc-mod-min" value="0">
-          <div class="help">Valeur quand CC = 0</div>
+          <div class="help">Value when CC = 0</div>
         </div>
         <div class="form-group">
-          <label>Valeur max <span id="cc-mod-max-unit">(&deg;)</span></label>
+          <label>Max value <span id="cc-mod-max-unit">(&deg;)</span></label>
           <input type="number" id="cc-mod-max" value="180">
-          <div class="help">Valeur quand CC = 127</div>
+          <div class="help">Value when CC = 127</div>
         </div>
       </div>
     </div>
 
     <div class="btn-row">
-      <button class="btn primary" id="cc-save-btn" onclick="saveCC()">Ajouter</button>
-      <button class="btn" onclick="closeModal('modal-cc')">Annuler</button>
+      <button class="btn primary" id="cc-save-btn" onclick="saveCC()">Add</button>
+      <button class="btn" onclick="closeModal('modal-cc')">Cancel</button>
     </div>
   </div>
 </div>
@@ -875,90 +875,90 @@ tr:hover td{background:var(--bg2)}
 <!-- Wizard Instrument -->
 <div class="modal-overlay" id="modal-wizard">
   <div class="modal" style="max-width:550px">
-    <h2>Assistant de cr&eacute;ation d'instrument</h2>
+    <h2>Instrument creation wizard</h2>
     <div class="wiz-steps" id="wiz-steps">
-      <div class="wiz-step-item active" id="wiz-item-1"><div class="wiz-dot active" id="wiz-dot-1">1</div><div class="wiz-step-label">Identit&eacute;</div></div>
+      <div class="wiz-step-item active" id="wiz-item-1"><div class="wiz-dot active" id="wiz-dot-1">1</div><div class="wiz-step-label">Identity</div></div>
       <div class="wiz-connector" id="wiz-conn-1"></div>
       <div class="wiz-step-item" id="wiz-item-2"><div class="wiz-dot" id="wiz-dot-2">2</div><div class="wiz-step-label">Type</div></div>
       <div class="wiz-connector" id="wiz-conn-2"></div>
       <div class="wiz-step-item" id="wiz-item-3"><div class="wiz-dot" id="wiz-dot-3">3</div><div class="wiz-step-label">Notes</div></div>
       <div class="wiz-connector" id="wiz-conn-3"></div>
-      <div class="wiz-step-item" id="wiz-item-4"><div class="wiz-dot" id="wiz-dot-4">4</div><div class="wiz-step-label">Cr&eacute;ation</div></div>
+      <div class="wiz-step-item" id="wiz-item-4"><div class="wiz-dot" id="wiz-dot-4">4</div><div class="wiz-step-label">Creation</div></div>
     </div>
 
     <!-- Step 1: Identity -->
     <div id="wiz-step-1" class="wiz-panel">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Identit&eacute; de l'instrument</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Instrument identity</div>
       <div class="form-group">
-        <label>Nom</label>
-        <input type="text" id="wiz-name" maxlength="31" placeholder="Ex: Xylophone, Caisse claire...">
+        <label>Name</label>
+        <input type="text" id="wiz-name" maxlength="31" placeholder="E.g.: Xylophone, Snare drum...">
       </div>
       <div class="form-group">
-        <label>Canal MIDI (0=Omni, 1-16)</label>
+        <label>MIDI Channel (0=Omni, 1-16)</label>
         <input type="number" id="wiz-channel" min="0" max="16" value="1">
-        <div class="help">0 = tous les canaux, 1-16 = canal sp&eacute;cifique</div>
+        <div class="help">0 = all channels, 1-16 = specific channel</div>
       </div>
     </div>
 
     <!-- Step 2: Actuator type -->
     <div id="wiz-step-2" class="wiz-panel" style="display:none">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Type d'actionneurs</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Actuator type</div>
       <div class="form-group">
         <label>Type</label>
         <select id="wiz-type" onchange="wizUpdateBehaviors()">
-          <option value="0">Servo-moteur (mouvement rotatif)</option>
-          <option value="1">Sol&eacute;no&iuml;de (frappe lin&eacute;aire)</option>
+          <option value="0">Servo motor (rotary motion)</option>
+          <option value="1">Solenoid (linear strike)</option>
         </select>
-        <div class="help">Tous les actionneurs utiliseront ce type</div>
+        <div class="help">All actuators will use this type</div>
       </div>
       <div class="form-group">
-        <label>Mode de jeu</label>
+        <label>Play mode</label>
         <select id="wiz-behavior"></select>
-        <div class="help">Comportement par d&eacute;faut pour tous les actionneurs</div>
+        <div class="help">Default behavior for all actuators</div>
       </div>
     </div>
 
     <!-- Step 3: Notes + PCA -->
     <div id="wiz-step-3" class="wiz-panel" style="display:none">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Attribution des notes MIDI</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">MIDI note assignment</div>
       <div class="form-row tri">
         <div class="form-group">
-          <label>Actionneurs</label>
+          <label>Actuators</label>
           <input type="number" id="wiz-count" min="1" max="64" value="8" oninput="wizBuildNoteTable()">
         </div>
         <div class="form-group">
-          <label>Gamme</label>
+          <label>Scale</label>
           <select id="wiz-scale" onchange="wizBuildNoteTable()">
-            <option value="chromatic">Chromatique (demi-tons)</option>
-            <option value="major">Majeur (do r&eacute; mi fa sol la si)</option>
-            <option value="pentatonic">Pentatonique (5 notes)</option>
+            <option value="chromatic">Chromatic (semitones)</option>
+            <option value="major">Major (C D E F G A B)</option>
+            <option value="pentatonic">Pentatonic (5 notes)</option>
           </select>
         </div>
         <div class="form-group">
-          <label>Note de d&eacute;part</label>
+          <label>Start note</label>
           <input type="number" id="wiz-start-note" min="0" max="127" value="48" oninput="wizBuildNoteTable()">
           <div class="help">C3=48, C4=60</div>
         </div>
       </div>
-      <div class="help" style="margin-bottom:4px">Modifiez chaque note individuellement si n&eacute;cessaire :</div>
+      <div class="help" style="margin-bottom:4px">Edit each note individually if needed:</div>
       <div class="wiz-note-table" id="wiz-note-table"></div>
       <div class="expert-section">
-        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">R&eacute;glages PCA avanc&eacute;s</button>
+        <button type="button" class="expert-toggle" onclick="toggleExpert(this)">Advanced PCA settings</button>
         <div class="expert-body">
           <div class="form-row">
             <div class="form-group">
-              <label>Carte PCA de d&eacute;part</label>
+              <label>Starting PCA board</label>
               <select id="wiz-pca">
-                <option value="64">0x40 (carte 1)</option>
-                <option value="65">0x41 (carte 2)</option>
-                <option value="66">0x42 (carte 3)</option>
-                <option value="67">0x43 (carte 4)</option>
+                <option value="64">0x40 (board 1)</option>
+                <option value="65">0x41 (board 2)</option>
+                <option value="66">0x42 (board 3)</option>
+                <option value="67">0x43 (board 4)</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Canal PCA de d&eacute;part</label>
+              <label>Starting PCA channel</label>
               <input type="number" id="wiz-start-ch" min="0" max="15" value="0">
-              <div class="help">Auto-incr&eacute;ment&eacute;</div>
+              <div class="help">Auto-incremented</div>
             </div>
           </div>
         </div>
@@ -967,90 +967,90 @@ tr:hover td{background:var(--bg2)}
 
     <!-- Step 4: Review -->
     <div id="wiz-step-4" class="wiz-panel" style="display:none">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">R&eacute;sum&eacute;</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Summary</div>
       <div id="wiz-summary" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-size:13px;line-height:1.8"></div>
     </div>
 
     <div class="btn-row" style="margin-top:16px">
-      <button class="btn" id="wiz-prev" onclick="wizPrev()" style="display:none">&larr; Pr&eacute;c&eacute;dent</button>
-      <button class="btn primary" id="wiz-next" onclick="wizNext()">Suivant &rarr;</button>
-      <button class="btn" onclick="closeModal('modal-wizard')">Annuler</button>
+      <button class="btn" id="wiz-prev" onclick="wizPrev()" style="display:none">&larr; Previous</button>
+      <button class="btn primary" id="wiz-next" onclick="wizNext()">Next &rarr;</button>
+      <button class="btn" onclick="closeModal('modal-wizard')">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- ============ CALIBRATION (Actionneurs + CC + Calibration acoustique) ============ -->
-<!-- ============ ACTIONNEURS (table + CC mapping) ============ -->
+<!-- ============ CALIBRATION (Actuators + CC + Acoustic Calibration) ============ -->
+<!-- ============ ACTUATORS (table + CC mapping) ============ -->
 <div class="page" id="page-actuators">
 
-  <!-- === Actionneurs === -->
-  <div class="section-title"><span>Actionneurs</span>
-    <button class="btn primary sm" onclick="openActuatorModal()">+ Ajouter</button>
+  <!-- === Actuators === -->
+  <div class="section-title"><span>Actuators</span>
+    <button class="btn primary sm" onclick="openActuatorModal()">+ Add</button>
   </div>
   <div class="table-responsive">
   <table>
-    <thead><tr><th>ID</th><th>Type</th><th>Note MIDI</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>&Eacute;tat</th><th>Actions</th></tr></thead>
-    <tbody id="actuators-table"><tr><td colspan="9" style="color:var(--fg2)">Chargement...</td></tr></tbody>
+    <thead><tr><th>ID</th><th>Type</th><th>MIDI Note</th><th>Bus</th><th>PCA</th><th>Ch</th><th>Mode</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody id="actuators-table"><tr><td colspan="9" style="color:var(--fg2)">Loading...</td></tr></tbody>
   </table>
   </div>
 
   <!-- === CC Mapping === -->
   <div class="section-title" style="margin-top:20px"><span>Control Changes (CC)</span>
-    <button class="btn primary sm" onclick="openAddCCModal()">+ Ajouter CC</button>
+    <button class="btn primary sm" onclick="openAddCCModal()">+ Add CC</button>
   </div>
   <div style="margin-bottom:8px">
     <select id="cc-instrument" onchange="loadCCRouting()" class="form-select" style="max-width:250px"></select>
   </div>
-  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Position : d&eacute;place un servo d&eacute;di&eacute;. Modificateur : ajuste amplitude ou vitesse d'un servo instrument.</p>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:8px">Position: moves a dedicated servo. Modifier: adjusts amplitude or speed of an instrument servo.</p>
   <div class="table-responsive">
   <table>
-    <thead><tr><th>CC#</th><th>Type</th><th>Servo</th><th>Action</th><th>Plage</th><th>Actions</th></tr></thead>
-    <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">S&eacute;lectionner un instrument</td></tr></tbody>
+    <thead><tr><th>CC#</th><th>Type</th><th>Servo</th><th>Action</th><th>Range</th><th>Actions</th></tr></thead>
+    <tbody id="mapping-cc-table"><tr><td colspan="6" style="color:var(--fg2)">Select an instrument</td></tr></tbody>
   </table>
   </div>
 </div>
 
-<!-- ============ CALIBRATION ACOUSTIQUE (visible uniquement si micro) ============ -->
+<!-- ============ ACOUSTIC CALIBRATION (visible only if microphone present) ============ -->
 <div class="page" id="page-calibration">
-  <div class="section-title">Calibration Acoustique</div>
-  <div class="mic-status" id="mic-status">V&eacute;rification du microphone...</div>
+  <div class="section-title">Acoustic Calibration</div>
+  <div class="mic-status" id="mic-status">Checking microphone...</div>
   <div id="cal-controls">
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
       <div class="card">
-        <h3>&Eacute;tat</h3>
-        <div class="val" id="cal-state" style="font-size:18px">Inactif</div>
+        <h3>Status</h3>
+        <div class="val" id="cal-state" style="font-size:18px">Inactive</div>
       </div>
       <div class="card">
-        <h3>Progression</h3>
+        <h3>Progress</h3>
         <div class="val"><span id="cal-progress">0</span><span class="unit">%</span></div>
         <div class="bar"><div class="bar-fill" id="cal-bar" style="width:0%;background:var(--accent)"></div></div>
       </div>
       <div class="card">
-        <h3>Actionneur</h3>
+        <h3>Actuator</h3>
         <div class="val" id="cal-cur-act">&mdash;</div>
       </div>
       <div class="card">
-        <h3>R&eacute;sultats</h3>
-        <div class="val"><span id="cal-result-count">0</span><span class="unit">mesures</span></div>
+        <h3>Results</h3>
+        <div class="val"><span id="cal-result-count">0</span><span class="unit">measurements</span></div>
       </div>
     </div>
     <div class="btn-row" style="margin:16px 0">
-      <button class="btn primary sm" onclick="startCalibrateAll()">&#9654; Calibrer tous</button>
-      <button class="btn sm" onclick="startCalibrateOne()" id="cal-btn-one">Calibrer un...</button>
-      <button class="btn danger sm" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Arr&ecirc;ter</button>
-      <button class="btn sm" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Appliquer</button>
+      <button class="btn primary sm" onclick="startCalibrateAll()">&#9654; Calibrate all</button>
+      <button class="btn sm" onclick="startCalibrateOne()" id="cal-btn-one">Calibrate one...</button>
+      <button class="btn danger sm" onclick="stopCalibration()" id="cal-btn-stop" style="display:none">Stop</button>
+      <button class="btn sm" onclick="applyCalibrateResults()" id="cal-btn-apply" style="display:none">&#10003; Apply</button>
       <button class="btn sm" onclick="loadCalibrateResults()" style="margin-left:auto">&#8635;</button>
     </div>
     <div id="cal-single-sel" style="display:none;margin-bottom:12px">
-      <label style="font-size:13px;margin-right:8px">Actionneur :</label>
+      <label style="font-size:13px;margin-right:8px">Actuator:</label>
       <select id="cal-act-select" class="form-select"></select>
       <button class="btn primary sm" style="margin-left:8px" onclick="confirmCalibrateOne()">Go</button>
       <button class="btn sm" style="margin-left:4px" onclick="document.getElementById('cal-single-sel').style.display='none'">&#10005;</button>
     </div>
     <div class="table-responsive">
     <table>
-      <thead><tr><th>ID</th><th>Type</th><th>Latence actuelle</th><th>Latence mesur&eacute;e</th><th>Mesures</th><th>&Eacute;tat</th></tr></thead>
-      <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Lancez une calibration</td></tr></tbody>
+      <thead><tr><th>ID</th><th>Type</th><th>Current latency</th><th>Measured latency</th><th>Measurements</th><th>Status</th></tr></thead>
+      <tbody id="cal-results-table"><tr><td colspan="6" style="color:var(--fg2);text-align:center">Start a calibration</td></tr></tbody>
     </table>
     </div>
   </div>
@@ -1073,9 +1073,9 @@ let pressedKeys = {}; // "instIdx-note" -> true (keys currently held down by use
 let editingInstrumentIdx = -1;
 let editingActuatorId = -1;
 
-const SERVO_BEHAVIORS = ['Frappe','Alterné','Gratter','Touche'];
-const SOL_BEHAVIORS = ['Frappe','Hit-and-Hold'];
-const CC_TARGETS = ['Position (\u00b0)','Amplitude (\u00b0)','Vitesse (ms)','PWM maintien'];
+const SERVO_BEHAVIORS = ['Strike','Alternate','Strum','Key'];
+const SOL_BEHAVIORS = ['Strike','Hit-and-Hold'];
+const CC_TARGETS = ['Position (\u00b0)','Amplitude (\u00b0)','Speed (ms)','PWM hold'];
 const CC_TARGET_UNITS = ['\u00b0','\u00b0','ms',''];
 const CC_TARGET_RANGES = [[0,180],[0,180],[10,2000],[0,4095]];
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -1101,17 +1101,17 @@ function connectWS() {
 
   ws.onopen = () => {
     wsConnected = true;
-    // AUDIT FIX : reset du compteur de logs à -1 pour forcer un refresh
-    // au premier message (gère le cas redémarrage serveur + client déjà connecté)
+    // AUDIT FIX: reset log counter to -1 to force a refresh
+    // on the first message (handles case of server restart + already connected client)
     logLastCount = -1;
     document.getElementById('ws-dot').className = 'dot';
-    document.getElementById('ws-status').textContent = 'Connecté';
+    document.getElementById('ws-status').textContent = 'Connected';
   };
 
   ws.onclose = () => {
     wsConnected = false;
     document.getElementById('ws-dot').className = 'dot off';
-    document.getElementById('ws-status').textContent = 'Déconnecté';
+    document.getElementById('ws-status').textContent = 'Disconnected';
     setTimeout(connectWS, 2000);
   };
 
@@ -1124,7 +1124,7 @@ function connectWS() {
       // MIDI messages received via WebSocket
       if (d.midi_msg) pushMidiLog(d.midi_msg);
       if (d.midi_msgs) for (const m of d.midi_msgs) pushMidiLog(m);
-      // Refresh logs si nouvelles entrées détectées
+      // Refresh logs if new entries detected
       if (d.log_count !== undefined && d.log_count !== logLastCount) {
         logLastCount = d.log_count;
         if (currentPage === 'settings') loadLogs();
@@ -1173,7 +1173,7 @@ function updateDashboard(d) {
     }
     const degEl = document.getElementById('s-degrad');
     if (degEl) {
-      degEl.textContent = d.safety.degradation ? 'Oui' : 'Non';
+      degEl.textContent = d.safety.degradation ? 'Yes' : 'No';
       degEl.style.color = d.safety.degradation ? 'var(--yellow)' : 'var(--green)';
     }
 
@@ -1184,7 +1184,7 @@ function updateDashboard(d) {
   // WiFi
   if (d.wifi) {
     el('d-wifi-rssi', d.wifi.rssi ? d.wifi.rssi + ' dBm' : 'N/A');
-    el('d-wifi-status', d.wifi.connected ? 'Connecté' : 'Déconnecté');
+    el('d-wifi-status', d.wifi.connected ? 'Connected' : 'Disconnected');
   }
 
   // Update piano active notes
@@ -1196,19 +1196,19 @@ function updateDashboard(d) {
 function updateAlerts(d) {
   let html = '';
   if (d.safety && d.safety.kill_switch) {
-    html += '<div class="alert danger">KILL SWITCH ACTIF — Toutes les sorties sont désactivées</div>';
+    html += '<div class="alert danger">KILL SWITCH ACTIVE — All outputs are disabled</div>';
   }
   if (d.safety && d.safety.degradation) {
-    html += '<div class="alert warn">DÉGRADATION — Approche du seuil de sécurité</div>';
+    html += '<div class="alert warn">DEGRADATION — Approaching safety threshold</div>';
   }
   if (d.power && d.power.degradation) {
-    html += '<div class="alert warn">BUDGET POWER — Dégradation gracieuse active</div>';
+    html += '<div class="alert warn">POWER BUDGET — Graceful degradation active</div>';
   }
   document.getElementById('alert-zone').innerHTML = html;
 
   let safetyHtml = '';
   if (d.safety && d.safety.kill_switch) {
-    safetyHtml += '<div class="alert danger">KILL SWITCH ACTIF</div>';
+    safetyHtml += '<div class="alert danger">KILL SWITCH ACTIVE</div>';
   }
   const sz = document.getElementById('safety-alert-zone');
   if (sz) sz.innerHTML = safetyHtml;
@@ -1278,12 +1278,12 @@ function loadHomeInstruments_render() {
   const tbody = document.getElementById('home-instruments-table');
   if (!tbody) return;
   if (!instruments || instruments.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">Aucun instrument &mdash; utilisez l\'assistant pour commencer</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">No instrument &mdash; use the wizard to get started</td></tr>';
     return;
   }
   let html = '';
   for (const inst of instruments) {
-    const busType = inst.bus_id === 0 ? 'Servos' : 'Sol\u00e9no\u00efdes';
+    const busType = inst.bus_id === 0 ? 'Servos' : 'Solenoids';
     // Compute actuator count from routing if backend sends 0
     let actCount = inst.actuator_count || 0;
     if (actCount === 0 && routing) {
@@ -1295,9 +1295,9 @@ function loadHomeInstruments_render() {
     html += '<td>' + (inst.channel === 0 ? 'Omni' : 'Ch. ' + inst.channel) + '</td>';
     html += '<td>' + busType + '</td>';
     html += '<td>' + actCount + '</td>';
-    html += '<td>' + (inst.enabled ? '<span class="badge on">Actif</span>' : '<span class="badge off">Inactif</span>') + '</td>';
-    html += '<td><button class="btn sm" onclick="editInstrument(' + inst.index + ')">\u00c9diter</button> ';
-    html += '<button class="btn sm" onclick="deleteInstrument(' + inst.index + ')">Suppr</button></td>';
+    html += '<td>' + (inst.enabled ? '<span class="badge on">Active</span>' : '<span class="badge off">Inactive</span>') + '</td>';
+    html += '<td><button class="btn sm" onclick="editInstrument(' + inst.index + ')">Edit</button> ';
+    html += '<button class="btn sm" onclick="deleteInstrument(' + inst.index + ')">Delete</button></td>';
     html += '</tr>';
   }
   tbody.innerHTML = html;
@@ -1310,7 +1310,7 @@ function openInstrumentModal() {
   document.getElementById('mi-bus').value = '0';
   document.getElementById('mi-latency').value = '10';
   document.getElementById('mi-autocal').value = '0';
-  document.getElementById('modal-inst-title').textContent = 'Nouvel instrument';
+  document.getElementById('modal-inst-title').textContent = 'New instrument';
   document.getElementById('modal-instrument').classList.add('show');
 }
 
@@ -1323,7 +1323,7 @@ function editInstrument(idx) {
   document.getElementById('mi-bus').value = inst.bus_id;
   document.getElementById('mi-latency').value = inst.latency_ms;
   document.getElementById('mi-autocal').value = inst.auto_cal ? '1' : '0';
-  document.getElementById('modal-inst-title').textContent = 'Modifier ' + inst.name;
+  document.getElementById('modal-inst-title').textContent = 'Edit ' + inst.name;
   document.getElementById('modal-instrument').classList.add('show');
 }
 
@@ -1332,7 +1332,7 @@ function closeModal(id) {
 }
 
 // Themed confirm/alert modals (replace native confirm/alert)
-function appConfirm(title, message, {confirmText='Confirmer', cancelText='Annuler', danger=false, icon='\u26a0\ufe0f'}={}) {
+function appConfirm(title, message, {confirmText='Confirm', cancelText='Cancel', danger=false, icon='\u26a0\ufe0f'}={}) {
   return new Promise(resolve => {
     document.getElementById('confirm-icon').textContent = icon;
     document.getElementById('confirm-title').textContent = title;
@@ -1392,7 +1392,7 @@ async function saveInstrument() {
 }
 
 async function deleteInstrument(idx) {
-  if (!await appConfirm('Supprimer l\u2019instrument', 'Cette action supprimera l\u2019instrument et ses mappings.', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
+  if (!await appConfirm('Delete instrument', 'This will delete the instrument and its mappings.', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   await api('/api/instrument?index=' + idx, 'DELETE');
   instruments = [];  // Force refresh
   routing = await api('/api/routing') || [];
@@ -1431,7 +1431,7 @@ async function loadActuatorsWithNotes() {
   const noteMap = buildActNoteMap();
   const tbody = document.getElementById('actuators-table');
   if (!actuators || actuators.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--fg2)">Aucun actionneur configur&eacute;</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--fg2)">No actuator configured</td></tr>';
     return;
   }
   // Group actuators by instrument
@@ -1453,7 +1453,7 @@ async function loadActuatorsWithNotes() {
     const nm = noteMap[act.id];
     html += '<tr>';
     html += '<td>' + act.id + '</td>';
-    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Sol\u00e9no\u00efde</span>') + '</td>';
+    html += '<td>' + (isServo ? '<span class="badge servo">Servo</span>' : '<span class="badge sol">Solenoid</span>') + '</td>';
     html += '<td><input class="note-input" type="number" min="0" max="127" value="' + (nm ? nm.note : '') + '" placeholder="-" '
       + 'onchange="setActuatorNote(' + act.id + ',this.value)">';
     if (nm) html += '<span class="note-label">' + noteName(nm.note) + '</span>';
@@ -1462,10 +1462,10 @@ async function loadActuatorsWithNotes() {
     html += '<td>0x' + act.pca_addr.toString(16).toUpperCase() + '</td>';
     html += '<td>' + act.pca_ch + '</td>';
     html += '<td>' + (behaviors[act.behavior] || '?') + '</td>';
-    html += '<td>' + (act.state && act.state.active ? '<span class="badge on">Actif</span>' : '<span class="badge off">Repos</span>') + '</td>';
-    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">\u00c9diter</button> ';
+    html += '<td>' + (act.state && act.state.active ? '<span class="badge on">Active</span>' : '<span class="badge off">Idle</span>') + '</td>';
+    html += '<td><button class="btn sm" onclick="editActuator(' + act.id + ')">Edit</button> ';
     html += '<button class="btn sm" onclick="testActuator(' + act.id + ')">Test</button> ';
-    html += '<button class="btn sm" onclick="deleteActuator(' + act.id + ')">Suppr</button></td>';
+    html += '<button class="btn sm" onclick="deleteActuator(' + act.id + ')">Delete</button></td>';
     html += '</tr>';
   }
   // Render each instrument group
@@ -1477,7 +1477,7 @@ async function loadActuatorsWithNotes() {
   }
   // Unassigned actuators
   if (unassigned.length > 0) {
-    html += '<tr class="inst-separator"><td colspan="9">Non assign\u00e9s <span style="font-weight:400;color:var(--fg2)">(' + unassigned.length + ')</span></td></tr>';
+    html += '<tr class="inst-separator"><td colspan="9">Unassigned <span style="font-weight:400;color:var(--fg2)">(' + unassigned.length + ')</span></td></tr>';
     for (const act of unassigned) renderRow(act);
   }
   tbody.innerHTML = html;
@@ -1532,11 +1532,11 @@ function toggleServoDirection() {
   const altFields = document.getElementById('servo-alterne-fields');
   const mode = document.getElementById('ma-servo-behavior').value;
   const isAlterne = mode === '1';
-  // Show direction only for frappe (0) and touche (3)
+  // Show direction only for strike (0) and key (3)
   if (el) el.style.display = (mode === '0' || mode === '3') ? 'block' : 'none';
-  // Show standard fields (repos + amplitude) for all modes except alterné
+  // Show standard fields (idle + amplitude) for all modes except alternate
   if (stdFields) stdFields.style.display = isAlterne ? 'none' : '';
-  // Show angle A / angle B only for alterné
+  // Show angle A / angle B only for alternate
   if (altFields) altFields.style.display = isAlterne ? '' : 'none';
   updateAnglePreview();
 }
@@ -1577,7 +1577,7 @@ function openActuatorModal() {
   document.getElementById('ma-pwm-hold').value = '2048';
   document.getElementById('ma-ramp').value = '50';
   toggleActuatorFields();
-  document.getElementById('modal-act-title').textContent = 'Nouvel actionneur';
+  document.getElementById('modal-act-title').textContent = 'New actuator';
   document.getElementById('modal-actuator').classList.add('show');
   updateAnglePreview();
 }
@@ -1611,7 +1611,7 @@ function editActuator(id) {
     document.getElementById('ma-ramp').value = act.ramp_ms || 50;
     toggleHitHoldFields();
   }
-  document.getElementById('modal-act-title').textContent = 'Modifier actionneur #' + id;
+  document.getElementById('modal-act-title').textContent = 'Edit actuator #' + id;
   document.getElementById('modal-actuator').classList.add('show');
   updateAnglePreview();
 }
@@ -1631,7 +1631,7 @@ async function saveActuator() {
   if (type === 0) { // Servo
     data.behavior = parseInt(document.getElementById('ma-servo-behavior').value);
     data.hit_reverse = document.getElementById('ma-hit-reverse').value === '1';
-    if (data.behavior === 1) { // Alterné: use angle A/B fields
+    if (data.behavior === 1) { // Alternate: use angle A/B fields
       data.angle_init = parseInt(document.getElementById('ma-angle-a-alt').value);
       data.amplitude = 0;
     } else {
@@ -1664,7 +1664,7 @@ async function testActuator(id) {
 }
 
 async function deleteActuator(id) {
-  if (!await appConfirm('Supprimer l\u2019actionneur', 'Supprimer l\u2019actionneur #' + id + ' ?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
+  if (!await appConfirm('Delete actuator', 'Delete actuator #' + id + '?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   await api('/api/actuator?id=' + id, 'DELETE');
   loadActuatorsWithNotes();
 }
@@ -1703,7 +1703,7 @@ const MIDI_TYPE_NAMES = {
   0x80:'Note Off', 0x90:'Note On', 0xA0:'Aftertouch', 0xB0:'CC',
   0xC0:'Program', 0xD0:'Ch Pressure', 0xE0:'Pitch Bend'
 };
-const MIDI_SOURCE_NAMES = {serial:'C\u00e2ble', udp:'UDP', rtp:'RTP'};
+const MIDI_SOURCE_NAMES = {serial:'Cable', udp:'UDP', rtp:'RTP'};
 
 function formatMidiData(m) {
   const t = m.type & 0xF0;
@@ -1725,7 +1725,7 @@ function renderMidiLog() {
   const tbody = document.getElementById('midi-log-table');
   if (!tbody) return;
   if (midiLogEntries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">En attente de messages MIDI...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">Waiting for MIDI messages...</td></tr>';
     return;
   }
   let html = '';
@@ -1734,7 +1734,7 @@ function renderMidiLog() {
     const typeName = MIDI_TYPE_NAMES[m.type & 0xF0] || '0x' + m.type.toString(16);
     const ch = (m.type & 0x0F) + 1;
     const src = MIDI_SOURCE_NAMES[m.src] || m.src || '?';
-    const routed = m.routed ? '<span class="badge on">Oui</span>' : '<span class="badge off">Non</span>';
+    const routed = m.routed ? '<span class="badge on">Yes</span>' : '<span class="badge off">No</span>';
     html += '<tr>';
     html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap">' + formatLogTime(m.t || 0) + '</td>';
     html += '<td>' + src + '</td>';
@@ -1764,7 +1764,7 @@ async function loadInstrumentSelects() {
     if (!sel) continue;
     sel.innerHTML = '';
     if (!instruments || instruments.length === 0) {
-      sel.innerHTML = '<option value="">Aucun instrument</option>';
+      sel.innerHTML = '<option value="">No instrument</option>';
       continue;
     }
     for (const inst of instruments) {
@@ -1788,7 +1788,7 @@ async function loadCCRouting() {
   const ctbody = document.getElementById('mapping-cc-table');
   if (!ctbody) return;
   if (!r || !r.ccs || r.ccs.length === 0) {
-    ctbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">Aucun mapping CC</td></tr>';
+    ctbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">No CC mapping</td></tr>';
   } else {
     let html = '';
     for (let ci = 0; ci < r.ccs.length; ci++) {
@@ -1797,12 +1797,12 @@ async function loadCCRouting() {
       const unit = CC_TARGET_UNITS[cm.target] || '';
       html += '<tr>';
       html += '<td>CC ' + cm.cc + '</td>';
-      html += '<td>' + (isPos ? '<span class="badge servo">Position</span>' : '<span class="badge sol">Modif.</span>') + '</td>';
+      html += '<td>' + (isPos ? '<span class="badge servo">Position</span>' : '<span class="badge sol">Modifier</span>') + '</td>';
       html += '<td>Servo #' + cm.actuator + '</td>';
       html += '<td>' + (CC_TARGETS[cm.target] || '?') + '</td>';
       html += '<td>' + cm.min + unit + ' \u2192 ' + cm.max + unit + '</td>';
-      html += '<td><button class="btn sm" onclick="editCC(' + instIdx + ',' + cm.cc + ')">\u00c9diter</button> ';
-      html += '<button class="btn sm" onclick="deleteCC(' + instIdx + ',' + cm.cc + ')">Suppr</button></td>';
+      html += '<td><button class="btn sm" onclick="editCC(' + instIdx + ',' + cm.cc + ')">Edit</button> ';
+      html += '<button class="btn sm" onclick="deleteCC(' + instIdx + ',' + cm.cc + ')">Delete</button></td>';
       html += '</tr>';
     }
     ctbody.innerHTML = html;
@@ -1844,7 +1844,7 @@ function populateFreeServoSelect(selectedActId) {
   }
   const hint = document.getElementById('cc-create-servo-hint');
   if (sel.options.length === 0) {
-    sel.innerHTML = '<option value="">Aucun servo libre</option>';
+    sel.innerHTML = '<option value="">No free servo</option>';
     if (hint) hint.style.display = '';
   } else {
     if (hint) hint.style.display = 'none';
@@ -1874,7 +1874,7 @@ function populateInstServoSelect(instIdx, selectedActId) {
     }
   }
   if (sel.options.length === 0) {
-    sel.innerHTML = '<option value="">Aucun servo dans cet instrument</option>';
+    sel.innerHTML = '<option value="">No servo in this instrument</option>';
   }
 }
 
@@ -1890,9 +1890,9 @@ function updateCCModRangeHints() {
   const unit = CC_TARGET_UNITS[t] || '';
   const help = document.getElementById('cc-mod-help');
   if (t === 1) {
-    if (help) help.textContent = 'Modifie la course de frappe en temps r\u00e9el pour les prochaines notes';
+    if (help) help.textContent = 'Modifies the strike range in real-time for upcoming notes';
   } else {
-    if (help) help.textContent = 'Modifie la dur\u00e9e du mouvement aller (10ms = rapide, 2000ms = lent)';
+    if (help) help.textContent = 'Modifies the forward movement duration (10ms = fast, 2000ms = slow)';
   }
   document.getElementById('cc-mod-min-unit').textContent = unit ? '(' + unit + ')' : '';
   document.getElementById('cc-mod-max-unit').textContent = unit ? '(' + unit + ')' : '';
@@ -1915,7 +1915,7 @@ function updateCCServoInfo() {
   const speed = act.speed_ms || 150;
   const beh = SERVO_BEHAVIORS[act.behavior] || '?';
   let minAngle, maxAngle;
-  if (act.behavior === 1) { // Alterné
+  if (act.behavior === 1) { // Alternate
     minAngle = init;
     maxAngle = act.angle_b !== undefined ? act.angle_b : 120;
   } else if (rev) {
@@ -1926,9 +1926,9 @@ function updateCCServoInfo() {
     maxAngle = Math.min(180, init + amp);
   }
   let s = '<strong>Servo #' + act.id + '</strong> \u2014 ' + beh;
-  s += ' \u2022 Repos : ' + init + '\u00b0';
-  s += ' \u2022 Course : ' + minAngle + '\u00b0 \u2192 ' + maxAngle + '\u00b0';
-  s += ' \u2022 Vitesse : ' + speed + 'ms';
+  s += ' \u2022 Idle: ' + init + '\u00b0';
+  s += ' \u2022 Range: ' + minAngle + '\u00b0 \u2192 ' + maxAngle + '\u00b0';
+  s += ' \u2022 Speed: ' + speed + 'ms';
   infoDiv.innerHTML = s;
   infoDiv.style.display = '';
 }
@@ -1952,7 +1952,7 @@ async function quickCreateServoForCC() {
   await api('/api/actuator', 'POST', data);
   actuators = await api('/api/actuators') || [];
   populateFreeServoSelect(nextId);
-  toast('Servo #' + nextId + ' cr\u00e9\u00e9', 'ok');
+  toast('Servo #' + nextId + ' created', 'ok');
 }
 
 let editingCCNum = -1;
@@ -1971,8 +1971,8 @@ function openAddCCModal() {
   document.getElementById('cc-pos-max').value = '180';
   document.getElementById('cc-mod-target').value = '1';
   updateCCModRangeHints();
-  document.getElementById('modal-cc-title').textContent = 'Ajouter un CC Mapping';
-  document.getElementById('cc-save-btn').textContent = 'Ajouter';
+  document.getElementById('modal-cc-title').textContent = 'Add CC Mapping';
+  document.getElementById('cc-save-btn').textContent = 'Add';
   document.getElementById('modal-cc').classList.add('show');
 }
 
@@ -1998,8 +1998,8 @@ function editCC(instIdx, ccNum) {
   }
   document.getElementById('cc-num').value = cm.cc;
   document.getElementById('cc-num').disabled = true;
-  document.getElementById('modal-cc-title').textContent = '\u00c9diter CC ' + ccNum;
-  document.getElementById('cc-save-btn').textContent = 'Sauvegarder';
+  document.getElementById('modal-cc-title').textContent = 'Edit CC ' + ccNum;
+  document.getElementById('cc-save-btn').textContent = 'Save';
   document.getElementById('modal-cc').classList.add('show');
 }
 
@@ -2020,7 +2020,7 @@ async function saveCC() {
     min = parseInt(document.getElementById('cc-mod-min').value);
     max = parseInt(document.getElementById('cc-mod-max').value);
   }
-  if (isNaN(ccNum) || isNaN(actId)) { toast('Valeurs invalides', 'error'); return; }
+  if (isNaN(ccNum) || isNaN(actId)) { toast('Invalid values', 'error'); return; }
 
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
   let ccs = r && r.ccs ? [...r.ccs] : [];
@@ -2028,13 +2028,13 @@ async function saveCC() {
   ccs.push({cc: ccNum, actuator: actId, target, min, max, enabled: true});
   await api('/api/routing/cc', 'POST', {instrument: instIdx, ccs});
   closeModal('modal-cc');
-  toast(editingCCNum >= 0 ? 'CC ' + ccNum + ' modifi\u00e9' : 'CC ' + ccNum + ' ajout\u00e9', 'ok');
+  toast(editingCCNum >= 0 ? 'CC ' + ccNum + ' updated' : 'CC ' + ccNum + ' added', 'ok');
   editingCCNum = -1;
   loadCCRouting();
 }
 
 async function deleteCC(instIdx, ccNum) {
-  if (!await appConfirm('Supprimer le CC', 'Supprimer le mapping CC ' + ccNum + ' ?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
+  if (!await appConfirm('Delete CC', 'Delete CC mapping ' + ccNum + '?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   const r = routing ? routing.find(x => x.instrument === instIdx) : null;
   if (!r || !r.ccs) return;
   const ccs = r.ccs.filter(c => c.cc !== ccNum);
@@ -2054,7 +2054,7 @@ function buildAllPianos() {
   pressedKeys = {};
 
   if (!instruments || instruments.length === 0) {
-    container.innerHTML = '<p style="color:var(--fg2);font-size:13px;margin-top:16px">Aucun instrument. Utilisez l\'assistant pour cr\u00e9er votre premier instrument.</p>';
+    container.innerHTML = '<p style="color:var(--fg2);font-size:13px;margin-top:16px">No instrument. Use the wizard to create your first instrument.</p>';
     return;
   }
 
@@ -2255,7 +2255,7 @@ async function savePowerBudget() {
   await api('/api/power/budget', 'POST', {
     max_polyphony: parseInt(document.getElementById('pw-poly').value)
   });
-  toast('Polyphonie mise \u00e0 jour', 'ok');
+  toast('Polyphony updated', 'ok');
   loadPower();
 }
 
@@ -2279,7 +2279,7 @@ async function saveSafetyConfig() {
     watchdog_ms: parseInt(document.getElementById('sf-watchdog').value),
     max_polyphony: parseInt(document.getElementById('pw-poly').value)
   });
-  toast('Limites appliqu\u00e9es', 'ok');
+  toast('Limits applied', 'ok');
 }
 
 async function toggleKillSwitch(on) {
@@ -2305,14 +2305,14 @@ async function saveWiFiConfig() {
     ap_fallback: document.getElementById('set-ap-fallback').value === '1',
     enabled: true
   });
-  appAlert('WiFi sauvegard\u00e9', 'Red\u00e9marrer l\u2019appareil pour appliquer les nouveaux param\u00e8tres.', {icon:'\ud83d\udce1'});
+  appAlert('WiFi saved', 'Restart the device to apply the new settings.', {icon:'\ud83d\udce1'});
 }
 
 async function loadBuses() {
   const buses = await api('/api/buses');
   const tbody = document.getElementById('buses-table');
   if (!buses || buses.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--fg2)">Aucun bus d\u00e9tect\u00e9</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--fg2)">No bus detected</td></tr>';
     return;
   }
   let html = '';
@@ -2329,10 +2329,10 @@ async function loadBuses() {
     html += '<td><select class="form-select" style="font-size:12px;min-width:90px" onchange="setBusPwmFreq(' + b.id + ',this.value)">';
     html += '<option value="50"' + pwmSel50 + '>50 Hz (Servo)</option>';
     html += '<option value="200"' + pwmSel200 + '>200 Hz</option>';
-    html += '<option value="1000"' + pwmSel1k + '>1000 Hz (Sol\u00e9no\u00efde)</option>';
+    html += '<option value="1000"' + pwmSel1k + '>1000 Hz (Solenoid)</option>';
     html += '</select></td>';
     html += '<td>' + b.pca_count + ' PCA</td>';
-    html += '<td>' + (b.enabled ? '<span class="badge on">Actif</span>' : '<span class="badge off">Inactif</span>') + '</td>';
+    html += '<td>' + (b.enabled ? '<span class="badge on">Active</span>' : '<span class="badge off">Inactive</span>') + '</td>';
     html += '</tr>';
   }
   tbody.innerHTML = html;
@@ -2340,15 +2340,15 @@ async function loadBuses() {
 
 async function setBusPwmFreq(busId, freq) {
   await api('/api/bus/pwm', 'POST', {bus_id: busId, freq_pwm: parseInt(freq)});
-  toast('Fr\u00e9quence PWM bus ' + busId + ' mise \u00e0 ' + freq + ' Hz', 'ok');
+  toast('PWM frequency bus ' + busId + ' set to ' + freq + ' Hz', 'ok');
 }
 
 async function scanI2C() {
   const result = await api('/api/scan/i2c', 'POST');
   if (result) {
-    let msg = 'Résultat scan I²C:\n';
+    let msg = 'I\u00b2C scan result:\n';
     for (const bus of result) {
-      msg += 'Bus ' + bus.bus + ': ' + bus.pca_count + ' PCA trouvés';
+      msg += 'Bus ' + bus.bus + ': ' + bus.pca_count + ' PCA found';
       if (bus.addresses && bus.addresses.length > 0) {
         msg += ' (' + bus.addresses.join(', ') + ')';
       }
@@ -2362,16 +2362,16 @@ async function scanI2C() {
 async function saveConfig() {
   const result = await api('/api/config/save', 'POST');
   if (result && result.ok) {
-    appAlert('Sauvegarde r\u00e9ussie', 'Configuration sauvegard\u00e9e sur la m\u00e9moire flash.', {icon:'\u2705'});
+    appAlert('Save successful', 'Configuration saved to flash memory.', {icon:'\u2705'});
   } else {
-    appAlert('Erreur', 'La sauvegarde a \u00e9chou\u00e9.', {icon:'\u274c'});
+    appAlert('Error', 'Save failed.', {icon:'\u274c'});
   }
 }
 
 async function confirmResetDefaults() {
-  if (!await appConfirm('R\u00e9initialiser', 'Remettre toute la configuration aux valeurs par d\u00e9faut ?\nCette action est irr\u00e9versible.', {danger:true, confirmText:'R\u00e9initialiser', icon:'\u26a0\ufe0f'})) return;
+  if (!await appConfirm('Reset', 'Reset all configuration to default values?\nThis action is irreversible.', {danger:true, confirmText:'Reset', icon:'\u26a0\ufe0f'})) return;
   await api('/api/config/defaults', 'POST');
-  await appAlert('R\u00e9initialis\u00e9', 'Configuration r\u00e9initialis\u00e9e. La page va se recharger.', {icon:'\u2705'});
+  await appAlert('Reset complete', 'Configuration reset. The page will reload.', {icon:'\u2705'});
   location.reload();
 }
 
@@ -2385,7 +2385,7 @@ function esc(s) {
 }
 
 // ============================================================================
-// Calibration Acoustique (Phase 7)
+// Acoustic Calibration (Phase 7)
 // ============================================================================
 let calPollInterval = null;
 
@@ -2394,9 +2394,9 @@ async function loadCalibrateStatus() {
   if (!d) return;
 
   const stateNames = {
-    idle:'Inactif', ambient:'Mesure ambiant…', triggering:'Déclenchement…',
-    recording:'Enregistrement…', pausing:'Pause…',
-    complete:'Terminé ✓', error:'Erreur ✗'
+    idle:'Inactive', ambient:'Measuring ambient…', triggering:'Triggering…',
+    recording:'Recording…', pausing:'Pausing…',
+    complete:'Complete \u2713', error:'Error \u2717'
   };
   el('cal-state', stateNames[d.state] || d.state);
   el('cal-progress', d.progress || 0);
@@ -2413,10 +2413,10 @@ async function loadCalibrateStatus() {
   if (d.running) {
     el('cal-cur-act', 'Act ' + d.current_act);
   } else {
-    el('cal-cur-act', d.state === 'complete' ? 'Terminé' : '—');
+    el('cal-cur-act', d.state === 'complete' ? 'Complete' : '—');
   }
 
-  // Arrêt du polling quand terminé
+  // Stop polling when complete
   if (!d.running && calPollInterval) {
     clearInterval(calPollInterval);
     calPollInterval = null;
@@ -2428,16 +2428,16 @@ async function loadCalibrateResults() {
   const data = await api('/api/calibrate/results');
   const tbody = document.getElementById('cal-results-table');
   if (!tbody || !data || !data.length) {
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2);text-align:center">Aucun résultat</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2);text-align:center">No results</td></tr>';
     return;
   }
 
-  const typeNames = ['Servo', 'Solénoïde'];
+  const typeNames = ['Servo', 'Solenoid'];
   let html = '';
   for (const r of data) {
     const hasMeasure = r.measured_ms !== null && r.measured_ms !== undefined;
     const badge = hasMeasure
-      ? (r.success ? '<span class="badge on">OK</span>' : '<span class="badge off">Échec</span>')
+      ? (r.success ? '<span class="badge on">OK</span>' : '<span class="badge off">Failed</span>')
       : '<span class="badge" style="background:var(--bg3)">—</span>';
 
     html += '<tr>';
@@ -2453,13 +2453,13 @@ async function loadCalibrateResults() {
 }
 
 async function startCalibrateAll() {
-  if (!await appConfirm('Calibration', 'D\u00e9marrer la calibration de tous les actionneurs ?\nAssurez-vous que le microphone est positionn\u00e9 et que l\u2019environnement est silencieux.', {icon:'\ud83c\udfaf', confirmText:'D\u00e9marrer'})) return;
+  if (!await appConfirm('Calibration', 'Start calibration for all actuators?\nMake sure the microphone is positioned and the environment is quiet.', {icon:'\ud83c\udfaf', confirmText:'Start'})) return;
   api('/api/calibrate', 'POST', { all: true }).then(r => {
     if (r && r.ok) {
-      toast('Calibration démarrée', 'ok');
+      toast('Calibration started', 'ok');
       startCalPoll();
     } else {
-      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+      toast('Error: ' + (r && r.error ? r.error : 'unknown'), 'error');
     }
   });
 }
@@ -2468,7 +2468,7 @@ function startCalibrateOne() {
   const sel = document.getElementById('cal-single-sel');
   const select = document.getElementById('cal-act-select');
   if (!sel || !select) return;
-  // Peupler le select avec les actionneurs connus
+  // Populate the select with known actuators
   select.innerHTML = '';
   for (const a of actuators) {
     const opt = document.createElement('option');
@@ -2485,17 +2485,17 @@ function confirmCalibrateOne() {
   document.getElementById('cal-single-sel').style.display = 'none';
   api('/api/calibrate', 'POST', { id }).then(r => {
     if (r && r.ok) {
-      toast('Calibration démarrée pour act ' + id, 'ok');
+      toast('Calibration started for act ' + id, 'ok');
       startCalPoll();
     } else {
-      toast('Erreur : ' + (r && r.error ? r.error : 'inconnue'), 'error');
+      toast('Error: ' + (r && r.error ? r.error : 'unknown'), 'error');
     }
   });
 }
 
 function stopCalibration() {
   api('/api/calibrate/stop', 'POST', {}).then(() => {
-    toast('Calibration arrêtée', 'warn');
+    toast('Calibration stopped', 'warn');
     loadCalibrateStatus();
   });
 }
@@ -2503,11 +2503,11 @@ function stopCalibration() {
 async function applyCalibrateResults() {
   const r = await api('/api/calibrate/apply', 'POST', {});
   if (r && r.ok) {
-    toast(r.applied + ' latences appliquées aux actionneurs', 'ok');
+    toast(r.applied + ' latencies applied to actuators', 'ok');
     loadActuators();
     loadCalibrateResults();
   } else {
-    toast('Erreur lors de l\'application', 'error');
+    toast('Error during application', 'error');
   }
 }
 
@@ -2557,7 +2557,7 @@ function formatLogTime(ms) {
 }
 
 function escHtml(s) {
-  // AUDIT FIX : ajout des guillemets pour une protection XSS complète (attributs HTML)
+  // AUDIT FIX: added quotes for complete XSS protection (HTML attributes)
   return String(s)
     .replace(/&/g,'&amp;')
     .replace(/</g,'&lt;')
@@ -2573,7 +2573,7 @@ async function loadLogs() {
       logCache = r.entries;
       renderLogs();
       const info = document.getElementById('log-count-info');
-      if (info) info.textContent = logCache.length + ' entrée(s) — ' + r.count + ' au total';
+      if (info) info.textContent = logCache.length + ' entry(ies) — ' + r.count + ' total';
     }
   } catch(e) {}
 }
@@ -2587,7 +2587,7 @@ function renderLogs() {
   const filtered = logCache.filter(e => e.lvl >= minLevel && (catFilter < 0 || e.cat === catFilter));
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg2)">Aucune entrée</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg2)">No entries</td></tr>';
     return;
   }
 
@@ -2602,7 +2602,7 @@ function renderLogs() {
   }
   tbody.innerHTML = html;
 
-  // AUDIT FIX : sélecteur robuste via classe dédiée .log-container
+  // AUDIT FIX: robust selector via dedicated .log-container class
   if (document.getElementById('log-autoscroll')?.checked) {
     const wrap = tbody.closest('.log-container');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
@@ -2610,14 +2610,14 @@ function renderLogs() {
 }
 
 async function clearLogs() {
-  if (!await appConfirm('Effacer le journal', 'Supprimer toutes les entr\u00e9es du journal syst\u00e8me ?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
+  if (!await appConfirm('Clear log', 'Delete all system log entries?', {danger:true, icon:'\ud83d\uddd1\ufe0f'})) return;
   api('/api/logs/clear', 'POST', {}).then(r => {
     if (r && r.ok) {
       logCache = [];
       renderLogs();
-      toast('Journal effacé', 'ok');
+      toast('Log cleared', 'ok');
     } else {
-      toast('Erreur', 'error');
+      toast('Error', 'error');
     }
   });
 }
@@ -2674,8 +2674,8 @@ function wizUpdateBehaviors() {
   const sel = document.getElementById('wiz-behavior');
   sel.innerHTML = '';
   const behaviors = type === '0'
-    ? [{v:0,t:'Frappe (aller-retour rapide)'},{v:1,t:'Alterné (bascule A/B)'},{v:2,t:'Gratter (mouvement continu)'},{v:3,t:'Touche (maintien appuyé)'}]
-    : [{v:0,t:'Frappe (impulsion courte)'},{v:1,t:'Hit-and-Hold (frappe puis maintien)'}];
+    ? [{v:0,t:'Strike (quick back-and-forth)'},{v:1,t:'Alternate (toggle A/B)'},{v:2,t:'Strum (continuous motion)'},{v:3,t:'Key (hold while pressed)'}]
+    : [{v:0,t:'Strike (short pulse)'},{v:1,t:'Hit-and-Hold (strike then hold)'}];
   for (const b of behaviors) {
     const opt = document.createElement('option');
     opt.value = b.v;
@@ -2705,7 +2705,7 @@ function wizBuildNoteTable() {
     for (let i = 0; i < count; i++) notes.push(Math.min(startNote + i, 127));
   }
 
-  let html = '<table><thead><tr><th style="width:60px">#</th><th style="width:80px">Note</th><th>Nom</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th style="width:60px">#</th><th style="width:80px">Note</th><th>Name</th></tr></thead><tbody>';
   for (let i = 0; i < count; i++) {
     html += '<tr>';
     html += '<td>Act ' + i + '</td>';
@@ -2743,11 +2743,11 @@ function wizShowStep() {
   document.getElementById('wiz-prev').style.display = wizStep > 1 ? 'inline-flex' : 'none';
   const nextBtn = document.getElementById('wiz-next');
   if (wizStep === 4) {
-    nextBtn.textContent = 'Créer';
+    nextBtn.textContent = 'Create';
     nextBtn.className = 'btn primary';
     wizBuildSummary();
   } else {
-    nextBtn.textContent = 'Suivant →';
+    nextBtn.textContent = 'Next \u2192';
     nextBtn.className = 'btn primary';
   }
 }
@@ -2756,7 +2756,7 @@ function wizBuildSummary() {
   const name = document.getElementById('wiz-name').value || 'Instrument';
   const ch = document.getElementById('wiz-channel').value;
   const type = document.getElementById('wiz-type').value;
-  const typeName = type === '0' ? 'Servo-moteur' : 'Solénoïde';
+  const typeName = type === '0' ? 'Servo motor' : 'Solenoid';
   const behavior = document.getElementById('wiz-behavior').selectedOptions[0]?.textContent || '';
   const count = parseInt(document.getElementById('wiz-count').value);
   const pca = document.getElementById('wiz-pca').selectedOptions[0]?.textContent || '';
@@ -2772,12 +2772,12 @@ function wizBuildSummary() {
     ? noteNames.join(', ')
     : noteNames.slice(0, 10).join(', ') + ' ... (+' + (noteNames.length - 10) + ')';
 
-  let html = '<strong>' + esc(name) + '</strong> — Canal MIDI ' + (ch === '0' ? 'Omni (tous)' : ch) + '<br>';
-  html += 'Type : <strong>' + typeName + '</strong> — ' + behavior + '<br>';
-  html += count + ' actionneurs<br>';
-  html += 'Notes : ' + noteStr + '<br>';
-  html += 'PCA : ' + pca + ' — Canaux ' + startCh + ' → ' + (parseInt(startCh) + count - 1) + '<br>';
-  html += 'Bus : <strong>' + (type === '0' ? 'Bus 0 (Servos)' : 'Bus 1 (Solénoïdes)') + '</strong>';
+  let html = '<strong>' + esc(name) + '</strong> — MIDI Channel ' + (ch === '0' ? 'Omni (all)' : ch) + '<br>';
+  html += 'Type: <strong>' + typeName + '</strong> — ' + behavior + '<br>';
+  html += count + ' actuators<br>';
+  html += 'Notes: ' + noteStr + '<br>';
+  html += 'PCA: ' + pca + ' — Channels ' + startCh + ' \u2192 ' + (parseInt(startCh) + count - 1) + '<br>';
+  html += 'Bus: <strong>' + (type === '0' ? 'Bus 0 (Servos)' : 'Bus 1 (Solenoids)') + '</strong>';
   document.getElementById('wiz-summary').innerHTML = html;
 }
 
@@ -2789,11 +2789,11 @@ async function wizNext() {
   // Per-step validation before advancing
   if (wizStep === 1) {
     const name = document.getElementById('wiz-name').value.trim();
-    if (!name) { toast('Veuillez entrer un nom pour l\'instrument', 'error'); return; }
+    if (!name) { toast('Please enter a name for the instrument', 'error'); return; }
   }
   if (wizStep === 3) {
     const count = parseInt(document.getElementById('wiz-count').value);
-    if (isNaN(count) || count < 1 || count > 64) { toast('Nombre d\'actionneurs invalide (1–64)', 'error'); return; }
+    if (isNaN(count) || count < 1 || count > 64) { toast('Invalid actuator count (1–64)', 'error'); return; }
   }
   if (wizStep < 4) { wizStep++; wizShowStep(); return; }
   // Step 4 → Create everything
@@ -2811,7 +2811,7 @@ async function wizNext() {
   const instData = {name, channel, bus_id: busId, latency_ms: 10, auto_cal: false, enabled: true};
   await api('/api/instrument', 'POST', instData);
 
-  // 2. Create actuators — baseId = max(existing IDs) + 1 pour garantir l'unicité
+  // 2. Create actuators — baseId = max(existing IDs) + 1 to ensure uniqueness
   const baseId = (actuators && actuators.length > 0)
     ? Math.max(...actuators.map(a => a.id)) + 1
     : 0;
@@ -2843,7 +2843,7 @@ async function wizNext() {
   await api('/api/routing', 'POST', {instrument: instIdx, notes});
 
   closeModal('modal-wizard');
-  toast(name + ' créé avec ' + count + ' actionneurs', 'ok');
+  toast(name + ' created with ' + count + ' actuators', 'ok');
 
   // Refresh everything
   await loadActuators();
@@ -2872,7 +2872,7 @@ function updateAnglePreview() {
   s+='<path d="M '+(cx-r)+' '+cy+' A '+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy+'" fill="none" stroke="var(--bg3)" stroke-width="3"/>';
 
   if (isAlterne) {
-    // Alterné: show angle A and angle B as two positions
+    // Alternate: show angle A and angle B as two positions
     const angleA = parseInt(document.getElementById('ma-angle-a-alt').value) || 90;
     const angleB = parseInt(document.getElementById('ma-angle-b').value) || 120;
     const lo = Math.min(angleA, angleB), hi = Math.max(angleA, angleB);
@@ -2891,12 +2891,12 @@ function updateAnglePreview() {
     s+=' B: <span style="color:var(--yellow)">'+angleB+'&deg;</span>';
     s+='</div>';
   } else {
-    // Frappe / Gratter / Touche: show repos + amplitude arc
+    // Strike / Strum / Key: show idle + amplitude arc
     const init = parseInt(document.getElementById('ma-angle-init').value) || 90;
     const amp = parseInt(document.getElementById('ma-amplitude').value) || 45;
     const reverse = document.getElementById('ma-hit-reverse').value === '1';
     let minA, maxA;
-    if (mode === '2') { // Gratter: bidirectional
+    if (mode === '2') { // Strum: bidirectional
       minA = Math.max(0, init - amp);
       maxA = Math.min(180, init + amp);
     } else if (reverse) {
@@ -2916,8 +2916,8 @@ function updateAnglePreview() {
     s+='<text x="104" y="68" font-size="9" fill="var(--fg2)">0</text>';
     s+='</svg>';
     s+='<div class="angle-info">';
-    s+='Repos: <span>'+init+'&deg;</span>';
-    s+=' Course: <span>'+minA+'&deg;&rarr;'+maxA+'&deg;</span>';
+    s+='Idle: <span>'+init+'&deg;</span>';
+    s+=' Range: <span>'+minA+'&deg;&rarr;'+maxA+'&deg;</span>';
     s+='</div>';
   }
   preview.innerHTML=s;
@@ -2935,7 +2935,7 @@ async function checkMicStatus() {
       if (navBtn) navBtn.style.display = '';
       if (micDiv) {
         micDiv.className = 'mic-status ok';
-        micDiv.innerHTML = '&#9679; Micro d\u00e9tect\u00e9 \u2014 Pr\u00eat pour la calibration';
+        micDiv.innerHTML = '&#9679; Microphone detected \u2014 Ready for calibration';
       }
     } else {
       if (navBtn) navBtn.style.display = 'none';

@@ -2,30 +2,30 @@
 #include <AppleMIDI.h>
 
 // ============================================================================
-// PlayMode — Couche Transport MIDI (implémentation)
+// PlayMode — MIDI Transport Layer (implementation)
 // ============================================================================
 
-// Session RTP-MIDI et interface MIDI (AppleMIDI v3.x).
+// RTP-MIDI session and MIDI interface (AppleMIDI v3.x).
 //
-// L'API AppleMIDI a changé en v3.x :
-//   - setHandleNoteOn/Off/CC  ne sont PLUS sur AppleMIDISession
-//   - Ils sont sur MidiInterface (objet "MIDI" créé par la macro ci-dessous)
-//   - setHandleConnected/Disconnected restent sur la session (AppleRTP)
+// The AppleMIDI API changed in v3.x:
+//   - setHandleNoteOn/Off/CC are NO LONGER on AppleMIDISession
+//   - They are on MidiInterface (object "MIDI" created by the macro below)
+//   - setHandleConnected/Disconnected remain on the session (AppleRTP)
 //
-// APPLEMIDI_CREATE_INSTANCE crée deux globals :
-//   AppleRTP → AppleMIDISession<WiFiUDP>  (session réseau, port 5004)
-//   MIDI     → MidiInterface              (callbacks NoteOn/Off/CC + read())
+// APPLEMIDI_CREATE_INSTANCE creates two globals:
+//   AppleRTP -> AppleMIDISession<WiFiUDP>  (network session, port 5004)
+//   MIDI     -> MidiInterface              (callbacks NoteOn/Off/CC + read())
 APPLEMIDI_CREATE_INSTANCE(WiFiUDP, AppleRTP, "play-mode", 5004);
 
 static MidiTransport* g_transportInstance = nullptr;
 
-// Callbacks AppleMIDI — connexion réseau
+// AppleMIDI callbacks — network connection
 static void onAppleMidiConnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc, const char* name) {
-    Serial.printf("[RTP-MIDI] Connecté : %s\n", name);
+    Serial.printf("[RTP-MIDI] Connected: %s\n", name);
 }
 
 static void onAppleMidiDisconnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc) {
-    Serial.println("[RTP-MIDI] Déconnecté");
+    Serial.println("[RTP-MIDI] Disconnected");
 }
 
 static void onAppleMidiNoteOn(byte channel, byte note, byte velocity) {
@@ -71,7 +71,7 @@ static void onAppleMidiControlChange(byte channel, byte number, byte value) {
 }
 
 // ============================================================================
-// Construction / Initialisation
+// Construction / Initialization
 // ============================================================================
 
 MidiTransport::MidiTransport(JitterBuffer& jitterBuffer)
@@ -123,7 +123,7 @@ void MidiTransport::stop() {
         _rtpActive = false;
         g_transportInstance = nullptr;
     }
-    Serial.println("[MIDI-TR] Tous les transports arrêtés");
+    Serial.println("[MIDI-TR] All transports stopped");
 }
 
 uint32_t MidiTransport::getSerialByteCount() const { return _serialBytes; }
@@ -131,51 +131,51 @@ uint32_t MidiTransport::getUdpPacketCount() const { return _udpPackets; }
 uint32_t MidiTransport::getRtpPacketCount() const { return _rtpPackets; }
 
 // ============================================================================
-// Initialisation Serial MIDI (Serial2, 31250 baud)
+// Serial MIDI Initialization (Serial2, 31250 baud)
 // ============================================================================
 bool MidiTransport::initSerial() {
     Serial2.begin(MIDI_SERIAL_BAUD, SERIAL_8N1, _config.serial_rx_pin, -1);
     _serialParser.reset();
     _serialActive = true;
-    Serial.printf("[MIDI-TR] Serial MIDI actif (GPIO %d, %d baud)\n",
+    Serial.printf("[MIDI-TR] Serial MIDI active (GPIO %d, %d baud)\n",
                   _config.serial_rx_pin, MIDI_SERIAL_BAUD);
     return true;
 }
 
 // ============================================================================
-// Initialisation UDP MIDI
+// UDP MIDI Initialization
 // ============================================================================
 bool MidiTransport::initUDP() {
     if (_udp.begin(_config.udp_port)) {
         _udpParser.reset();
         _udpActive = true;
-        Serial.printf("[MIDI-TR] UDP MIDI actif (port %d)\n", _config.udp_port);
+        Serial.printf("[MIDI-TR] UDP MIDI active (port %d)\n", _config.udp_port);
         return true;
     }
-    Serial.println("[MIDI-TR] Échec init UDP MIDI");
+    Serial.println("[MIDI-TR] UDP MIDI init failed");
     return false;
 }
 
 // ============================================================================
-// Initialisation RTP-MIDI (AppleMIDI v3.x)
+// RTP-MIDI Initialization (AppleMIDI v3.x)
 // ============================================================================
 bool MidiTransport::initRTP() {
     g_transportInstance = this;
 
-    // Connexion / déconnexion → sur la session via getTransport()
-    // (AppleRTP est la MidiInterface dans cette version de la bibliothèque ;
-    //  la session sous-jacente est accessible par getTransport())
+    // Connection / disconnection -> on the session via getTransport()
+    // (AppleRTP is the MidiInterface in this version of the library;
+    //  the underlying session is accessible via getTransport())
     AppleRTP.getTransport()->setHandleConnected(onAppleMidiConnected);
     AppleRTP.getTransport()->setHandleDisconnected(onAppleMidiDisconnected);
 
-    // Messages MIDI → directement sur la MidiInterface AppleRTP
+    // MIDI messages -> directly on the MidiInterface AppleRTP
     AppleRTP.setHandleNoteOn(onAppleMidiNoteOn);
     AppleRTP.setHandleNoteOff(onAppleMidiNoteOff);
     AppleRTP.setHandleControlChange(onAppleMidiControlChange);
     AppleRTP.begin(MIDI_CHANNEL_OMNI);
 
     _rtpActive = true;
-    Serial.println("[MIDI-TR] RTP-MIDI (AppleMIDI) actif (port 5004)");
+    Serial.println("[MIDI-TR] RTP-MIDI (AppleMIDI) active (port 5004)");
     return true;
 }
 
@@ -221,12 +221,12 @@ void MidiTransport::pollRTP() {
 }
 
 // ============================================================================
-// Délivrer un message au jitter buffer
+// Deliver a message to the jitter buffer
 // ============================================================================
 void MidiTransport::deliverMessage(MidiMessage& msg, MidiTransportSource source) {
     msg.source = source;
     if (!_jitterBuffer.insert(msg)) {
-        Serial.println("[MIDI-TR] Jitter buffer plein, message perdu");
+        Serial.println("[MIDI-TR] Jitter buffer full, message lost");
     }
 
     if (source == MIDI_SOURCE_RTP) {

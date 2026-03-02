@@ -1,70 +1,70 @@
-# API REST & WebSocket
+# REST API & WebSocket
 
-38+ endpoints pour contrôle complet du système. Toutes les réponses sont en JSON.
+38+ endpoints for complete system control. All responses are in JSON.
 
-## Lecture (GET)
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/status` | État global du système (scheduler, MIDI, safety, power, WiFi) |
-| `GET /api/instruments` | Liste de tous les instruments configurés |
-| `GET /api/actuators` | Liste de tous les actionneurs |
-| `GET /api/buses` | État des bus I²C (PCA détectés, fréquences, OE) |
-| `GET /api/wifi` | Configuration WiFi (SSID, hostname, mode) |
-| `GET /api/midi` | Configuration des transports MIDI |
-| `GET /api/routing` | Routage MIDI (notes, CC, courbes vélocité) |
-| `GET /api/power` | Budget énergie et statistiques consommation |
-| `GET /api/safety` | Limites de sécurité et état courant |
-| `GET /api/calibrate/status` | État de la calibration en cours |
-| `GET /api/calibrate/results` | Résultats de calibration (latences mesurées) |
-| `GET /api/test/status` | État du test en cours (sweep/burst/stress) |
-| `GET /api/test/log` | Journal d'événements des tests |
-| `GET /api/logs` | Journal système (128 dernières entrées) |
-
-## Écriture configuration (POST JSON)
+## Read (GET)
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /api/instrument` | Créer ou modifier un instrument |
-| `POST /api/actuator` | Créer ou modifier un actionneur |
-| `POST /api/wifi` | Modifier la configuration WiFi |
-| `POST /api/midi` | Modifier les transports MIDI |
-| `POST /api/routing` | Modifier le routage MIDI (notes, CC) |
-| `POST /api/power/budget` | Modifier le budget énergie et polyphonie |
-| `POST /api/safety` | Modifier les limites de sécurité |
-| `POST /api/bus/pwm` | Modifier la fréquence PWM d'un bus |
+| `GET /api/status` | Global system state (scheduler, MIDI, safety, power, WiFi) |
+| `GET /api/instruments` | List of all configured instruments |
+| `GET /api/actuators` | List of all actuators |
+| `GET /api/buses` | I²C bus state (detected PCAs, frequencies, OE) |
+| `GET /api/wifi` | WiFi configuration (SSID, hostname, mode) |
+| `GET /api/midi` | MIDI transport configuration |
+| `GET /api/routing` | MIDI routing (notes, CC, velocity curves) |
+| `GET /api/power` | Energy budget and consumption statistics |
+| `GET /api/safety` | Safety limits and current state |
+| `GET /api/calibrate/status` | Current calibration state |
+| `GET /api/calibrate/results` | Calibration results (measured latencies) |
+| `GET /api/test/status` | Current test state (sweep/burst/stress) |
+| `GET /api/test/log` | Test event log |
+| `GET /api/logs` | System log (last 128 entries) |
+
+## Write Configuration (POST JSON)
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/instrument` | Create or update an instrument |
+| `POST /api/actuator` | Create or update an actuator |
+| `POST /api/wifi` | Update WiFi configuration |
+| `POST /api/midi` | Update MIDI transports |
+| `POST /api/routing` | Update MIDI routing (notes, CC) |
+| `POST /api/power/budget` | Update energy budget and polyphony |
+| `POST /api/safety` | Update safety limits |
+| `POST /api/bus/pwm` | Update PWM frequency for a bus |
 
 ## Actions (POST)
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /api/killswitch` | Activer/désactiver l'arrêt d'urgence (coupe OE) |
-| `POST /api/test/actuator` | Tester un actionneur individuellement |
-| `POST /api/scan/i2c` | Scanner les bus I²C (détection PCA9685) |
-| `POST /api/config/save` | Sauvegarder la configuration sur flash (LittleFS) |
-| `POST /api/config/defaults` | Réinitialiser la configuration par défaut |
-| `POST /api/calibrate` | Lancer une calibration acoustique |
-| `POST /api/calibrate/apply` | Appliquer les résultats de calibration |
-| `POST /api/calibrate/stop` | Arrêter la calibration en cours |
-| `POST /api/test/sweep` | Lancer un test sweep (balayage séquentiel) |
-| `POST /api/test/burst` | Lancer un test burst (rafale sur un actionneur) |
-| `POST /api/test/stress` | Lancer un test stress (charge maximale) |
-| `POST /api/test/stop` | Arrêter le test en cours |
-| `POST /api/test/log/clear` | Effacer le journal de tests |
-| `POST /api/logs/clear` | Effacer le journal système |
+| `POST /api/killswitch` | Enable/disable emergency stop (cuts OE) |
+| `POST /api/test/actuator` | Test an individual actuator |
+| `POST /api/scan/i2c` | Scan I²C buses (PCA9685 detection) |
+| `POST /api/config/save` | Save configuration to flash (LittleFS) |
+| `POST /api/config/defaults` | Reset configuration to defaults |
+| `POST /api/calibrate` | Start an acoustic calibration |
+| `POST /api/calibrate/apply` | Apply calibration results |
+| `POST /api/calibrate/stop` | Stop current calibration |
+| `POST /api/test/sweep` | Start a sweep test (sequential scan) |
+| `POST /api/test/burst` | Start a burst test (rapid fire on one actuator) |
+| `POST /api/test/stress` | Start a stress test (maximum load) |
+| `POST /api/test/stop` | Stop current test |
+| `POST /api/test/log/clear` | Clear test log |
+| `POST /api/logs/clear` | Clear system log |
 
-## Suppression (DELETE)
+## Delete (DELETE)
 
 | Endpoint | Description |
 |----------|-------------|
-| `DELETE /api/instrument` | Supprimer un instrument |
-| `DELETE /api/actuator` | Supprimer un actionneur |
+| `DELETE /api/instrument` | Delete an instrument |
+| `DELETE /api/actuator` | Delete an actuator |
 
 ## WebSocket
 
-**Endpoint** : `/ws`
+**Endpoint**: `/ws`
 
-Broadcast automatique de l'état complet toutes les 200 ms :
+Automatic broadcast of complete state every 200 ms:
 
 ```json
 {
@@ -82,9 +82,9 @@ Broadcast automatique de l'état complet toutes les 200 ms :
 }
 ```
 
-### Commande WebSocket (client → serveur)
+### WebSocket Command (client → server)
 
-Test rapide d'un actionneur :
+Quick actuator test:
 ```json
 { "cmd": "test", "id": 3, "vel": 100 }
 ```

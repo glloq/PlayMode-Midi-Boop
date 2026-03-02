@@ -8,62 +8,62 @@
 #include "types.h"
 
 // ============================================================================
-// PlayMode — Driver PCA9685 multi-bus I²C
+// PlayMode — PCA9685 multi-bus I²C driver
 // ============================================================================
 
-// Nombre max de PCA total (2 bus × 4 PCA)
+// Max total PCA count (2 buses x 4 PCA)
 #define PCA_TOTAL_MAX (2 * PCA_MAX_PER_BUS)
 
 class PCADriver {
 public:
     PCADriver();
 
-    // Initialisation des bus I²C et scan des PCA
+    // Initialize I²C buses and scan for PCA chips
     bool begin();
 
-    // Scan un bus I²C pour détecter les PCA9685
+    // Scan an I²C bus to detect PCA9685 chips
     uint8_t scanBus(uint8_t bus_id);
 
-    // Configuration de la fréquence PWM pour un bus
+    // Set PWM frequency for a bus
     void setFrequency(uint8_t bus_id, uint16_t freq_hz);
 
-    // Écriture PWM directe sur un canal
+    // Direct PWM write to a channel
     void setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uint16_t value);
 
-    // Écriture PWM par ID d'actionneur (résolu via config)
+    // PWM write by actuator ID (resolved via config)
     void setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value);
 
-    // Conversion angle (degrés) → valeur PWM pour servo
+    // Convert angle (degrees) to PWM value for servo
     uint16_t angleToPWM(uint16_t angle_degrees);
 
-    // Active/désactive les sorties d'un bus via OE pin
+    // Enable/disable outputs of a bus via OE pin
     void enableBus(uint8_t bus_id, bool enable);
 
-    // Kill switch global — désactive toutes les sorties
+    // Global kill switch — disable all outputs
     void killAll();
 
-    // Retourne la config d'un bus
+    // Return the config of a bus
     BusConfig& getBusConfig(uint8_t bus_id);
 
-    // Nombre de PCA détectés sur un bus
+    // Number of PCA chips detected on a bus
     uint8_t getPCACount(uint8_t bus_id);
 
-    // Vérifie si un PCA est présent à une adresse sur un bus
+    // Check if a PCA is present at an address on a bus
     bool isPCAPresent(uint8_t bus_id, uint8_t address);
 
 private:
     BusConfig _buses[2];
     Adafruit_PWMServoDriver* _drivers[PCA_TOTAL_MAX];
     uint8_t _driver_count;
-    uint8_t _bus_driver_start[2];  // Index dans _drivers[] où commence chaque bus
+    uint8_t _bus_driver_start[2];  // Index in _drivers[] where each bus starts
 
-    // Retrouve le driver pour un bus + adresse
+    // Find the driver for a bus + address
     Adafruit_PWMServoDriver* getDriver(uint8_t bus_id, uint8_t pca_address);
 
-    // Initialise un bus I²C
+    // Initialize an I²C bus
     bool initBus(uint8_t bus_id);
 
-    // Référence au bus Wire correspondant
+    // Reference to the corresponding Wire bus
     TwoWire& getWire(uint8_t bus_id);
 };
 

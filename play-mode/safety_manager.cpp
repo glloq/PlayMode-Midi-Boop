@@ -1,10 +1,10 @@
 #include "safety_manager.h"
 
 // ============================================================================
-// PlayMode — Safety Manager + Power Manager (implémentation)
+// PlayMode — Safety Manager + Power Manager (implementation)
 // ============================================================================
 
-// État par défaut pour les IDs invalides
+// Default state for invalid IDs
 const ActuatorSafetyState SafetyManager::_default_safety_state = {};
 
 SafetyManager::SafetyManager(PCADriver& pca)
@@ -30,61 +30,61 @@ void SafetyManager::begin() {
     memset(&_global_state, 0, sizeof(SafetyState));
     _last_check_us = now_us;
 
-    Serial.println("[SAFETY] Safety Manager initialisé");
-    Serial.printf("[SAFETY] Limites : duty=%d%%, freq=%dHz, watchdog=%dms, polyphonie=%d, courant=%dmA\n",
+    Serial.println("[SAFETY] Safety Manager initialized");
+    Serial.printf("[SAFETY] Limits: duty=%d%%, freq=%dHz, watchdog=%dms, polyphony=%d, current=%dmA\n",
                   _max_duty_cycle, _max_freq_hz, _watchdog_ms,
                   _max_polyphony, _max_total_current_ma);
 }
 
 // ============================================================================
-// Vérification pré-événement
+// Pre-event check
 // ============================================================================
 
 bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEvent& event) {
-    // Kill switch actif = tout bloquer
+    // Kill switch active = block everything
     if (_global_state.kill_switch_active) return false;
 
     uint8_t id = actuator.id;
     if (id >= MAX_ACTUATORS) return false;
 
-    // Seuls les NOTE_ON sont soumis aux limites de fréquence/duty/polyphonie
+    // Only NOTE_ON events are subject to frequency/duty/polyphony limits
     if (event.action == ACTION_NOTE_ON) {
-        // Vérifier fréquence de déclenchement
+        // Check trigger frequency
         if (!checkFrequency(id)) {
             _actuator_safety[id].rate_limited = true;
-            Serial.printf("[SAFETY] Actionneur %d : fréquence limitée\n", id);
+            Serial.printf("[SAFETY] Actuator %d: frequency limited\n", id);
             return false;
         }
 
-        // Vérifier duty cycle
+        // Check duty cycle
         if (!checkDutyCycle(id, actuator)) {
             _actuator_safety[id].duty_limited = true;
-            Serial.printf("[SAFETY] Actionneur %d : duty cycle limité\n", id);
+            Serial.printf("[SAFETY] Actuator %d: duty cycle limited\n", id);
             return false;
         }
 
-        // Vérifier polyphonie globale
+        // Check global polyphony
         if (_global_state.active_actuator_count >= _max_polyphony) {
-            // Dégradation gracieuse : refuser les notes de basse priorité
+            // Graceful degradation: reject low-priority notes
             if (event.priority > 0) {
-                Serial.printf("[SAFETY] Polyphonie max atteinte (%d), événement refusé\n",
+                Serial.printf("[SAFETY] Max polyphony reached (%d), event rejected\n",
                               _max_polyphony);
                 return false;
             }
         }
 
-        // Vérifier le courant total estimé
+        // Check total estimated current
         if (_global_state.total_estimated_current_ma >= _max_total_current_ma) {
-            Serial.printf("[SAFETY] Courant max atteint (%dmA), événement refusé\n",
+            Serial.printf("[SAFETY] Max current reached (%dmA), event rejected\n",
                           _global_state.total_estimated_current_ma);
             return false;
         }
     }
 
-    // Mettre à jour les compteurs
-    // AUDIT FIX : seuls les NOTE_ON comptent comme déclenchements pour le
-    // rate limiter. Les NOTE_OFF et ACTION_PWM_SET (retours solénoïde) ne
-    // doivent pas gonfler trigger_count_window.
+    // Update counters
+    // AUDIT FIX: only NOTE_ON events count as triggers for the
+    // rate limiter. NOTE_OFF and ACTION_PWM_SET (solenoid returns) must
+    // not inflate trigger_count_window.
     if (event.action == ACTION_NOTE_ON) {
         _actuator_safety[id].trigger_count_window++;
     }
@@ -97,44 +97,44 @@ bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEv
 }
 
 // ============================================================================
-// Monitoring périodique
+// Periodic monitoring
 // ============================================================================
 
 void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
     uint32_t now_us = (uint32_t)esp_timer_get_time();
 
-    // Vérifier seulement à l'intervalle configuré
+    // Only check at the configured interval
     if ((now_us - _last_check_us) < (SAFETY_CHECK_INTERVAL_MS * 1000)) {
         return;
     }
     _last_check_us = now_us;
 
-    // Mettre à jour l'estimation de courant
+    // Update the current estimate
     updateCurrentEstimate(actuators, count);
 
-    // Vérifier les watchdogs pour chaque actionneur enregistré
+    // Check watchdogs for each registered actuator
     for (uint8_t i = 0; i < count; i++) {
         if (actuators[i] != nullptr && actuators[i]->enabled) {
             checkWatchdog(actuators[i]->id, *actuators[i]);
         }
     }
 
-    // Vérifier le seuil de dégradation gracieuse
+    // Check the graceful degradation threshold
     if (_global_state.total_estimated_current_ma >= SAFETY_DEGRADATION_THRESHOLD_MA) {
         if (!_global_state.degradation_active) {
             _global_state.degradation_active = true;
-            Serial.printf("[SAFETY] Dégradation gracieuse activée (%dmA)\n",
+            Serial.printf("[SAFETY] Graceful degradation activated (%dmA)\n",
                           _global_state.total_estimated_current_ma);
         }
     } else {
         _global_state.degradation_active = false;
     }
 
-    // Vérifier le dépassement de courant critique
+    // Check for critical current overload
     if (_global_state.total_estimated_current_ma >= _max_total_current_ma) {
         if (!_global_state.over_current) {
             _global_state.over_current = true;
-            Serial.printf("[SAFETY] DÉPASSEMENT COURANT : %dmA > %dmA — KILL SWITCH\n",
+            Serial.printf("[SAFETY] CURRENT OVERLOAD: %dmA > %dmA — KILL SWITCH\n",
                           _global_state.total_estimated_current_ma, _max_total_current_ma);
             activateKillSwitch();
         }
@@ -142,7 +142,7 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
         _global_state.over_current = false;
     }
 
-    // Réinitialiser les fenêtres de comptage expirées (1 seconde)
+    // Reset expired counting windows (1 second)
     for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
         if ((now_us - _actuator_safety[i].window_start_us) >= 1000000) {
             resetWindow(i);
@@ -157,14 +157,14 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
 void SafetyManager::activateKillSwitch() {
     _global_state.kill_switch_active = true;
     _pca.killAll();
-    Serial.println("[SAFETY] KILL SWITCH ACTIVÉ — toutes les sorties coupées");
+    Serial.println("[SAFETY] KILL SWITCH ACTIVATED — all outputs cut off");
 }
 
 void SafetyManager::deactivateKillSwitch() {
     _global_state.kill_switch_active = false;
     _pca.enableBus(0, true);
     _pca.enableBus(1, true);
-    Serial.println("[SAFETY] Kill switch désactivé — sorties réactivées");
+    Serial.println("[SAFETY] Kill switch deactivated — outputs re-enabled");
 }
 
 bool SafetyManager::isKillSwitchActive() const {
@@ -172,7 +172,7 @@ bool SafetyManager::isKillSwitchActive() const {
 }
 
 // ============================================================================
-// Accesseurs
+// Accessors
 // ============================================================================
 
 const ActuatorSafetyState& SafetyManager::getActuatorSafetyState(uint8_t actuator_id) const {
@@ -221,7 +221,7 @@ void SafetyManager::setMaxTotalCurrent(uint16_t ma) {
 }
 
 // ============================================================================
-// Méthodes internes
+// Internal methods
 // ============================================================================
 
 bool SafetyManager::checkFrequency(uint8_t actuator_id) {
@@ -230,14 +230,14 @@ bool SafetyManager::checkFrequency(uint8_t actuator_id) {
     ActuatorSafetyState& state = _actuator_safety[actuator_id];
     uint32_t now_us = (uint32_t)esp_timer_get_time();
 
-    // Si la fenêtre a expiré, elle sera réinitialisée dans update()
-    // Calculer le nombre de triggers par seconde dans la fenêtre courante
+    // If the window has expired, it will be reset in update()
+    // Calculate the number of triggers per second in the current window
     uint32_t elapsed_us = now_us - state.window_start_us;
     if (elapsed_us == 0) elapsed_us = 1;
 
-    // Si on est dans la même fenêtre, vérifier le nombre de déclenchements
+    // If within the same window, check the trigger count
     if (elapsed_us < 1000000) {
-        // Estimer la fréquence projetée sur 1 seconde
+        // Estimate the projected frequency over 1 second
         if (state.trigger_count_window >= _max_freq_hz) {
             return false;
         }
@@ -254,8 +254,8 @@ bool SafetyManager::checkDutyCycle(uint8_t actuator_id, const ActuatorConfig& ac
     uint32_t elapsed_us = now_us - state.window_start_us;
     if (elapsed_us == 0) elapsed_us = 1;
 
-    // Calculer le duty cycle courant (%)
-    // active_time_us = temps cumulé actif dans la fenêtre
+    // Calculate the current duty cycle (%)
+    // active_time_us = cumulative active time in the window
     uint8_t duty = 0;
     if (elapsed_us < 1000000) {
         duty = (uint8_t)((state.active_time_us * 100UL) / elapsed_us);
@@ -273,19 +273,19 @@ void SafetyManager::checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuator)
     uint32_t elapsed_ms = (now_us - state.last_activity_us) / 1000;
 
     if (elapsed_ms >= _watchdog_ms) {
-        // Watchdog expiré : forcer la désactivation de l'actionneur
+        // Watchdog expired: force actuator deactivation
         state.watchdog_triggered = true;
         actuator.state.active = false;
 
-        // Couper la sortie PWM directement
-        // AUDIT FIX : les servos étaient omis — retour à la position de repos.
+        // Cut the PWM output directly
+        // AUDIT FIX: servos were omitted — return to rest position.
         if (actuator.type == ACT_SOLENOID) {
             _pca.setActuatorPWM(actuator, 0);
         } else if (actuator.type == ACT_SERVO) {
             _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial));
         }
 
-        Serial.printf("[SAFETY] Watchdog actionneur %d : forcé à OFF après %dms\n",
+        Serial.printf("[SAFETY] Watchdog actuator %d: forced OFF after %dms\n",
                       actuator_id, elapsed_ms);
     }
 }
@@ -298,7 +298,7 @@ uint16_t SafetyManager::estimateActuatorCurrent(const ActuatorConfig& actuator) 
     }
 
     if (actuator.type == ACT_SOLENOID) {
-        // Différencier pleine puissance vs maintien
+        // Differentiate full power vs hold
         if (actuator.state.current_position >= actuator.pwm_initial / 2) {
             return SAFETY_SOLENOID_CURRENT_MA;
         } else {
@@ -322,7 +322,7 @@ void SafetyManager::updateCurrentEstimate(ActuatorConfig* actuators[], uint8_t c
             if (actuators[i]->state.active) {
                 active_count++;
 
-                // Mettre à jour le temps actif dans la fenêtre
+                // Update the active time in the window
                 uint8_t id = actuators[i]->id;
                 if (id < MAX_ACTUATORS) {
                     _actuator_safety[id].active_time_us +=

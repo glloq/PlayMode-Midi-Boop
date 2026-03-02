@@ -9,121 +9,121 @@
 #include "config_manager.h"
 
 // ============================================================================
-// PlayMode — Calibrateur Acoustique (Phase 7)
+// PlayMode — Acoustic Calibrator (Phase 7)
 // ============================================================================
 //
-// Mesure la latence mécanique réelle de chaque actionneur en utilisant un
-// microphone numérique I²S (INMP441 ou compatible).
+// Measures the actual mechanical latency of each actuator using a
+// digital I2S microphone (INMP441 or compatible).
 //
-// Procédure pour chaque actionneur :
-//   1. Mesure du bruit ambiant → seuil de détection adaptatif
-//   2. Flush du buffer DMA I²S + déclenchement actionneur
-//   3. Lecture streaming des échantillons I²S post-trigger
-//   4. Détection du premier onset (|sample| > seuil)
-//   5. Latence = samples_avant_onset / sample_rate
-//   6. Moyenne sur CAL_RETRIES mesures valides
+// Procedure for each actuator:
+//   1. Ambient noise measurement → adaptive detection threshold
+//   2. Flush I2S DMA buffer + trigger actuator
+//   3. Streaming read of I2S samples post-trigger
+//   4. Detection of first onset (|sample| > threshold)
+//   5. Latency = samples_before_onset / sample_rate
+//   6. Average over CAL_RETRIES valid measurements
 //
 
 enum CalibrationState : uint8_t {
-    CAL_IDLE       = 0,   // En attente
-    CAL_AMBIENT    = 1,   // Mesure bruit ambiant (baseline)
-    CAL_TRIGGERING = 2,   // Flush DMA + déclenchement
-    CAL_RECORDING  = 3,   // Enregistrement + détection onset
-    CAL_PAUSING    = 4,   // Pause inter-essais / inter-actionneurs
-    CAL_COMPLETE   = 5,   // Calibration terminée avec succès
-    CAL_ERROR      = 6    // Erreur (timeout, pas de son, init échouée)
+    CAL_IDLE       = 0,   // Waiting
+    CAL_AMBIENT    = 1,   // Ambient noise measurement (baseline)
+    CAL_TRIGGERING = 2,   // Flush DMA + trigger
+    CAL_RECORDING  = 3,   // Recording + onset detection
+    CAL_PAUSING    = 4,   // Pause between retries / between actuators
+    CAL_COMPLETE   = 5,   // Calibration completed successfully
+    CAL_ERROR      = 6    // Error (timeout, no sound, init failed)
 };
 
 struct CalibrationResult {
     uint8_t  actuator_id;
-    uint16_t measured_latency_ms;  // Latence moyenne mesurée (ms)
-    uint8_t  samples_taken;        // Nombre de mesures valides
-    bool     success;              // Calibration réussie (≥1 mesure valide)
-    uint32_t timestamp_ms;         // millis() au moment de la complétion
+    uint16_t measured_latency_ms;  // Average measured latency (ms)
+    uint8_t  samples_taken;        // Number of valid measurements
+    bool     success;              // Calibration succeeded (>=1 valid measurement)
+    uint32_t timestamp_ms;         // millis() at time of completion
 };
 
 class Calibrator {
 public:
     Calibrator(Scheduler& scheduler, ConfigManager& config);
 
-    // --- Cycle de vie ---
-    bool begin();  // Initialise le driver I²S (appeler une fois dans setup)
-    void stop();   // Arrêt immédiat, retour à IDLE
+    // --- Lifecycle ---
+    bool begin();  // Initializes the I2S driver (call once in setup)
+    void stop();   // Immediate stop, return to IDLE
 
-    // --- Démarrage ---
-    bool startCalibration(uint8_t actuator_id);  // 1 actionneur spécifique
-    bool startCalibrationAll();                   // Tous les actionneurs actifs
+    // --- Start ---
+    bool startCalibration(uint8_t actuator_id);  // 1 specific actuator
+    bool startCalibrationAll();                   // All active actuators
 
-    // --- Boucle principale — appeler chaque loop() ---
+    // --- Main loop — call each loop() ---
     void update();
 
-    // --- Lecture d'état ---
+    // --- State reading ---
     CalibrationState getState()             const;
     bool             isRunning()            const;
     uint8_t          getProgress()          const;  // 0-100 %
     uint8_t          getCurrentActuatorId() const;
     bool             isMicReady()           const { return _i2s_ready; }
 
-    // --- Résultats ---
+    // --- Results ---
     const CalibrationResult* getResult(uint8_t actuator_id) const;
     uint8_t                  getResultCount()               const;
 
-    // Écrit les latences mesurées dans les ActuatorConfig
+    // Writes measured latencies into ActuatorConfig
     uint8_t applyResults();
 
 private:
     Scheduler&     _scheduler;
     ConfigManager& _config;
 
-    // État machine
+    // State machine
     CalibrationState _state;
     bool             _i2s_ready;
 
-    // Actionneur en cours
+    // Current actuator
     uint8_t  _cur_act_id;
     uint8_t  _cur_try;           // 0 .. CAL_RETRIES-1
 
     // Timing
-    uint32_t _state_enter_us;    // esp_timer_get_time() à l'entrée dans l'état
-    uint32_t _trigger_time_us;   // Timestamp du NOTE_ON (esp_timer)
+    uint32_t _state_enter_us;    // esp_timer_get_time() on state entry
+    uint32_t _trigger_time_us;   // NOTE_ON timestamp (esp_timer)
 
-    // Seuil de détection (calculé en phase AMBIENT)
+    // Detection threshold (computed during AMBIENT phase)
     int32_t  _onset_threshold;
 
-    // Comptage de samples depuis le flush/trigger
+    // Sample count since flush/trigger
     uint32_t _samples_after_trigger;
 
-    // Accumulation pour la phase AMBIENT (mean absolute value)
+    // Accumulation for AMBIENT phase (mean absolute value)
     uint32_t _ambient_abs_sum;
     uint32_t _ambient_sample_count;
 
-    // Accumulation des mesures de latence
+    // Latency measurement accumulation
     uint32_t _latency_sum_us;
     uint8_t  _latency_count;
 
-    // File d'attente pour le mode startCalibrationAll()
+    // Queue for startCalibrationAll() mode
     uint8_t _queue[MAX_ACTUATORS];
     uint8_t _queue_count;
     uint8_t _queue_idx;
 
-    // Résultats
+    // Results
     CalibrationResult _results[MAX_ACTUATORS];
     uint8_t           _result_count;
 
-    // Buffer de lecture I²S (DMA → RAM)
+    // I2S read buffer (DMA → RAM)
     int32_t  _i2s_buf[CAL_READ_CHUNK];
-    uint32_t _chunk_samples;  // Samples valides dans _i2s_buf après readChunk()
+    uint32_t _chunk_samples;  // Valid samples in _i2s_buf after readChunk()
 
-    // --- Méthodes internes ---
+    // --- Internal methods ---
     bool    initI2S();
     void    deinitI2S();
-    bool    probeMic();                // Lit des samples pour vérifier qu'un micro est réellement branché
+    bool    probeMic();                // Reads samples to verify that a mic is actually connected
     void    flushI2S();
-    bool    readChunk();               // Lit jusqu'à CAL_READ_CHUNK samples, renvoie vrai si ≥1 sample lu
-    int32_t detectOnset() const;       // Retourne index dans _i2s_buf ou -1
+    bool    readChunk();               // Reads up to CAL_READ_CHUNK samples, returns true if >=1 sample read
+    int32_t detectOnset() const;       // Returns index in _i2s_buf or -1
     void    triggerActuator();
-    void    finishCurrent();           // Finalise les mesures et passe au suivant
-    bool    advanceToNext();           // Retourne true si un actionneur suivant est dispo
+    void    finishCurrent();           // Finalizes measurements and moves to next
+    bool    advanceToNext();           // Returns true if a next actuator is available
     void    enterState(CalibrationState s);
 
     CalibrationResult*       findResult(uint8_t actuator_id);

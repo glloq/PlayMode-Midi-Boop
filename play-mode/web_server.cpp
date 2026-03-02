@@ -70,7 +70,7 @@ bool WebServer::begin() {
     _server.begin();
     _running = true;
 
-    Serial.printf("[WEB] Serveur démarré sur le port %d\n", _port);
+    Serial.printf("[WEB] Server started on port %d\n", _port);
     return true;
 }
 
@@ -78,7 +78,7 @@ void WebServer::stop() {
     if (!_running) return;
     _ws.closeAll();
     _running = false;
-    Serial.println("[WEB] Serveur arrêté");
+    Serial.println("[WEB] Server stopped");
 }
 
 void WebServer::update() {
@@ -100,25 +100,25 @@ bool WebServer::isRunning() const { return _running; }
 uint8_t WebServer::getClientCount() const { return _ws.count(); }
 
 // ============================================================================
-// Routes statiques — Pages HTML
+// Static routes — HTML pages
 // ============================================================================
 
 void WebServer::setupStaticRoutes() {
-    // Page principale (SPA) — taille explicite pour garantir Content-Length correct
+    // Main page (SPA) — explicit size to guarantee correct Content-Length
     _server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
         request->send_P(200, "text/html; charset=UTF-8",
                         reinterpret_cast<const uint8_t*>(WEB_UI_HTML),
                         sizeof(WEB_UI_HTML) - 1);
     });
 
-    // Favicon (204 No Content pour éviter les erreurs 404)
+    // Favicon (204 No Content to avoid 404 errors)
     _server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
         request->send(204);
     });
 
     // --- Captive portal probes ---
-    // Android : renvoie 204 → OS détecte le portail et affiche la notification
-    // "Se connecter au réseau" → l'utilisateur ouvre le navigateur complet.
+    // Android: returns 204 → OS detects portal and shows notification
+    // "Sign in to network" → user opens full browser.
     _server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
         request->send(204);
     });
@@ -137,13 +137,13 @@ void WebServer::setupStaticRoutes() {
         request->redirect("http://" + WiFi.softAPIP().toString() + "/");
     });
 
-    // Fallback : appels API inconnus → 404 JSON ; tout le reste → page principale
+    // Fallback: unknown API calls → 404 JSON; everything else → main page
     _server.onNotFound([](AsyncWebServerRequest* request) {
         if (request->url().startsWith("/api/")) {
             request->send(404, "application/json", "{\"error\":\"not found\"}");
             return;
         }
-        // Utilise l'IP correcte selon le mode WiFi courant
+        // Use the correct IP based on current WiFi mode
         IPAddress ip = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
         request->redirect("http://" + ip.toString() + "/");
     });
@@ -192,14 +192,14 @@ void WebServer::setupAPIRoutes() {
         handleGetSafety(req);
     });
 
-    // --- POST endpoints (avec body JSON) ---
+    // --- POST endpoints (with JSON body) ---
 
-    // Sauvegarde config sur flash
+    // Save config to flash
     _server.on("/api/config/save", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostSave(req);
     });
 
-    // Reset config par défaut
+    // Reset config to defaults
     _server.on("/api/config/defaults", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostDefaults(req);
     });
@@ -307,7 +307,7 @@ void WebServer::setupAPIRoutes() {
     killHandler->setMethod(HTTP_POST);
     _server.addHandler(killHandler);
 
-    // AUDIT FIX : Bus PWM frequency (endpoint manquant — appelé par le frontend)
+    // AUDIT FIX: Bus PWM frequency (missing endpoint — called by the frontend)
     auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
             if (!_pca || !_config) { req->send(500); return; }
@@ -319,14 +319,14 @@ void WebServer::setupAPIRoutes() {
                 return;
             }
             _pca->setFrequency(bus_id, freq);
-            // Mettre à jour la config pour persistance
+            // Update config for persistence
             _config->getBuses()[bus_id].pwm_frequency = freq;
             req->send(200, "application/json", "{\"ok\":true}");
         });
     busPwmHandler->setMethod(HTTP_POST);
     _server.addHandler(busPwmHandler);
 
-    // --- Calibration acoustique (Phase 7) ---
+    // --- Acoustic calibration (Phase 7) ---
     _server.on("/api/calibrate/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
         handleGetCalibrateStatus(req);
     });
@@ -350,7 +350,7 @@ void WebServer::setupAPIRoutes() {
         handlePostCalibrateStop(req);
     });
 
-    // --- Test Manager industriel (Phase 8) ---
+    // --- Industrial Test Manager (Phase 8) ---
     _server.on("/api/test/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
         handleGetTestStatus(req);
     });
@@ -461,7 +461,7 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
         obj["enabled"]  = actuators[i].enabled;
         obj["latency_ms"] = actuators[i].latency_ms;
 
-        // Paramètres servo
+        // Servo parameters
         if (actuators[i].type == ACT_SERVO) {
             obj["angle_init"]   = actuators[i].angle_initial;
             obj["amplitude"]    = actuators[i].amplitude;
@@ -469,7 +469,7 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
             obj["angle_b"]      = actuators[i].angle_b;
             obj["hit_reverse"]  = actuators[i].hit_reverse;
         }
-        // Paramètres solénoïde
+        // Solenoid parameters
         else {
             obj["pulse_min_ms"] = actuators[i].pulse_min_ms;
             obj["pulse_ms"]    = actuators[i].pulse_ms;
@@ -478,7 +478,7 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
             obj["ramp_ms"]     = actuators[i].ramp_ms;
         }
 
-        // État runtime
+        // Runtime state
         JsonObject state = obj.createNestedObject("state");
         state["active"]   = actuators[i].state.active;
         state["position"] = actuators[i].state.current_position;
@@ -531,7 +531,7 @@ void WebServer::handleGetWiFi(AsyncWebServerRequest* request) {
     doc["ip"]          = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString()
                                                           : WiFi.softAPIP().toString();
     doc["rssi"]        = WiFi.RSSI();
-    // Ne pas exposer le mot de passe
+    // Do not expose the password
 
     String output;
     serializeJson(doc, output);
@@ -647,7 +647,7 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     doc["degradation"]       = state.degradation_active;
     doc["over_current"]      = state.over_current;
 
-    // Config actuelle
+    // Current config
     JsonObject cfg = doc.createNestedObject("config");
     cfg["max_duty_pct"]    = SAFETY_MAX_DUTY_CYCLE;
     cfg["max_freq_hz"]     = SAFETY_MAX_FREQ_HZ;
@@ -661,7 +661,7 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
 }
 
 // ============================================================================
-// POST handlers — Configuration écriture
+// POST handlers — Configuration write
 // ============================================================================
 
 void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
@@ -685,7 +685,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     inst.enabled            = doc["enabled"] | true;
     inst.actuator_count     = 0;
 
-    // Mappings actuator→note
+    // Actuator→note mappings
     JsonArray acts = doc["actuators"];
     if (!acts.isNull()) {
         for (JsonObject a : acts) {
@@ -696,13 +696,13 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
         }
     }
 
-    // Si un index est fourni → mise à jour de l'instrument existant
+    // If an index is provided → update existing instrument
     if (doc.containsKey("index")) {
         uint8_t idx = (uint8_t)(doc["index"].as<int>());
         InstrumentConfig* instruments = _config->getInstruments();
         uint8_t count = _config->getInstrumentCount();
         if (idx < count) {
-            // Préserver les associations actionneurs/notes si non fournies
+            // Preserve actuator/note associations if not provided
             if (acts.isNull()) {
                 inst.actuator_count = instruments[idx].actuator_count;
                 memcpy(inst.actuator_ids, instruments[idx].actuator_ids, sizeof(inst.actuator_ids));
@@ -716,8 +716,8 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     }
 
     if (_config->addInstrument(inst)) {
-        // Créer automatiquement une entrée de routage vide pour ce nouvel instrument
-        // (routing_count doit toujours rester == instrument_count)
+        // Automatically create an empty routing entry for this new instrument
+        // (routing_count must always remain == instrument_count)
         uint8_t newIdx = _config->getInstrumentCount() - 1;
         MidiRoutingConfig emptyRouting = {};
         emptyRouting.instrument_index = newIdx;
@@ -752,14 +752,14 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     act.enabled      = doc["enabled"] | true;
     act.latency_ms   = doc["latency_ms"] | 10;
 
-    // Paramètres servo
+    // Servo parameters
     act.angle_initial = doc["angle_init"] | 90;
     act.amplitude     = doc["amplitude"] | 45;
     act.speed_ms      = doc["speed_ms"] | 150;
     act.angle_b       = doc["angle_b"] | 120;
     act.hit_reverse   = doc["hit_reverse"] | false;
 
-    // Paramètres solénoïde
+    // Solenoid parameters
     act.pulse_min_ms  = doc["pulse_min_ms"] | SOLENOID_MIN_PULSE_MS;
     act.pulse_ms      = doc["pulse_ms"] | 20;
     act.pwm_initial   = doc["pwm_initial"] | 4095;
@@ -774,8 +774,8 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
         for (uint8_t i = 0; i < count; i++) {
             if (actuators[i].id == act.id) {
                 _engine->initActuator(actuators[i]);
-                // Enregistrer dans le scheduler seulement si c'est un nouvel actionneur
-                // (évite les doublons dans _actuators[] lors d'une mise à jour)
+                // Register in scheduler only if it's a new actuator
+                // (avoids duplicates in _actuators[] during an update)
                 if (is_new) {
                     _scheduler->registerActuator(&actuators[i]);
                 }
@@ -811,7 +811,7 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
 
     _config->setWiFiConfig(wifi);
     request->send(200, "application/json",
-                  "{\"ok\":true,\"note\":\"redémarrer pour appliquer WiFi\"}");
+                  "{\"ok\":true,\"note\":\"restart to apply WiFi changes\"}");
 }
 
 void WebServer::handlePostMidi(AsyncWebServerRequest* request,
@@ -837,9 +837,9 @@ void WebServer::handlePostMidi(AsyncWebServerRequest* request,
 
     _config->setMidiInputConfig(midi);
 
-    // Note : les transports MIDI nécessitent un redémarrage pour appliquer
+    // Note: MIDI transports require a restart to apply
     request->send(200, "application/json",
-                  "{\"ok\":true,\"note\":\"redémarrer pour appliquer MIDI\"}");
+                  "{\"ok\":true,\"note\":\"restart to apply MIDI changes\"}");
 }
 
 void WebServer::handlePostRouting(AsyncWebServerRequest* request,
@@ -856,14 +856,14 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
 
     uint8_t inst_idx = doc["instrument"] | 0;
 
-    // Valider contre le nombre d'instruments (pas de routages, qui peut être désynchronisé)
+    // Validate against instrument count (not routings, which may be desynchronized)
     if (inst_idx >= _config->getInstrumentCount()) {
         request->send(400, "application/json",
                       "{\"error\":\"invalid instrument index\"}");
         return;
     }
 
-    // Si routing_count < inst_idx+1 (désynchronisation), créer les entrées manquantes
+    // If routing_count < inst_idx+1 (desynchronization), create the missing entries
     while (_config->getRoutingCount() <= inst_idx) {
         MidiRoutingConfig empty = {};
         empty.instrument_index = _config->getRoutingCount();
@@ -918,7 +918,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
         }
     }
 
-    // Recharger les tables de lookup du dispatcher
+    // Reload the dispatcher lookup tables
     _dispatcher->refreshConfig();
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -982,10 +982,10 @@ void WebServer::handlePostSave(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
     if (_config->save()) {
-        logger.log(LOG_INFO, CAT_SYSTEM, "Config sauvegardée sur flash");
+        logger.log(LOG_INFO, CAT_SYSTEM, "Config saved to flash");
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
-        logger.log(LOG_ERROR, CAT_SYSTEM, "Échec sauvegarde config");
+        logger.log(LOG_ERROR, CAT_SYSTEM, "Config save failed");
         request->send(500, "application/json",
                       "{\"error\":\"save failed\"}");
     }
@@ -996,7 +996,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
 
     _config->loadDefaults();
     if (_dispatcher) _dispatcher->refreshConfig();
-    logger.log(LOG_WARN, CAT_SYSTEM, "Reset usine appliqué");
+    logger.log(LOG_WARN, CAT_SYSTEM, "Factory reset applied");
     request->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -1047,10 +1047,10 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
     bool activate = doc["active"] | false;
     if (activate) {
         _safety->activateKillSwitch();
-        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch ACTIVÉ depuis l'UI web");
+        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch ACTIVATED from web UI");
     } else {
         _safety->deactivateKillSwitch();
-        logger.log(LOG_INFO, CAT_SAFETY, "Kill switch désactivé depuis l'UI web");
+        logger.log(LOG_INFO, CAT_SAFETY, "Kill switch deactivated from web UI");
     }
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1125,7 +1125,7 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
 
     uint8_t id = request->getParam("id")->value().toInt();
 
-    // Remettre l'actionneur au repos avant suppression
+    // Return the actuator to rest before deletion
     ActuatorConfig* actuators = _config->getActuators();
     uint8_t count = _config->getActuatorCount();
     for (uint8_t i = 0; i < count; i++) {
@@ -1161,14 +1161,14 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
                                  uint8_t* data, size_t len) {
     switch (type) {
         case WS_EVT_CONNECT:
-            Serial.printf("[WEB] WS client #%u connecté depuis %s\n",
+            Serial.printf("[WEB] WS client #%u connected from %s\n",
                           client->id(), client->remoteIP().toString().c_str());
             break;
         case WS_EVT_DISCONNECT:
-            Serial.printf("[WEB] WS client #%u déconnecté\n", client->id());
+            Serial.printf("[WEB] WS client #%u disconnected\n", client->id());
             break;
         case WS_EVT_DATA: {
-            // Commandes WebSocket entrantes (futur : piano virtuel test)
+            // Incoming WebSocket commands (future: virtual piano test)
             AwsFrameInfo* info = (AwsFrameInfo*)arg;
             if (info->final && info->index == 0 && info->len == len
                 && info->opcode == WS_TEXT)
@@ -1178,7 +1178,7 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
                 if (!err) {
                     const char* cmd = doc["cmd"];
                     if (cmd && strcmp(cmd, "test") == 0) {
-                        // Test actionneur rapide via WS
+                        // Quick actuator test via WS
                         uint8_t act_id   = doc["id"] | 0;
                         uint8_t velocity = doc["vel"] | 100;
                         if (_scheduler) {
@@ -1205,7 +1205,7 @@ void WebServer::broadcastStatus() {
     String json;
     buildStatusJSON(json);
     if (json.length() == 0) {
-        Serial.println("[WEB] broadcastStatus: JSON vide (heap insuffisant ?)");
+        Serial.println("[WEB] broadcastStatus: empty JSON (insufficient heap?)");
         return;
     }
     _ws.textAll(json);
@@ -1216,7 +1216,7 @@ void WebServer::broadcastStatus() {
 // ============================================================================
 
 void WebServer::buildStatusJSON(String& output) {
-    // AUDIT FIX : taille augmentée à 4096 (active_actuators + power + safety + midi_msgs + log_count)
+    // AUDIT FIX: size increased to 4096 (active_actuators + power + safety + midi_msgs + log_count)
     StaticJsonDocument<4096> doc;
 
     doc["uptime_s"] = millis() / 1000;
@@ -1267,12 +1267,12 @@ void WebServer::buildStatusJSON(String& output) {
         pwr["sol_ma"]        = ps.solenoid_bus_ma;
         pwr["budget_pct"]    = ps.budget_used_percent;
         pwr["degradation"]   = ps.degradation_active;
-        // AUDIT FIX : champs attendus par le frontend pour la jauge de polyphonie
+        // AUDIT FIX: fields expected by the frontend for the polyphony gauge
         pwr["active_count"]  = ps.global_active_count;
         pwr["max_polyphony"] = pb.global_max_polyphony;
     }
 
-    // Actuators actifs (résumé compact)
+    // Active actuators (compact summary)
     if (_config) {
         JsonArray acts = doc.createNestedArray("active_actuators");
         ActuatorConfig* actuators = _config->getActuators();
@@ -1291,7 +1291,7 @@ void WebServer::buildStatusJSON(String& output) {
     wifi["connected"] = WiFi.isConnected();
     wifi["rssi"]      = WiFi.RSSI();
 
-    // AUDIT FIX : relayer les messages MIDI récents via WebSocket
+    // AUDIT FIX: relay recent MIDI messages via WebSocket
     if (_dispatcher) {
         static const uint8_t MAX_WS_MIDI = 16;
         MidiDispatcher::WsLogEntry entries[MAX_WS_MIDI];
@@ -1311,7 +1311,7 @@ void WebServer::buildStatusJSON(String& output) {
         }
     }
 
-    // Log count (Phase 9) — permet à l'UI de détecter de nouvelles entrées
+    // Log count (Phase 9) — allows the UI to detect new entries
     doc["log_count"] = logger.getCount();
 
     serializeJson(doc, output);
@@ -1346,7 +1346,7 @@ void WebServer::buildBusJSON(const BusConfig& bus, String& output) {
 }
 
 // ============================================================================
-// Calibration acoustique (Phase 7)
+// Acoustic calibration (Phase 7)
 // ============================================================================
 
 static const char* calStateName(CalibrationState s) {
@@ -1389,7 +1389,7 @@ void WebServer::handleGetCalibrateStatus(AsyncWebServerRequest* request) {
 void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
     if (!_calibrator) {
         request->send(503, "application/json",
-                      "{\"error\":\"calibrateur non disponible\"}");
+                      "{\"error\":\"calibrator not available\"}");
         return;
     }
 
@@ -1398,7 +1398,7 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
 
     uint8_t count = _calibrator->getResultCount();
 
-    // Itérer sur les actionneurs actifs pour récupérer leurs résultats
+    // Iterate over active actuators to retrieve their results
     if (_config) {
         ActuatorConfig* acts     = _config->getActuators();
         uint8_t         act_count = _config->getActuatorCount();
@@ -1434,19 +1434,19 @@ void WebServer::handlePostCalibrate(AsyncWebServerRequest* request,
                                     uint8_t* data, size_t len) {
     if (!_calibrator) {
         request->send(503, "application/json",
-                      "{\"error\":\"calibrateur non disponible\"}");
+                      "{\"error\":\"calibrator not available\"}");
         return;
     }
     if (_calibrator->isRunning()) {
         request->send(409, "application/json",
-                      "{\"error\":\"calibration en cours\"}");
+                      "{\"error\":\"calibration in progress\"}");
         return;
     }
 
     StaticJsonDocument<128> doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
-        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
         return;
     }
 
@@ -1462,14 +1462,14 @@ void WebServer::handlePostCalibrate(AsyncWebServerRequest* request,
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
-                      "{\"error\":\"impossible de démarrer la calibration\"}");
+                      "{\"error\":\"unable to start calibration\"}");
     }
 }
 
 void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
     if (!_calibrator) {
         request->send(503, "application/json",
-                      "{\"error\":\"calibrateur non disponible\"}");
+                      "{\"error\":\"calibrator not available\"}");
         return;
     }
 
@@ -1487,7 +1487,7 @@ void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
 void WebServer::handlePostCalibrateStop(AsyncWebServerRequest* request) {
     if (!_calibrator) {
         request->send(503, "application/json",
-                      "{\"error\":\"calibrateur non disponible\"}");
+                      "{\"error\":\"calibrator not available\"}");
         return;
     }
     _calibrator->stop();
@@ -1495,7 +1495,7 @@ void WebServer::handlePostCalibrateStop(AsyncWebServerRequest* request) {
 }
 
 // ============================================================================
-// Test Manager industriel (Phase 8)
+// Industrial Test Manager (Phase 8)
 // ============================================================================
 
 static const char* testModeName(TestMode m) {
@@ -1536,11 +1536,11 @@ void WebServer::handleGetTestStatus(AsyncWebServerRequest* request) {
 void WebServer::handleGetTestLog(AsyncWebServerRequest* request) {
     if (!_testManager) {
         request->send(503, "application/json",
-                      "{\"error\":\"test manager non disponible\"}");
+                      "{\"error\":\"test manager not available\"}");
         return;
     }
 
-    // Limite le nombre d'entrées retournées (max 32 pour économiser la RAM JSON)
+    // Limit the number of entries returned (max 32 to save JSON RAM)
     const uint8_t MAX_ENTRIES = 32;
     DynamicJsonDocument doc(1536);
     JsonArray arr = doc.to<JsonArray>();
@@ -1567,19 +1567,19 @@ void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
                                     uint8_t* data, size_t len) {
     if (!_testManager) {
         request->send(503, "application/json",
-                      "{\"error\":\"test manager non disponible\"}");
+                      "{\"error\":\"test manager not available\"}");
         return;
     }
     if (_testManager->isRunning()) {
         request->send(409, "application/json",
-                      "{\"error\":\"test en cours\"}");
+                      "{\"error\":\"test in progress\"}");
         return;
     }
 
     StaticJsonDocument<128> doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
-        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
         return;
     }
 
@@ -1589,12 +1589,12 @@ void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
     bool     loop        = doc["loop"]        | false;
 
     if (_testManager->startSweep(velocity, interval_ms, hold_ms, loop)) {
-        logger.log(LOG_INFO, CAT_TEST, "Sweep démarré vel=%d int=%dms hold=%dms loop=%d",
+        logger.log(LOG_INFO, CAT_TEST, "Sweep started vel=%d int=%dms hold=%dms loop=%d",
                    velocity, interval_ms, hold_ms, (int)loop);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
-                      "{\"error\":\"impossible de démarrer le sweep\"}");
+                      "{\"error\":\"unable to start sweep\"}");
     }
 }
 
@@ -1602,19 +1602,19 @@ void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
                                     uint8_t* data, size_t len) {
     if (!_testManager) {
         request->send(503, "application/json",
-                      "{\"error\":\"test manager non disponible\"}");
+                      "{\"error\":\"test manager not available\"}");
         return;
     }
     if (_testManager->isRunning()) {
         request->send(409, "application/json",
-                      "{\"error\":\"test en cours\"}");
+                      "{\"error\":\"test in progress\"}");
         return;
     }
 
     StaticJsonDocument<128> doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
-        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
         return;
     }
 
@@ -1624,12 +1624,12 @@ void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
     uint16_t interval_ms = doc["interval_ms"] | (uint16_t)TEST_BURST_DEFAULT_INTVL_MS;
 
     if (_testManager->startBurst(act_id, count, velocity, interval_ms)) {
-        logger.log(LOG_INFO, CAT_TEST, "Burst démarré act=%d count=%d vel=%d",
+        logger.log(LOG_INFO, CAT_TEST, "Burst started act=%d count=%d vel=%d",
                    act_id, count, velocity);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
-                      "{\"error\":\"impossible de démarrer le burst\"}");
+                      "{\"error\":\"unable to start burst\"}");
     }
 }
 
@@ -1637,19 +1637,19 @@ void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
     if (!_testManager) {
         request->send(503, "application/json",
-                      "{\"error\":\"test manager non disponible\"}");
+                      "{\"error\":\"test manager not available\"}");
         return;
     }
     if (_testManager->isRunning()) {
         request->send(409, "application/json",
-                      "{\"error\":\"test en cours\"}");
+                      "{\"error\":\"test in progress\"}");
         return;
     }
 
     StaticJsonDocument<64> doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
-        // Body optionnel pour stress
+        // Body optional for stress
         doc.clear();
     }
 
@@ -1657,19 +1657,19 @@ void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
     uint16_t hold_ms  = doc["hold_ms"]  | TEST_DEFAULT_HOLD_MS;
 
     if (_testManager->startStress(velocity, hold_ms)) {
-        logger.log(LOG_INFO, CAT_TEST, "Stress test exécuté vel=%d hold=%dms",
+        logger.log(LOG_INFO, CAT_TEST, "Stress test executed vel=%d hold=%dms",
                    velocity, hold_ms);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
-                      "{\"error\":\"impossible de lancer le stress test\"}");
+                      "{\"error\":\"unable to start stress test\"}");
     }
 }
 
 void WebServer::handlePostTestStop(AsyncWebServerRequest* request) {
     if (!_testManager) {
         request->send(503, "application/json",
-                      "{\"error\":\"test manager non disponible\"}");
+                      "{\"error\":\"test manager not available\"}");
         return;
     }
     _testManager->stop();
@@ -1679,7 +1679,7 @@ void WebServer::handlePostTestStop(AsyncWebServerRequest* request) {
 void WebServer::handlePostTestClearLog(AsyncWebServerRequest* request) {
     if (!_testManager) {
         request->send(503, "application/json",
-                      "{\"error\":\"test manager non disponible\"}");
+                      "{\"error\":\"test manager not available\"}");
         return;
     }
     _testManager->clearLog();
@@ -1691,7 +1691,7 @@ void WebServer::handlePostTestClearLog(AsyncWebServerRequest* request) {
 // ============================================================================
 
 void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
-    // Filtre optionnel ?level=N (0=DEBUG .. 4=CRITICAL)
+    // Optional filter ?level=N (0=DEBUG .. 4=CRITICAL)
     int min_level = 0;
     if (request->hasParam("level")) {
         min_level = request->getParam("level")->value().toInt();
@@ -1699,8 +1699,8 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
         if (min_level > 4) min_level = 4;
     }
 
-    // AUDIT FIX : snapshot thread-safe via getAllEntries() au lieu d'accès direct
-    // (le handler web tourne dans une tâche FreeRTOS distincte de la loop principale)
+    // AUDIT FIX: thread-safe snapshot via getAllEntries() instead of direct access
+    // (the web handler runs in a FreeRTOS task separate from the main loop)
     static LogEntry snapshot[LOG_BUFFER_SIZE];
     uint8_t total = 0;
     logger.getAllEntries(snapshot, total);
@@ -1721,7 +1721,7 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
         out += ",\"lvl\":";  out += (int)e.level;
         out += ",\"cat\":";  out += (int)e.category;
         out += ",\"msg\":\"";
-        // Échappement minimal du message
+        // Minimal message escaping
         for (const char* p = e.message; *p; p++) {
             if      (*p == '"')  out += "\\\"";
             else if (*p == '\\') out += "\\\\";
@@ -1739,6 +1739,6 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
 
 void WebServer::handlePostLogsClear(AsyncWebServerRequest* request) {
     logger.clear();
-    logger.log(LOG_INFO, CAT_SYSTEM, "Journal système effacé");
+    logger.log(LOG_INFO, CAT_SYSTEM, "System log cleared");
     request->send(200, "application/json", "{\"ok\":true}");
 }

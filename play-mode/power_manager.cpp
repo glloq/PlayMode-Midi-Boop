@@ -1,7 +1,7 @@
 #include "power_manager.h"
 
 // ============================================================================
-// PlayMode — Power Manager (Phase 5) — Implémentation
+// PlayMode — Power Manager (Phase 5) — Implementation
 // ============================================================================
 
 PowerManager::PowerManager()
@@ -15,7 +15,7 @@ PowerManager::PowerManager()
 void PowerManager::begin(const PowerBudget& budget) {
     _budget = budget;
 
-    // Valeurs par défaut si non configurées
+    // Default values if not configured
     if (_budget.global_max_ma == 0)
         _budget.global_max_ma = POWER_GLOBAL_MAX_MA;
     if (_budget.servo_bus_max_ma == 0)
@@ -25,7 +25,7 @@ void PowerManager::begin(const PowerBudget& budget) {
     if (_budget.global_max_polyphony == 0)
         _budget.global_max_polyphony = POWER_MAX_POLYPHONY;
 
-    // Polyphonie par instrument non configurée → utiliser la valeur globale
+    // Per-instrument polyphony not configured → use global value
     for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
         if (_budget.instrument_max_polyphony[i] == 0) {
             _budget.instrument_max_polyphony[i] = _budget.global_max_polyphony;
@@ -38,14 +38,14 @@ void PowerManager::begin(const PowerBudget& budget) {
 
     _last_update_us = (uint32_t)esp_timer_get_time();
 
-    Serial.println("[POWER] Power Manager initialisé");
-    Serial.printf("[POWER] Budget : global=%umA, servos=%umA, solénoïdes=%umA, polyphonie=%d\n",
+    Serial.println("[POWER] Power Manager initialized");
+    Serial.printf("[POWER] Budget: global=%umA, servos=%umA, solenoids=%umA, polyphony=%d\n",
                   _budget.global_max_ma, _budget.servo_bus_max_ma,
                   _budget.solenoid_bus_max_ma, _budget.global_max_polyphony);
 }
 
 // ============================================================================
-// Décision d'activation
+// Activation decision
 // ============================================================================
 
 bool PowerManager::canActivate(const ActuatorConfig& actuator,
@@ -55,61 +55,61 @@ bool PowerManager::canActivate(const ActuatorConfig& actuator,
     if (id >= MAX_ACTUATORS) return false;
     if (!actuator.enabled)   return false;
 
-    // --- Vérification polyphonie globale ---
+    // --- Global polyphony check ---
     if (_stats.global_active_count >= _budget.global_max_polyphony) {
         if (!_budget.smart_rejection) {
-            // Rejet strict : refuser toute note supplémentaire
+            // Strict rejection: refuse any additional note
             _stats.total_rejected++;
-            Serial.printf("[POWER] Polyphonie globale max (%d) — note refusée\n",
+            Serial.printf("[POWER] Max global polyphony (%d) — note rejected\n",
                           _budget.global_max_polyphony);
             return false;
         }
-        // Rejet intelligent : accepter seulement si vélocité ≥ 100 (haute priorité)
+        // Smart rejection: accept only if velocity >= 100 (high priority)
         if (velocity < 100) {
             _stats.total_rejected++;
-            Serial.printf("[POWER] Polyphonie max + smart rejection — vélocité %d refusée\n",
+            Serial.printf("[POWER] Max polyphony + smart rejection — velocity %d rejected\n",
                           velocity);
             return false;
         }
     }
 
-    // --- Vérification polyphonie par instrument ---
+    // --- Per-instrument polyphony check ---
     if (instrument_index < MAX_INSTRUMENTS) {
         uint8_t inst_active = _stats.instrument_active_count[instrument_index];
         uint8_t inst_max    = _budget.instrument_max_polyphony[instrument_index];
         if (inst_active >= inst_max) {
             _stats.total_rejected++;
-            Serial.printf("[POWER] Polyphonie instrument %d max (%d) — note refusée\n",
+            Serial.printf("[POWER] Instrument %d max polyphony (%d) — note rejected\n",
                           instrument_index, inst_max);
             return false;
         }
     }
 
-    // --- Vérification budget courant ---
+    // --- Current budget check ---
     uint16_t needed_ma = estimateCurrent(actuator, velocity);
 
-    // Budget global
+    // Global budget
     if (_stats.total_estimated_ma + needed_ma > _budget.global_max_ma) {
         _stats.total_rejected++;
-        Serial.printf("[POWER] Budget global dépassé (%u + %u > %u mA) — note refusée\n",
+        Serial.printf("[POWER] Global budget exceeded (%u + %u > %u mA) — note rejected\n",
                       _stats.total_estimated_ma, needed_ma, _budget.global_max_ma);
         return false;
     }
 
-    // Budget par bus
+    // Per-bus budget
     if (actuator.bus_id == 0) {
         // Bus 0 = servos
         if (_stats.servo_bus_ma + needed_ma > _budget.servo_bus_max_ma) {
             _stats.total_rejected++;
-            Serial.printf("[POWER] Budget bus servo dépassé (%u + %u > %u mA)\n",
+            Serial.printf("[POWER] Servo bus budget exceeded (%u + %u > %u mA)\n",
                           _stats.servo_bus_ma, needed_ma, _budget.servo_bus_max_ma);
             return false;
         }
     } else if (actuator.bus_id == 1) {
-        // Bus 1 = solénoïdes
+        // Bus 1 = solenoids
         if (_stats.solenoid_bus_ma + needed_ma > _budget.solenoid_bus_max_ma) {
             _stats.total_rejected++;
-            Serial.printf("[POWER] Budget bus solénoïde dépassé (%u + %u > %u mA)\n",
+            Serial.printf("[POWER] Solenoid bus budget exceeded (%u + %u > %u mA)\n",
                           _stats.solenoid_bus_ma, needed_ma, _budget.solenoid_bus_max_ma);
             return false;
         }
@@ -126,11 +126,11 @@ void PowerManager::notifyActivation(const ActuatorConfig& actuator,
 
     uint16_t ma = estimateCurrent(actuator, velocity);
 
-    // Allouer le courant à cet actionneur
+    // Allocate current for this actuator
     _actuator_allocated_ma[id] = ma;
     _actuator_tracked[id]      = true;
 
-    // Mettre à jour les compteurs
+    // Update counters
     _stats.total_estimated_ma += ma;
     _stats.global_active_count++;
 
@@ -153,7 +153,7 @@ void PowerManager::notifyDeactivation(const ActuatorConfig& actuator,
 
     uint16_t ma = _actuator_allocated_ma[id];
 
-    // Libérer le courant
+    // Release the current
     if (_stats.total_estimated_ma >= ma)
         _stats.total_estimated_ma -= ma;
     else
@@ -181,7 +181,7 @@ void PowerManager::notifyDeactivation(const ActuatorConfig& actuator,
 }
 
 // ============================================================================
-// Mise à jour périodique
+// Periodic update
 // ============================================================================
 
 void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
@@ -192,8 +192,8 @@ void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
 
     _last_update_us = now_us;
 
-    // Resynchroniser les compteurs depuis l'état réel des actionneurs.
-    // Cela corrige d'éventuelles désynchronisations (watchdog, kill switch, etc.).
+    // Resynchronize counters from the actual state of actuators.
+    // This corrects potential desynchronizations (watchdog, kill switch, etc.).
     uint32_t total_ma    = 0;
     uint32_t servo_ma    = 0;
     uint32_t solenoid_ma = 0;
@@ -209,13 +209,13 @@ void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
         if (id >= MAX_ACTUATORS) continue;
 
         if (act->state.active) {
-            // Actionneur actif : estimer la consommation depuis son état courant
+            // Active actuator: estimate consumption from its current state
             uint16_t ma = 0;
 
             if (act->type == ACT_SERVO) {
                 ma = POWER_SERVO_ACTIVE_MA;
             } else if (act->type == ACT_SOLENOID) {
-                // Distinguer pleine puissance vs maintien (hit-and-hold)
+                // Distinguish full power vs hold (hit-and-hold)
                 if (act->state.current_position >= (uint16_t)(act->pwm_initial / 2)) {
                     ma = POWER_SOLENOID_FULL_MA;
                 } else {
@@ -232,10 +232,10 @@ void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
             if (act->bus_id == 0)      servo_ma    += ma;
             else if (act->bus_id == 1) solenoid_ma += ma;
 
-            // Note : l'index instrument n'est pas disponible ici (non stocké dans ActuatorConfig)
-            // Les compteurs par instrument sont maintenus par notify*() uniquement.
+            // Note: instrument index is not available here (not stored in ActuatorConfig)
+            // Per-instrument counters are maintained by notify*() only.
         } else {
-            // Actionneur inactif : libérer l'allocation si elle est encore comptabilisée
+            // Inactive actuator: release the allocation if it is still accounted for
             if (_actuator_tracked[id]) {
                 _actuator_tracked[id]      = false;
                 _actuator_allocated_ma[id] = 0;
@@ -252,7 +252,7 @@ void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
 }
 
 // ============================================================================
-// Accesseurs statistiques
+// Statistics accessors
 // ============================================================================
 
 const PowerStats& PowerManager::getStats() const {
@@ -277,12 +277,12 @@ const PowerBudget& PowerManager::getBudget() const {
 }
 
 // ============================================================================
-// Configuration runtime
+// Runtime configuration
 // ============================================================================
 
 void PowerManager::setGlobalMaxMA(uint32_t ma) {
     _budget.global_max_ma = ma;
-    Serial.printf("[POWER] Budget global mis à jour : %u mA\n", ma);
+    Serial.printf("[POWER] Global budget updated: %u mA\n", ma);
 }
 
 void PowerManager::setServoBusMaxMA(uint32_t ma) {
@@ -295,7 +295,7 @@ void PowerManager::setSolenoidBusMaxMA(uint32_t ma) {
 
 void PowerManager::setGlobalMaxPolyphony(uint8_t max) {
     _budget.global_max_polyphony = max;
-    Serial.printf("[POWER] Polyphonie globale max : %d\n", max);
+    Serial.printf("[POWER] Max global polyphony: %d\n", max);
 }
 
 void PowerManager::setInstrumentMaxPolyphony(uint8_t instrument_index, uint8_t max) {
@@ -304,25 +304,25 @@ void PowerManager::setInstrumentMaxPolyphony(uint8_t instrument_index, uint8_t m
 }
 
 // ============================================================================
-// Méthodes internes
+// Internal methods
 // ============================================================================
 
 uint16_t PowerManager::estimateCurrent(const ActuatorConfig& actuator,
                                         uint8_t velocity) const {
     if (actuator.type == ACT_SERVO) {
-        // Consommation servo légèrement modulée par la vélocité
-        // (amplitude plus forte → plus de couple → plus de courant)
+        // Servo consumption slightly modulated by velocity
+        // (higher amplitude → more torque → more current)
         uint16_t base = POWER_SERVO_ACTIVE_MA;
-        uint16_t extra = (uint16_t)((velocity * 50UL) / 127);  // jusqu'à +50 mA
+        uint16_t extra = (uint16_t)((velocity * 50UL) / 127);  // up to +50 mA
         return base + extra;
     }
 
     if (actuator.type == ACT_SOLENOID) {
         if (actuator.behavior == SOL_HIT_AND_HOLD) {
-            // Frappe initiale pleine puissance, puis maintien
+            // Initial strike at full power, then hold
             return POWER_SOLENOID_FULL_MA;
         }
-        // Frappe simple : courant proportionnel à la vélocité
+        // Simple strike: current proportional to velocity
         uint16_t base  = POWER_SOLENOID_HOLD_MA;
         uint16_t delta = POWER_SOLENOID_FULL_MA - POWER_SOLENOID_HOLD_MA;
         return (uint16_t)(base + (uint32_t)(delta * velocity) / 127);
@@ -332,7 +332,7 @@ uint16_t PowerManager::estimateCurrent(const ActuatorConfig& actuator,
 }
 
 void PowerManager::updateDerivedStats() {
-    // Pourcentage du budget utilisé
+    // Percentage of budget used
     if (_budget.global_max_ma > 0) {
         _stats.budget_used_percent =
             (uint8_t)((_stats.total_estimated_ma * 100UL) / _budget.global_max_ma);
@@ -341,11 +341,11 @@ void PowerManager::updateDerivedStats() {
         _stats.budget_used_percent = 0;
     }
 
-    // Dégradation gracieuse
+    // Graceful degradation
     _stats.degradation_active =
         (_stats.budget_used_percent >= POWER_DEGRADATION_THRESHOLD_PCT);
 
-    // Dépassement soft limit
+    // Soft limit exceeded
     _stats.budget_exceeded =
         (_stats.total_estimated_ma > _budget.global_max_ma);
 }

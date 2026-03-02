@@ -16,28 +16,28 @@ class WiFiManager {
 public:
     WiFiManager();
 
-    // Initialise le WiFi avec la configuration donnée.
-    // Bloque pendant timeout_ms en attendant la connexion STA.
-    // Retourne true si connecté (STA) ou AP démarré (fallback).
+    // Initializes WiFi with the given configuration.
+    // Blocks for timeout_ms while waiting for STA connection.
+    // Returns true if connected (STA) or AP started (fallback).
     bool begin(const WiFiConfig& config, uint32_t timeout_ms = WIFI_CONNECT_TIMEOUT_MS);
 
-    // Vérifie si le WiFi est connecté en mode STA
+    // Checks if WiFi is connected in STA mode
     bool isConnected() const;
 
-    // Vérifie si le mode AP est actif
+    // Checks if AP mode is active
     bool isAP() const;
 
-    // Retourne l'adresse IP courante (STA ou AP)
+    // Returns the current IP address (STA or AP)
     IPAddress getIP() const;
 
-    // Maintient la connexion WiFi (reconnexion si déconnecté).
-    // Appeler périodiquement depuis loop().
+    // Maintains WiFi connection (reconnects if disconnected).
+    // Call periodically from loop().
     void maintain();
 
-    // Force de signal WiFi (dBm)
+    // WiFi signal strength (dBm)
     int8_t getRSSI() const;
 
-    // Déconnecte et arrête le WiFi
+    // Disconnects and stops WiFi
     void stop();
 
 private:
