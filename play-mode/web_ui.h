@@ -1069,6 +1069,7 @@ let instruments = [];
 let actuators = [];
 let routing = [];
 let pianoNotes = {}; // instIndex -> { note -> actuator_id }
+let pressedKeys = {}; // "instIdx-note" -> true (keys currently held down by user)
 let editingInstrumentIdx = -1;
 let editingActuatorId = -1;
 
@@ -2050,6 +2051,7 @@ function buildAllPianos() {
   if (!container) return;
   container.innerHTML = '';
   pianoNotes = {};
+  pressedKeys = {};
 
   if (!instruments || instruments.length === 0) {
     container.innerHTML = '<p style="color:var(--fg2);font-size:13px;margin-top:16px">Aucun instrument. Utilisez l\'assistant pour cr\u00e9er votre premier instrument.</p>';
@@ -2099,23 +2101,11 @@ function buildAllPianos() {
     // Align to nearest white key above
     while (endNote < 128 && [1,3,6,8,10].includes(endNote % 12)) endNote++;
 
-    // Build list of notes to render (only mapped + their black neighbors)
+    // Render ALL notes in the range for correct piano layout
+    // Unmapped notes are shown dimmed but maintain proper spatial ordering
     const notesToRender = new Set();
     for (let n = startNote; n <= endNote; n++) {
-      const nio = n % 12;
-      const isBlack = [1,3,6,8,10].includes(nio);
-      if (mappedNotes.has(n)) {
-        notesToRender.add(n);
-        // Add adjacent white keys for context around black mapped notes
-        if (isBlack) {
-          notesToRender.add(n - 1);
-          if (n + 1 <= endNote) notesToRender.add(n + 1);
-        }
-        // Add black keys between consecutive mapped white keys
-        if (!isBlack && mappedNotes.has(n + 2) && [1,3,6,8,10].includes((n+1) % 12)) {
-          notesToRender.add(n + 1);
-        }
-      }
+      notesToRender.add(n);
     }
 
     // White keys first (they define layout flow)
@@ -2139,6 +2129,7 @@ function buildAllPianos() {
         k.onmouseleave = () => pianoNoteOff(idx, n);
         k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
         k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+        k.addEventListener('touchcancel', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
       }
       piano.appendChild(k);
       wIdx++;
@@ -2165,6 +2156,7 @@ function buildAllPianos() {
         k.onmouseleave = () => pianoNoteOff(idx, n);
         k.addEventListener('touchstart', (e) => { e.preventDefault(); pianoNoteOn(idx, n); }, {passive:false});
         k.addEventListener('touchend', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
+        k.addEventListener('touchcancel', (e) => { e.preventDefault(); pianoNoteOff(idx, n); }, {passive:false});
       }
       piano.appendChild(k);
     }
@@ -2194,6 +2186,8 @@ function pianoNoteOn(instIdx, note) {
   if (!instMap) return;
   const actId = instMap[note];
   if (actId === undefined) return;
+  // Track that this key is being held down
+  pressedKeys[instIdx + '-' + note] = true;
   // Visual feedback only on this instrument's piano
   const piano = document.getElementById('piano-' + instIdx);
   if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
@@ -2203,6 +2197,7 @@ function pianoNoteOn(instIdx, note) {
 }
 
 function pianoNoteOff(instIdx, note) {
+  delete pressedKeys[instIdx + '-' + note];
   const piano = document.getElementById('piano-' + instIdx);
   if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.remove('active'));
   const instMap = pianoNotes[instIdx];
@@ -2215,8 +2210,11 @@ function pianoNoteOff(instIdx, note) {
 function updatePianoActive(activeActuators) {
   if (currentPage !== 'instrument') return;
 
-  // Reset all active states
-  document.querySelectorAll('.piano .active').forEach(k => k.classList.remove('active'));
+  // Reset active states but preserve keys currently held by user
+  document.querySelectorAll('.piano .active').forEach(k => {
+    const key = k.dataset.inst + '-' + k.dataset.note;
+    if (!pressedKeys[key]) k.classList.remove('active');
+  });
 
   if (!activeActuators) return;
 
