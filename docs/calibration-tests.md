@@ -1,4 +1,6 @@
-# Calibration et Tests — PlayMode Midi B∞p
+# Calibration et Tests
+
+> Voir aussi : [API REST](api-rest.md) — [Architecture](architecture.md) — [Modèle de données](modele-donnees.md)
 
 ---
 

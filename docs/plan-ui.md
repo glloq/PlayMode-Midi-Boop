@@ -1,5 +1,7 @@
 # Plan de refactoring UI — Simplification pour débutants
 
+> Voir aussi : [Interface web](interface-web.md) pour la documentation complète de l'UI actuelle.
+
 ## Statut : Implémenté
 
 ---
