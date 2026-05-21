@@ -104,20 +104,22 @@ bool MidiParser::handleDataByte(uint8_t byte) {
     }
 
     if (_data_index == 0) {
+        // AUDIT FIX: capture the timestamp at the first data byte so that
+        // jitter buffer ageing reflects the wire-arrival time of the
+        // earliest byte, not the byte that completes the message.
+        _message.timestamp_us = (uint32_t)esp_timer_get_time();
         _message.data1 = byte;
         _data_index = 1;
 
         // Messages with only 1 data byte -> complete
         if (_expected_length == 1) {
             _message.data2 = 0;
-            _message.timestamp_us = (uint32_t)esp_timer_get_time();
             _data_index = 0;  // Ready for next message (running status)
             _ready = true;
             return true;
         }
     } else if (_data_index == 1) {
         _message.data2 = byte;
-        _message.timestamp_us = (uint32_t)esp_timer_get_time();
         _data_index = 0;  // Ready for next message (running status)
         _ready = true;
         return true;

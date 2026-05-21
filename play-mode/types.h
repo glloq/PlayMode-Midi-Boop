@@ -38,13 +38,17 @@ enum EventAction : uint8_t {
 };
 
 // --- Actuator internal state ---
+// All fields written by Core 1 (scheduler/engine) and read by Core 0
+// (web server, power manager). Aligned 16/32-bit accesses are atomic on
+// the ESP32 Xtensa LX6; `volatile` prevents the compiler from caching
+// the value across the inter-core barrier.
 struct ActuatorState {
-    volatile bool active;        // Note in progress (volatile: written Core 1, read Core 0)
-    uint16_t current_position;   // Current PWM position (0-4095)
-    bool alternate_state;        // Alternate state (A or B)
-    bool scratch_direction;      // Scratch direction (+ or -)
-    uint32_t last_trigger_us;    // Last trigger time (µs)
-    uint8_t trigger_count;       // Duty cycle counter
+    volatile bool     active;             // Note in progress
+    volatile uint16_t current_position;   // Current PWM position (0-4095)
+    bool              alternate_state;    // Alternate state (A or B) — Core 1 only
+    bool              scratch_direction;  // Scratch direction (+ or -) — Core 1 only
+    volatile uint32_t last_trigger_us;    // Last trigger time (µs)
+    uint8_t           trigger_count;      // Duty cycle counter — Core 1 only
 };
 
 // --- Actuator configuration ---

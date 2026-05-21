@@ -18,6 +18,68 @@
 // PlayMode — Web Server Implementation (Phase 6)
 // ============================================================================
 
+// ============================================================================
+// AUDIT FIX: AP-mode authentication
+// ============================================================================
+// In Access Point mode anyone within radio range can reach the API. We
+// derive a short token from the AP MAC (deterministic per device) that
+// the UI fetches once via /api/auth-token. Sensitive POST endpoints
+// (kill switch, factory reset, save, calibration, test, config writes)
+// require it via the X-PlayMode-Token header or a `token` query param.
+// In STA mode the token check is skipped (the local LAN is the trust
+// boundary).
+namespace {
+    String s_ap_token;
+
+    void ensureApToken() {
+        if (s_ap_token.length() > 0) return;
+        uint8_t mac[6];
+        WiFi.softAPmacAddress(mac);
+        char buf[17];
+        snprintf(buf, sizeof(buf), "%02X%02X%02X%02X%02X%02X%02X%02X",
+                 mac[0], mac[1], mac[2], mac[3],
+                 (uint8_t)(mac[0] ^ 0xA5), (uint8_t)(mac[2] ^ 0x5A),
+                 (uint8_t)(mac[4] ^ 0xF0), (uint8_t)(mac[5] ^ 0x0F));
+        s_ap_token = String(buf);
+    }
+
+    bool requireAuth(AsyncWebServerRequest* req) {
+        // Auth only enforced in AP mode — STA networks are user-trusted.
+        if (!(WiFi.getMode() & WIFI_AP) || (WiFi.getMode() & WIFI_STA)) {
+            return true;
+        }
+        ensureApToken();
+        if (req->hasHeader(WEB_AUTH_HEADER)) {
+            if (req->header(WEB_AUTH_HEADER) == s_ap_token) return true;
+        }
+        if (req->hasParam(WEB_AUTH_PARAM)) {
+            if (req->getParam(WEB_AUTH_PARAM)->value() == s_ap_token) return true;
+        }
+        req->send(401, "application/json", "{\"error\":\"auth required (AP mode)\"}");
+        return false;
+    }
+
+    // Standard security headers — added to every HTML response.
+    AsyncWebServerResponse* securedHtml(AsyncWebServerRequest* req,
+                                       const uint8_t* body, size_t len) {
+        AsyncWebServerResponse* resp = req->beginResponse_P(
+            200, "text/html; charset=UTF-8", body, len);
+        resp->addHeader("X-Frame-Options", "DENY");
+        resp->addHeader("X-Content-Type-Options", "nosniff");
+        resp->addHeader("Referrer-Policy", "no-referrer");
+        // CSP allows the embedded inline script/style (the SPA is a single
+        // self-contained HTML blob); blocks external loads.
+        resp->addHeader("Content-Security-Policy",
+                        "default-src 'self'; "
+                        "script-src 'self' 'unsafe-inline'; "
+                        "style-src 'self' 'unsafe-inline'; "
+                        "connect-src 'self' ws: wss:; "
+                        "img-src 'self' data:; "
+                        "frame-ancestors 'none'");
+        return resp;
+    }
+}
+
 WebServer::WebServer(uint16_t port)
     : _server(port)
     , _ws("/ws")
@@ -63,6 +125,10 @@ void WebServer::setTestManager(TestManager* testManager) {
 bool WebServer::begin() {
     if (_running) return true;
 
+    // AUDIT FIX: ESPAsyncWebServer drops unknown request headers by
+    // default — register the auth header so requireAuth() can read it.
+    _server.collectHeader(WEB_AUTH_HEADER);
+
     setupStaticRoutes();
     setupAPIRoutes();
     setupWebSocket();
@@ -105,10 +171,26 @@ uint8_t WebServer::getClientCount() const { return _ws.count(); }
 
 void WebServer::setupStaticRoutes() {
     // Main page (SPA) — explicit size to guarantee correct Content-Length
+    // AUDIT FIX: ship standard security headers (CSP, X-Frame-Options, etc.).
     _server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send_P(200, "text/html; charset=UTF-8",
-                        reinterpret_cast<const uint8_t*>(WEB_UI_HTML),
-                        sizeof(WEB_UI_HTML) - 1);
+        request->send(securedHtml(request,
+                                  reinterpret_cast<const uint8_t*>(WEB_UI_HTML),
+                                  sizeof(WEB_UI_HTML) - 1));
+    });
+
+    // Expose the auth token to clients that can already reach this device
+    // on the LAN/AP — only useful in AP mode. STA mode returns "ok".
+    _server.on("/api/auth-token", HTTP_GET, [](AsyncWebServerRequest* request) {
+        StaticJsonDocument<128> doc;
+        if (WiFi.getMode() & WIFI_AP) {
+            ensureApToken();
+            doc["ap_mode"] = true;
+            doc["token"]   = s_ap_token;
+        } else {
+            doc["ap_mode"] = false;
+        }
+        String out; serializeJson(doc, out);
+        request->send(200, "application/json; charset=UTF-8", out);
     });
 
     // Favicon (204 No Content to avoid 404 errors)
@@ -125,27 +207,32 @@ void WebServer::setupStaticRoutes() {
     _server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* request) {
         request->send(204);
     });
+    // AUDIT FIX: only redirect to the AP IP when WiFi is actually up.
+    // Otherwise `WiFi.softAPIP()` returns 0.0.0.0 and we'd ship a broken URL.
+    auto captiveTarget = []() -> String {
+        IPAddress ip = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+        if ((uint32_t)ip == 0) return String("/");
+        return String("http://") + ip.toString() + "/";
+    };
     // iOS / macOS
-    _server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    _server.on("/hotspot-detect.html", HTTP_GET, [captiveTarget](AsyncWebServerRequest* request) {
+        request->redirect(captiveTarget());
     });
     // Windows NCSI
-    _server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    _server.on("/ncsi.txt", HTTP_GET, [captiveTarget](AsyncWebServerRequest* request) {
+        request->redirect(captiveTarget());
     });
-    _server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    _server.on("/connecttest.txt", HTTP_GET, [captiveTarget](AsyncWebServerRequest* request) {
+        request->redirect(captiveTarget());
     });
 
     // Fallback: unknown API calls → 404 JSON; everything else → main page
-    _server.onNotFound([](AsyncWebServerRequest* request) {
+    _server.onNotFound([captiveTarget](AsyncWebServerRequest* request) {
         if (request->url().startsWith("/api/")) {
             request->send(404, "application/json", "{\"error\":\"not found\"}");
             return;
         }
-        // Use the correct IP based on current WiFi mode
-        IPAddress ip = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
-        request->redirect("http://" + ip.toString() + "/");
+        request->redirect(captiveTarget());
     });
 }
 
@@ -766,6 +853,31 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     act.pwm_hold      = doc["pwm_hold"] | 2048;
     act.ramp_ms       = doc["ramp_ms"] | 50;
 
+    // AUDIT FIX: validate ranges so the API can never write out-of-spec
+    // values to the runtime config (e.g. amplitude=360, pwm_hold=65535).
+    if (act.bus_id > 1) act.bus_id = 0;
+    if (act.pca_address < PCA_BASE_ADDRESS ||
+        act.pca_address >= PCA_BASE_ADDRESS + PCA_MAX_PER_BUS) {
+        act.pca_address = PCA_BASE_ADDRESS;
+    }
+    if (act.pca_channel >= PCA_CHANNELS) act.pca_channel = 0;
+    if (act.latency_ms > 1000) act.latency_ms = 1000;
+    if (act.type == ACT_SERVO) {
+        if (act.angle_initial > SERVO_MAX_ANGLE) act.angle_initial = SERVO_MAX_ANGLE;
+        if (act.angle_b       > SERVO_MAX_ANGLE) act.angle_b       = SERVO_MAX_ANGLE;
+        if (act.amplitude     > SERVO_MAX_ANGLE) act.amplitude     = SERVO_MAX_ANGLE;
+        if (act.speed_ms == 0)                    act.speed_ms      = 1;
+        if (act.speed_ms > 5000)                  act.speed_ms      = 5000;
+        if (act.behavior > SERVO_TOUCHE)          act.behavior      = SERVO_FRAPPE;
+    } else {
+        if (act.pwm_initial > SOLENOID_PWM_MAX) act.pwm_initial = SOLENOID_PWM_MAX;
+        if (act.pwm_hold    > SOLENOID_PWM_MAX) act.pwm_hold    = SOLENOID_PWM_MAX;
+        if (act.pulse_ms     > 500)             act.pulse_ms     = 500;
+        if (act.pulse_min_ms > act.pulse_ms)    act.pulse_min_ms = act.pulse_ms;
+        if (act.ramp_ms      > 5000)            act.ramp_ms      = 5000;
+        if (act.behavior > SOL_HIT_AND_HOLD)    act.behavior     = SOL_FRAPPE;
+    }
+
     uint8_t count_before = _config->getActuatorCount();
     if (_config->addActuator(act)) {
         bool is_new = (_config->getActuatorCount() > count_before);
@@ -979,6 +1091,7 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
 // ============================================================================
 
 void WebServer::handlePostSave(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     if (_config->save()) {
@@ -992,6 +1105,7 @@ void WebServer::handlePostSave(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     _config->loadDefaults();
@@ -1002,6 +1116,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
 
 void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
                                        uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_scheduler || !_config) { request->send(500); return; }
 
     StaticJsonDocument<128> doc;
@@ -1034,6 +1149,7 @@ void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
 
 void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_safety) { request->send(500); return; }
 
     StaticJsonDocument<64> doc;
@@ -1432,6 +1548,7 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
 
 void WebServer::handlePostCalibrate(AsyncWebServerRequest* request,
                                     uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_calibrator) {
         request->send(503, "application/json",
                       "{\"error\":\"calibrator not available\"}");
@@ -1467,6 +1584,7 @@ void WebServer::handlePostCalibrate(AsyncWebServerRequest* request,
 }
 
 void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_calibrator) {
         request->send(503, "application/json",
                       "{\"error\":\"calibrator not available\"}");
@@ -1475,9 +1593,23 @@ void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
 
     uint8_t applied = _calibrator->applyResults();
 
-    StaticJsonDocument<64> doc;
+    // AUDIT FIX: persist the new latency values to flash so they survive
+    // a reboot. Without this, every power cycle reverts to the previous
+    // (possibly default) latencies and re-measurement is required.
+    bool saved = false;
+    if (applied > 0 && _config) {
+        saved = _config->save();
+        if (saved) {
+            logger.log(LOG_INFO, CAT_CAL, "Calibration applied & saved (%d actuators)", applied);
+        } else {
+            logger.log(LOG_ERROR, CAT_CAL, "Calibration applied but save failed");
+        }
+    }
+
+    StaticJsonDocument<96> doc;
     doc["ok"]      = true;
     doc["applied"] = applied;
+    doc["saved"]   = saved;
 
     String output;
     serializeJson(doc, output);
@@ -1565,6 +1697,7 @@ void WebServer::handleGetTestLog(AsyncWebServerRequest* request) {
 
 void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
                                     uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_testManager) {
         request->send(503, "application/json",
                       "{\"error\":\"test manager not available\"}");
@@ -1600,6 +1733,7 @@ void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
 
 void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
                                     uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_testManager) {
         request->send(503, "application/json",
                       "{\"error\":\"test manager not available\"}");
@@ -1635,6 +1769,7 @@ void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
 
 void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_testManager) {
         request->send(503, "application/json",
                       "{\"error\":\"test manager not available\"}");

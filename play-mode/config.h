@@ -61,6 +61,9 @@
 #define SAFETY_SOLENOID_HOLD_MA     150     // Estimated solenoid hold current (mA)
 #define SAFETY_MAX_POLYPHONY        12      // Max simultaneously active actuators
 #define SAFETY_DEGRADATION_THRESHOLD_MA 4000 // Graceful degradation threshold (mA)
+#define SAFETY_DEGRADATION_RELEASE_MA   3500 // Graceful degradation release threshold (hysteresis)
+#define SAFETY_KILL_RELEASE_MA          4000 // Kill switch auto-release threshold (hysteresis)
+#define SAFETY_KILL_RELEASE_MIN_MS      5000 // Min time before automatic kill switch recovery (ms)
 
 // --- Power Manager (Phase 5) ---
 #define POWER_SERVO_BUS_MAX_MA          3000    // Max servo bus budget (mA)
@@ -73,6 +76,7 @@
 #define POWER_UPDATE_INTERVAL_MS        50      // Power stats update interval (ms)
 #define POWER_MAX_POLYPHONY             12      // Max global polyphony (default)
 #define POWER_DEGRADATION_THRESHOLD_PCT 80      // Budget % threshold for graceful degradation
+#define POWER_DEGRADATION_RELEASE_PCT   70      // Release threshold for graceful degradation (hysteresis)
 
 // --- WiFi ---
 #define WIFI_DEFAULT_HOSTNAME    "play-mode"
@@ -112,6 +116,9 @@
 #define WEB_SERVER_PORT          80      // Web server HTTP port
 #define WEB_WS_BROADCAST_MS      200     // WebSocket stats broadcast interval (ms)
 #define WEB_MAX_WS_CLIENTS       4       // Max simultaneous WebSocket clients
+#define WEB_MAX_JSON_BODY        4096    // Max accepted size for JSON request bodies (bytes)
+#define WEB_AUTH_HEADER          "X-PlayMode-Token" // Header carrying the auth token
+#define WEB_AUTH_PARAM           "token" // Query/body parameter accepted as fallback
 
 // --- Acoustic Calibrator (Phase 7) ---
 #define CAL_I2S_PORT            0       // ESP32 I²S port (0 or 1)

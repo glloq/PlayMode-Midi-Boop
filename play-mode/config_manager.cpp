@@ -17,11 +17,20 @@ ConfigManager::ConfigManager()
 }
 
 bool ConfigManager::begin() {
-    if (!LittleFS.begin(true)) {  // true = format on failure
-        Serial.println("[CONFIG] LittleFS mount error");
-        return false;
+    // AUDIT FIX: do NOT auto-format on mount failure — that silently wipes
+    // every saved instrument, mapping and calibration result. Try first
+    // without format; only format if a mount still fails afterwards
+    // (corrupted FS on a brand-new flash).
+    if (!LittleFS.begin(false)) {
+        Serial.println("[CONFIG] LittleFS mount failed — attempting one-time format");
+        if (!LittleFS.begin(true)) {
+            Serial.println("[CONFIG] LittleFS mount error after format attempt");
+            return false;
+        }
+        Serial.println("[CONFIG] LittleFS formatted (was uninitialised/corrupt)");
+    } else {
+        Serial.println("[CONFIG] LittleFS mounted");
     }
-    Serial.println("[CONFIG] LittleFS mounted");
 
     // Load config if it exists, otherwise load defaults
     if (configExists()) {

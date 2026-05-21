@@ -1735,12 +1735,14 @@ function renderMidiLog() {
     const ch = (m.type & 0x0F) + 1;
     const src = MIDI_SOURCE_NAMES[m.src] || m.src || '?';
     const routed = m.routed ? '<span class="badge on">Yes</span>' : '<span class="badge off">No</span>';
+    // AUDIT FIX: escape every value coming from the MIDI bus (src/typeName
+    // may originate from external traffic). routed is a static literal.
     html += '<tr>';
-    html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap">' + formatLogTime(m.t || 0) + '</td>';
-    html += '<td>' + src + '</td>';
+    html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap">' + escHtml(formatLogTime(m.t || 0)) + '</td>';
+    html += '<td>' + escHtml(src) + '</td>';
     html += '<td>' + ch + '</td>';
-    html += '<td>' + typeName + '</td>';
-    html += '<td>' + formatMidiData(m) + '</td>';
+    html += '<td>' + escHtml(typeName) + '</td>';
+    html += '<td>' + escHtml(formatMidiData(m)) + '</td>';
     html += '<td>' + routed + '</td>';
     html += '</tr>';
   }

@@ -185,7 +185,10 @@ void ActuatorEngine::solenoidFrappe(ActuatorConfig& act, const SchedulerEvent& e
         // actuator) instead of global constants SOLENOID_MIN/MAX_PULSE_MS.
         uint16_t min_pulse = (act.pulse_min_ms > 0) ? act.pulse_min_ms : SOLENOID_MIN_PULSE_MS;
         uint16_t max_pulse = (act.pulse_ms > 0) ? act.pulse_ms : SOLENOID_MAX_PULSE_MS;
-        uint16_t pulse = map(event.velocity, 0, 127, min_pulse, max_pulse);
+        // AUDIT FIX: clamp velocity and ensure min <= max before mapping.
+        uint8_t vel = (event.velocity > 127) ? 127 : event.velocity;
+        if (min_pulse > max_pulse) { uint16_t t = min_pulse; min_pulse = max_pulse; max_pulse = t; }
+        uint16_t pulse = (uint16_t)map(vel, 0, 127, min_pulse, max_pulse);
         scheduleReturn(act, pulse, 0);
 
     } else if (event.action == ACTION_PWM_SET) {
@@ -234,8 +237,11 @@ void ActuatorEngine::setSolenoidPWM(ActuatorConfig& act, uint16_t pwm) {
 }
 
 uint16_t ActuatorEngine::velocityToAmplitude(const ActuatorConfig& act, uint8_t velocity) {
-    // Map MIDI velocity (0-127) -> amplitude (0 to act.amplitude)
-    return map(velocity, 0, 127, 0, act.amplitude);
+    // AUDIT FIX: clamp velocity to [0,127] before mapping. Arduino `map()`
+    // extrapolates linearly outside the source range, which would let an
+    // out-of-spec MIDI velocity exceed the configured amplitude.
+    if (velocity > 127) velocity = 127;
+    return (uint16_t)map(velocity, 0, 127, 0, (long)act.amplitude);
 }
 
 void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint16_t target_value) {

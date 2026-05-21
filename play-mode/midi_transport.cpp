@@ -226,7 +226,11 @@ void MidiTransport::pollRTP() {
 void MidiTransport::deliverMessage(MidiMessage& msg, MidiTransportSource source) {
     msg.source = source;
     if (!_jitterBuffer.insert(msg)) {
-        Serial.println("[MIDI-TR] Jitter buffer full, message lost");
+        // AUDIT FIX: include the source in the log so the operator can
+        // pinpoint which transport is saturating the jitter buffer.
+        static const char* src_names[] = {"serial", "udp", "rtp"};
+        Serial.printf("[MIDI-TR] Jitter buffer full, message lost (src=%s)\n",
+                      src_names[source % 3]);
     }
 
     if (source == MIDI_SOURCE_RTP) {
