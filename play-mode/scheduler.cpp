@@ -151,32 +151,51 @@ void Scheduler::drainInputQueue() {
 }
 
 // ============================================================================
-// Sorted insertion into the priority queue (ascending timestamp order)
+// AUDIT FIX: priority queue as a min-heap — O(log n) insertion / pop
+// (was O(n²) due to linear search + array shift). Comparator uses signed
+// subtraction so it stays correct across the uint32_t wrap of
+// `esp_timer_get_time()` (every ~71 min).
 // ============================================================================
+
+bool Scheduler::eventLess(const SchedulerEvent& a, const SchedulerEvent& b) {
+    int32_t dt = (int32_t)(a.trigger_time_us - b.trigger_time_us);
+    if (dt != 0) return dt < 0;
+    return a.priority < b.priority;
+}
+
+void Scheduler::heapSiftUp(uint16_t idx) {
+    while (idx > 0) {
+        uint16_t parent = (idx - 1) >> 1;
+        if (!eventLess(_event_buffer[idx], _event_buffer[parent])) break;
+        SchedulerEvent tmp = _event_buffer[idx];
+        _event_buffer[idx] = _event_buffer[parent];
+        _event_buffer[parent] = tmp;
+        idx = parent;
+    }
+}
+
+void Scheduler::heapSiftDown(uint16_t idx) {
+    for (;;) {
+        uint16_t left  = idx * 2 + 1;
+        uint16_t right = idx * 2 + 2;
+        uint16_t smallest = idx;
+        if (left  < _event_count && eventLess(_event_buffer[left],  _event_buffer[smallest])) smallest = left;
+        if (right < _event_count && eventLess(_event_buffer[right], _event_buffer[smallest])) smallest = right;
+        if (smallest == idx) break;
+        SchedulerEvent tmp = _event_buffer[idx];
+        _event_buffer[idx] = _event_buffer[smallest];
+        _event_buffer[smallest] = tmp;
+        idx = smallest;
+    }
+}
+
 void Scheduler::insertEvent(const SchedulerEvent& event) {
     if (_event_count >= SCHEDULER_MAX_EVENTS) {
         Serial.println("[SCHED] WARNING: priority queue full, event dropped");
         return;
     }
-
-    // Find insertion position (ascending order by timestamp)
-    uint16_t pos = _event_count;
-    for (uint16_t i = 0; i < _event_count; i++) {
-        if (event.trigger_time_us < _event_buffer[i].trigger_time_us ||
-            (event.trigger_time_us == _event_buffer[i].trigger_time_us &&
-             event.priority < _event_buffer[i].priority)) {
-            pos = i;
-            break;
-        }
-    }
-
-    // Shift elements to make room
-    for (uint16_t i = _event_count; i > pos; i--) {
-        _event_buffer[i] = _event_buffer[i - 1];
-    }
-
-    // Insert the event
-    _event_buffer[pos] = event;
+    _event_buffer[_event_count] = event;
+    heapSiftUp(_event_count);
     _event_count++;
 }
 
@@ -193,7 +212,9 @@ void Scheduler::processReadyEvents() {
     // (after ~71 min, esp_timer_get_time() truncated to uint32 wraps around to 0).
     while (_event_count > 0 &&
            (int32_t)(now_us - _event_buffer[0].trigger_time_us) >= 0) {
-        SchedulerEvent& event = _event_buffer[0];
+        // AUDIT FIX: copy the root event by value so the heap can be
+        // mutated below without aliasing.
+        SchedulerEvent event = _event_buffer[0];
 
         // Find the target actuator
         ActuatorConfig* actuator = findActuator(event.actuator_id);
@@ -213,11 +234,12 @@ void Scheduler::processReadyEvents() {
             Serial.printf("[SCHED] Actuator %d not found\n", event.actuator_id);
         }
 
-        // Remove the processed event (shift)
-        for (uint16_t i = 0; i < _event_count - 1; i++) {
-            _event_buffer[i] = _event_buffer[i + 1];
-        }
+        // AUDIT FIX: O(log n) pop from the min-heap (was O(n) array shift).
         _event_count--;
+        if (_event_count > 0) {
+            _event_buffer[0] = _event_buffer[_event_count];
+            heapSiftDown(0);
+        }
     }
 }
 

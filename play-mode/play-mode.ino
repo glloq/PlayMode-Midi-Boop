@@ -339,11 +339,20 @@ void loop() {
     }
 
     // 4. Periodic Power Manager update
+    // AUDIT FIX: rebuild the pointer array only when actuator count
+    // changes — PowerManager.update() rate-limits internally, so the
+    // table doesn't need to be reshuffled on every loop tick.
     {
         ActuatorConfig* actuators = configManager.getActuators();
         uint8_t count = configManager.getActuatorCount();
         static ActuatorConfig* act_ptrs[MAX_ACTUATORS];
-        for (uint8_t i = 0; i < count; i++) act_ptrs[i] = &actuators[i];
+        static uint8_t last_count = 0xFF;
+        static ActuatorConfig* last_base = nullptr;
+        if (count != last_count || actuators != last_base) {
+            for (uint8_t i = 0; i < count; i++) act_ptrs[i] = &actuators[i];
+            last_count = count;
+            last_base = actuators;
+        }
         powerManager.update(act_ptrs, count);
     }
 
@@ -427,7 +436,11 @@ void loop() {
                       ESP.getFreeHeap());
     }
 
-    delay(1);  // Minimal yield — MIDI requires frequent reading
+    // AUDIT FIX: `delay(1)` blocks Core 0 for up to 1 ms — adds jitter to
+    // MIDI polling. `yield()` cooperatively releases the CPU to higher
+    // priority tasks and the FreeRTOS idle hook (which feeds the WDT)
+    // without forcing a 1 ms wait.
+    yield();
 }
 
 // ============================================================================

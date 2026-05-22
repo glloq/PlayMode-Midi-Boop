@@ -79,6 +79,8 @@ private:
     uint16_t _max_total_current_ma;  // mA (default SAFETY_MAX_TOTAL_CURRENT_MA)
 
     uint32_t _last_check_us;         // Last periodic check
+    uint32_t _kill_switch_activated_us; // esp_timer when kill switch was last activated (auto-recovery)
+    bool     _kill_switch_auto;       // true if last activation was automatic (overcurrent)
 
     // Default state (for invalid IDs)
     static const ActuatorSafetyState _default_safety_state;

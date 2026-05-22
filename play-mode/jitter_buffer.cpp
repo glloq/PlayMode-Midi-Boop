@@ -43,9 +43,11 @@ bool JitterBuffer::pop(MidiMessage& msg) {
     uint32_t now_us = (uint32_t)esp_timer_get_time();
     uint32_t hold_us = (uint32_t)_depth_ms * 1000;
 
-    // Check if the oldest message has been held long enough
-    uint32_t age_us = now_us - _buffer[_tail].timestamp_us;
-    if (age_us >= hold_us) {
+    // AUDIT FIX: signed subtraction correctly handles the uint32_t wrap that
+    // happens every ~71 min on `esp_timer_get_time()` truncated to 32 bits.
+    // Negative ages (timestamp clearly in the future) are treated as 0.
+    int32_t age_us = (int32_t)(now_us - _buffer[_tail].timestamp_us);
+    if (age_us >= (int32_t)hold_us) {
         msg = _buffer[_tail];
         _tail = (_tail + 1) % JITTER_BUFFER_SIZE;
         _count--;

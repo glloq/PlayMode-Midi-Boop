@@ -80,6 +80,12 @@ private:
 
     // Find the actuator config by ID
     ActuatorConfig* findActuator(uint8_t id);
+
+    // AUDIT FIX: min-heap helpers — O(log n) insert/pop instead of the
+    // previous O(n²) sorted-shift implementation. Wrap-safe comparator.
+    static bool eventLess(const SchedulerEvent& a, const SchedulerEvent& b);
+    void heapSiftUp(uint16_t idx);
+    void heapSiftDown(uint16_t idx);
 };
 
 #endif // SCHEDULER_H

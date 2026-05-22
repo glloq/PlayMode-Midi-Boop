@@ -323,9 +323,11 @@ uint16_t PowerManager::estimateCurrent(const ActuatorConfig& actuator,
             return POWER_SOLENOID_FULL_MA;
         }
         // Simple strike: current proportional to velocity
+        // AUDIT FIX: promote to uint32_t BEFORE multiplication to avoid
+        // a uint16_t overflow if delta or velocity grows in the future.
         uint16_t base  = POWER_SOLENOID_HOLD_MA;
-        uint16_t delta = POWER_SOLENOID_FULL_MA - POWER_SOLENOID_HOLD_MA;
-        return (uint16_t)(base + (uint32_t)(delta * velocity) / 127);
+        uint32_t delta = (uint32_t)POWER_SOLENOID_FULL_MA - (uint32_t)POWER_SOLENOID_HOLD_MA;
+        return (uint16_t)(base + (delta * velocity) / 127UL);
     }
 
     return 0;
@@ -341,9 +343,15 @@ void PowerManager::updateDerivedStats() {
         _stats.budget_used_percent = 0;
     }
 
-    // Graceful degradation
-    _stats.degradation_active =
-        (_stats.budget_used_percent >= POWER_DEGRADATION_THRESHOLD_PCT);
+    // AUDIT FIX: graceful degradation with hysteresis to prevent flapping
+    // when usage oscillates around POWER_DEGRADATION_THRESHOLD_PCT.
+    if (_stats.degradation_active) {
+        if (_stats.budget_used_percent <= POWER_DEGRADATION_RELEASE_PCT) {
+            _stats.degradation_active = false;
+        }
+    } else if (_stats.budget_used_percent >= POWER_DEGRADATION_THRESHOLD_PCT) {
+        _stats.degradation_active = true;
+    }
 
     // Soft limit exceeded
     _stats.budget_exceeded =

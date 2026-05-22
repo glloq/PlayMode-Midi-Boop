@@ -14,7 +14,9 @@ SafetyManager::SafetyManager(PCADriver& pca)
       _watchdog_ms(SAFETY_WATCHDOG_MS),
       _max_polyphony(SAFETY_MAX_POLYPHONY),
       _max_total_current_ma(SAFETY_MAX_TOTAL_CURRENT_MA),
-      _last_check_us(0) {
+      _last_check_us(0),
+      _kill_switch_activated_us(0),
+      _kill_switch_auto(false) {
     memset(_actuator_safety, 0, sizeof(_actuator_safety));
     memset(&_global_state, 0, sizeof(_global_state));
 }
@@ -119,27 +121,42 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
         }
     }
 
-    // Check the graceful degradation threshold
-    if (_global_state.total_estimated_current_ma >= SAFETY_DEGRADATION_THRESHOLD_MA) {
-        if (!_global_state.degradation_active) {
-            _global_state.degradation_active = true;
-            Serial.printf("[SAFETY] Graceful degradation activated (%dmA)\n",
-                          _global_state.total_estimated_current_ma);
+    // AUDIT FIX: graceful degradation with hysteresis to avoid flapping
+    // around the threshold when current oscillates.
+    if (_global_state.degradation_active) {
+        if (_global_state.total_estimated_current_ma <= SAFETY_DEGRADATION_RELEASE_MA) {
+            _global_state.degradation_active = false;
         }
-    } else {
-        _global_state.degradation_active = false;
+    } else if (_global_state.total_estimated_current_ma >= SAFETY_DEGRADATION_THRESHOLD_MA) {
+        _global_state.degradation_active = true;
+        Serial.printf("[SAFETY] Graceful degradation activated (%dmA)\n",
+                      _global_state.total_estimated_current_ma);
     }
 
-    // Check for critical current overload
+    // Check for critical current overload (latches kill switch)
     if (_global_state.total_estimated_current_ma >= _max_total_current_ma) {
         if (!_global_state.over_current) {
             _global_state.over_current = true;
             Serial.printf("[SAFETY] CURRENT OVERLOAD: %dmA > %dmA — KILL SWITCH\n",
                           _global_state.total_estimated_current_ma, _max_total_current_ma);
             activateKillSwitch();
+            _kill_switch_auto = true;
         }
     } else {
         _global_state.over_current = false;
+    }
+
+    // AUDIT FIX: automatic kill switch recovery — only when the trigger was
+    // automatic (overcurrent), the load has been below the release threshold
+    // for SAFETY_KILL_RELEASE_MIN_MS, and no manual deactivation happened.
+    if (_global_state.kill_switch_active && _kill_switch_auto &&
+        _global_state.total_estimated_current_ma <= SAFETY_KILL_RELEASE_MA) {
+        uint32_t elapsed_ms = (now_us - _kill_switch_activated_us) / 1000UL;
+        if (elapsed_ms >= SAFETY_KILL_RELEASE_MIN_MS) {
+            Serial.printf("[SAFETY] Auto-recovery from kill switch after %ums (load=%umA)\n",
+                          elapsed_ms, _global_state.total_estimated_current_ma);
+            deactivateKillSwitch();
+        }
     }
 
     // Reset expired counting windows (1 second)
@@ -156,12 +173,16 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
 
 void SafetyManager::activateKillSwitch() {
     _global_state.kill_switch_active = true;
+    _kill_switch_activated_us = (uint32_t)esp_timer_get_time();
+    // Default to manual; over-current path overrides to true afterwards.
+    _kill_switch_auto = false;
     _pca.killAll();
     Serial.println("[SAFETY] KILL SWITCH ACTIVATED — all outputs cut off");
 }
 
 void SafetyManager::deactivateKillSwitch() {
     _global_state.kill_switch_active = false;
+    _kill_switch_auto = false;
     _pca.enableBus(0, true);
     _pca.enableBus(1, true);
     Serial.println("[SAFETY] Kill switch deactivated — outputs re-enabled");
