@@ -878,22 +878,21 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
         if (act.behavior > SOL_HIT_AND_HOLD)    act.behavior     = SOL_FRAPPE;
     }
 
-    uint8_t count_before = _config->getActuatorCount();
     if (_config->addActuator(act)) {
-        bool is_new = (_config->getActuatorCount() > count_before);
         ActuatorConfig* actuators = _config->getActuators();
         uint8_t count = _config->getActuatorCount();
         for (uint8_t i = 0; i < count; i++) {
             if (actuators[i].id == act.id) {
                 _engine->initActuator(actuators[i]);
-                // Register in scheduler only if it's a new actuator
-                // (avoids duplicates in _actuators[] during an update)
-                if (is_new) {
-                    _scheduler->registerActuator(&actuators[i]);
-                }
                 break;
             }
         }
+        // AUDIT FIX: rebuild the scheduler's actuator table from the config
+        // array. The previous per-actuator registerActuator() left stale and
+        // duplicate pointers after a delete-then-add (the config array shifts
+        // on removal), which double-counted current in the SafetyManager and
+        // could trip a false overcurrent kill switch.
+        if (_scheduler) _scheduler->syncActuators(actuators, count);
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -1252,6 +1251,13 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
     }
 
     if (_config->removeActuator(id)) {
+        // AUDIT FIX: resync the scheduler's actuator table — removeActuator()
+        // shifts the config array, so the scheduler's pointers (and count)
+        // must be rebuilt to avoid pointing at stale/duplicated slots.
+        if (_scheduler) {
+            _scheduler->syncActuators(_config->getActuators(),
+                                      _config->getActuatorCount());
+        }
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(404, "application/json",
@@ -1756,6 +1762,10 @@ void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
     uint8_t  count       = doc["count"]       | (uint8_t)TEST_BURST_DEFAULT_COUNT;
     uint8_t  velocity    = doc["velocity"]    | TEST_DEFAULT_VELOCITY;
     uint16_t interval_ms = doc["interval_ms"] | (uint16_t)TEST_BURST_DEFAULT_INTVL_MS;
+
+    // AUDIT FIX: a burst of 0 strikes is meaningless and made getProgress()
+    // divide by zero — clamp to at least one strike.
+    if (count == 0) count = 1;
 
     if (_testManager->startBurst(act_id, count, velocity, interval_ms)) {
         logger.log(LOG_INFO, CAT_TEST, "Burst started act=%d count=%d vel=%d",

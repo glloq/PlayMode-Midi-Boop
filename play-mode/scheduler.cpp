@@ -84,6 +84,25 @@ void Scheduler::registerActuator(ActuatorConfig* actuator) {
     }
 }
 
+// AUDIT FIX: rebuild the actuator pointer table so it exactly mirrors the
+// ConfigManager array. Ordering matters for the concurrent Core 1 reader:
+// shrink the count first (so it never iterates past a valid pointer), then
+// repoint every slot, then publish the final count last.
+void Scheduler::syncActuators(ActuatorConfig* base, uint8_t count) {
+    if (base == nullptr) {
+        _actuator_count = 0;
+        return;
+    }
+    if (count > MAX_ACTUATORS) count = MAX_ACTUATORS;
+
+    if (count < _actuator_count) _actuator_count = count;
+    for (uint8_t i = 0; i < count; i++) {
+        _actuators[i] = &base[i];
+    }
+    _actuator_count = count;
+    Serial.printf("[SCHED] Actuator table synced (%d actuators)\n", count);
+}
+
 uint16_t Scheduler::getQueuedEventCount() const {
     return _event_count;
 }
