@@ -1,8 +1,16 @@
 #include "config_manager.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // ============================================================================
 // PlayMode — Config Manager (implementation)
 // ============================================================================
+
+// AUDIT FIX (point B): mutex that serialises structural edits of the actuator
+// array (add/remove/update) against the real-time Scheduler, which
+// dereferences pointers into that array from Core 1 while driving the PCA9685.
+// Defined here, referenced by the Scheduler via an extern declaration.
+SemaphoreHandle_t g_actuator_mutex = nullptr;
 
 ConfigManager::ConfigManager()
     : _actuator_count(0),
@@ -17,6 +25,13 @@ ConfigManager::ConfigManager()
 }
 
 bool ConfigManager::begin() {
+    // AUDIT FIX (point B): create the actuator mutex before the Scheduler task
+    // is started (Scheduler::begin() runs later in setup()), so structural
+    // edits and real-time processing are serialised from the first tick.
+    if (g_actuator_mutex == nullptr) {
+        g_actuator_mutex = xSemaphoreCreateMutex();
+    }
+
     // AUDIT FIX: do NOT auto-format on mount failure — that silently wipes
     // every saved instrument, mapping and calibration result. Try first
     // without format; only format if a mount still fails afterwards
@@ -247,6 +262,19 @@ InstrumentConfig* ConfigManager::getInstruments() {
 
 uint8_t ConfigManager::getInstrumentCount() const {
     return _instrument_count;
+}
+
+// AUDIT FIX (point B): guard structural actuator-array edits against the
+// real-time Scheduler. Returns true if the caller now holds the lock (or the
+// mutex is unavailable, in which case behaviour degrades to the previous
+// unguarded path — never a hard failure).
+bool ConfigManager::lockActuators(uint32_t timeout_ms) {
+    if (g_actuator_mutex == nullptr) return true;
+    return xSemaphoreTake(g_actuator_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
+void ConfigManager::unlockActuators() {
+    if (g_actuator_mutex != nullptr) xSemaphoreGive(g_actuator_mutex);
 }
 
 bool ConfigManager::addActuator(const ActuatorConfig& actuator) {

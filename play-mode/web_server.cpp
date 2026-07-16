@@ -878,7 +878,13 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
         if (act.behavior > SOL_HIT_AND_HOLD)    act.behavior     = SOL_FRAPPE;
     }
 
-    if (_config->addActuator(act)) {
+    // AUDIT FIX (point B): hold the actuator lock across the add/update, the
+    // rest-position init (I²C) and the scheduler resync, so the real-time
+    // Scheduler on Core 1 never dereferences a slot that is being written or
+    // reshuffled underneath it.
+    _config->lockActuators();
+    bool added = _config->addActuator(act);
+    if (added) {
         ActuatorConfig* actuators = _config->getActuators();
         uint8_t count = _config->getActuatorCount();
         for (uint8_t i = 0; i < count; i++) {
@@ -887,12 +893,16 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
                 break;
             }
         }
-        // AUDIT FIX: rebuild the scheduler's actuator table from the config
-        // array. The previous per-actuator registerActuator() left stale and
-        // duplicate pointers after a delete-then-add (the config array shifts
-        // on removal), which double-counted current in the SafetyManager and
+        // Rebuild the scheduler's actuator table from the config array. The
+        // previous per-actuator registerActuator() left stale and duplicate
+        // pointers after a delete-then-add (the config array shifts on
+        // removal), which double-counted current in the SafetyManager and
         // could trip a false overcurrent kill switch.
         if (_scheduler) _scheduler->syncActuators(actuators, count);
+    }
+    _config->unlockActuators();
+
+    if (added) {
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -1240,6 +1250,12 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
 
     uint8_t id = request->getParam("id")->value().toInt();
 
+    // AUDIT FIX (point B): hold the actuator lock across the rest-position
+    // reset (I²C), the array-shifting removeActuator() and the scheduler
+    // resync — this is the removal path whose element shift most needs to be
+    // mutually exclusive with the Scheduler's Core 1 dereferences.
+    _config->lockActuators();
+
     // Return the actuator to rest before deletion
     ActuatorConfig* actuators = _config->getActuators();
     uint8_t count = _config->getActuatorCount();
@@ -1250,14 +1266,17 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
         }
     }
 
-    if (_config->removeActuator(id)) {
-        // AUDIT FIX: resync the scheduler's actuator table — removeActuator()
-        // shifts the config array, so the scheduler's pointers (and count)
-        // must be rebuilt to avoid pointing at stale/duplicated slots.
-        if (_scheduler) {
-            _scheduler->syncActuators(_config->getActuators(),
-                                      _config->getActuatorCount());
-        }
+    bool removed = _config->removeActuator(id);
+    if (removed && _scheduler) {
+        // removeActuator() shifts the config array, so the scheduler's
+        // pointers (and count) must be rebuilt to avoid pointing at stale or
+        // duplicated slots.
+        _scheduler->syncActuators(_config->getActuators(),
+                                  _config->getActuatorCount());
+    }
+    _config->unlockActuators();
+
+    if (removed) {
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(404, "application/json",
