@@ -226,7 +226,7 @@ void ActuatorEngine::solenoidHitAndHold(ActuatorConfig& act, const SchedulerEven
 // ============================================================================
 
 void ActuatorEngine::setServoAngle(ActuatorConfig& act, uint16_t angle) {
-    uint16_t pwm = _pca.angleToPWM(angle);
+    uint16_t pwm = _pca.angleToPWM(angle, act.bus_id);
     _pca.setActuatorPWM(act, pwm);
     act.state.current_position = pwm;
 }

@@ -301,7 +301,7 @@ void SafetyManager::checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuator)
         if (actuator.type == ACT_SOLENOID) {
             _pca.setActuatorPWM(actuator, 0);
         } else if (actuator.type == ACT_SERVO) {
-            _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial));
+            _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial, actuator.bus_id));
         }
 
         Serial.printf("[SAFETY] Watchdog actuator %d: forced OFF after %dms\n",
