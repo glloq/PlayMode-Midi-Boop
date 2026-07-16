@@ -181,7 +181,7 @@ void WebServer::setupStaticRoutes() {
     // Expose the auth token to clients that can already reach this device
     // on the LAN/AP — only useful in AP mode. STA mode returns "ok".
     _server.on("/api/auth-token", HTTP_GET, [](AsyncWebServerRequest* request) {
-        StaticJsonDocument<128> doc;
+        JsonDocument doc;
         if (WiFi.getMode() & WIFI_AP) {
             ensureApToken();
             doc["ap_mode"] = true;
@@ -498,14 +498,14 @@ void WebServer::handleGetStatus(AsyncWebServerRequest* request) {
 void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     InstrumentConfig* instruments = _config->getInstruments();
     uint8_t count = _config->getInstrumentCount();
 
     for (uint8_t i = 0; i < count; i++) {
-        JsonObject obj = arr.createNestedObject();
+        JsonObject obj = arr.add<JsonObject>();
         obj["index"]   = i;
         obj["name"]    = instruments[i].name;
         obj["channel"] = instruments[i].midi_channel;
@@ -515,9 +515,9 @@ void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
         obj["auto_cal"]       = instruments[i].auto_calibration;
         obj["enabled"]        = instruments[i].enabled;
 
-        JsonArray acts = obj.createNestedArray("actuators");
+        JsonArray acts = obj["actuators"].to<JsonArray>();
         for (uint8_t j = 0; j < instruments[i].actuator_count; j++) {
-            JsonObject a = acts.createNestedObject();
+            JsonObject a = acts.add<JsonObject>();
             a["id"]   = instruments[i].actuator_ids[j];
             a["note"] = instruments[i].midi_notes[j];
         }
@@ -531,14 +531,14 @@ void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
 void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     ActuatorConfig* actuators = _config->getActuators();
     uint8_t count = _config->getActuatorCount();
 
     for (uint8_t i = 0; i < count; i++) {
-        JsonObject obj = arr.createNestedObject();
+        JsonObject obj = arr.add<JsonObject>();
         obj["id"]       = actuators[i].id;
         obj["type"]     = actuators[i].type;
         obj["bus_id"]   = actuators[i].bus_id;
@@ -566,7 +566,7 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
         }
 
         // Runtime state
-        JsonObject state = obj.createNestedObject("state");
+        JsonObject state = obj["state"].to<JsonObject>();
         state["active"]   = actuators[i].state.active;
         state["position"] = actuators[i].state.current_position;
     }
@@ -579,12 +579,12 @@ void WebServer::handleGetActuators(AsyncWebServerRequest* request) {
 void WebServer::handleGetBuses(AsyncWebServerRequest* request) {
     if (!_pca) { request->send(500); return; }
 
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     for (uint8_t b = 0; b < 2; b++) {
         BusConfig& bus = _pca->getBusConfig(b);
-        JsonObject obj = arr.createNestedObject();
+        JsonObject obj = arr.add<JsonObject>();
         obj["id"]        = bus.id;
         obj["sda"]       = bus.sda_pin;
         obj["scl"]       = bus.scl_pin;
@@ -594,7 +594,7 @@ void WebServer::handleGetBuses(AsyncWebServerRequest* request) {
         obj["enabled"]   = bus.enabled;
         obj["pca_count"] = bus.pca_count;
 
-        JsonArray addrs = obj.createNestedArray("pca_addrs");
+        JsonArray addrs = obj["pca_addrs"].to<JsonArray>();
         for (uint8_t p = 0; p < bus.pca_count; p++) {
             addrs.add(bus.pca_addresses[p]);
         }
@@ -608,7 +608,7 @@ void WebServer::handleGetBuses(AsyncWebServerRequest* request) {
 void WebServer::handleGetWiFi(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     WiFiConfig* wifi = _config->getWiFiConfig();
     doc["ssid"]        = wifi->ssid;
     doc["hostname"]    = wifi->hostname;
@@ -628,7 +628,7 @@ void WebServer::handleGetWiFi(AsyncWebServerRequest* request) {
 void WebServer::handleGetMidi(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     MidiInputConfig* midi = _config->getMidiInputConfig();
     doc["serial_enabled"]   = midi->serial_enabled;
     doc["udp_enabled"]      = midi->udp_enabled;
@@ -646,27 +646,27 @@ void WebServer::handleGetMidi(AsyncWebServerRequest* request) {
 void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
     if (!_config) { request->send(500); return; }
 
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     MidiRoutingConfig* routings = _config->getRoutingConfigs();
     uint8_t count = _config->getRoutingCount();
 
     for (uint8_t i = 0; i < count; i++) {
-        JsonObject obj = arr.createNestedObject();
+        JsonObject obj = arr.add<JsonObject>();
         obj["instrument"] = routings[i].instrument_index;
 
-        JsonArray notes = obj.createNestedArray("notes");
+        JsonArray notes = obj["notes"].to<JsonArray>();
         for (uint8_t n = 0; n < routings[i].note_map_count; n++) {
-            JsonObject nm = notes.createNestedObject();
+            JsonObject nm = notes.add<JsonObject>();
             nm["note"]     = routings[i].note_map[n].midi_note;
             nm["actuator"] = routings[i].note_map[n].actuator_id;
             nm["enabled"]  = routings[i].note_map[n].enabled;
         }
 
-        JsonArray ccs = obj.createNestedArray("ccs");
+        JsonArray ccs = obj["ccs"].to<JsonArray>();
         for (uint8_t c = 0; c < routings[i].cc_map_count; c++) {
-            JsonObject cm = ccs.createNestedObject();
+            JsonObject cm = ccs.add<JsonObject>();
             cm["cc"]       = routings[i].cc_map[c].cc_number;
             cm["actuator"] = routings[i].cc_map[c].actuator_id;
             cm["target"]   = routings[i].cc_map[c].target;
@@ -675,9 +675,9 @@ void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
             cm["enabled"]  = routings[i].cc_map[c].enabled;
         }
 
-        JsonArray vel = obj.createNestedArray("velocity_curve");
+        JsonArray vel = obj["velocity_curve"].to<JsonArray>();
         for (uint8_t v = 0; v < routings[i].velocity_curve_count; v++) {
-            JsonObject vp = vel.createNestedObject();
+            JsonObject vp = vel.add<JsonObject>();
             vp["in"]  = routings[i].velocity_curve[v].input;
             vp["out"] = routings[i].velocity_curve[v].output;
         }
@@ -691,11 +691,11 @@ void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
 void WebServer::handleGetPower(AsyncWebServerRequest* request) {
     if (!_power) { request->send(500); return; }
 
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     const PowerStats& stats = _power->getStats();
     const PowerBudget& budget = _power->getBudget();
 
-    JsonObject s = doc.createNestedObject("stats");
+    JsonObject s = doc["stats"].to<JsonObject>();
     s["total_ma"]      = stats.total_estimated_ma;
     s["servo_bus_ma"]  = stats.servo_bus_ma;
     s["sol_bus_ma"]    = stats.solenoid_bus_ma;
@@ -705,14 +705,14 @@ void WebServer::handleGetPower(AsyncWebServerRequest* request) {
     s["degradation"]   = stats.degradation_active;
     s["exceeded"]      = stats.budget_exceeded;
 
-    JsonObject b = doc.createNestedObject("budget");
+    JsonObject b = doc["budget"].to<JsonObject>();
     b["global_max_ma"] = budget.global_max_ma;
     b["servo_max_ma"]  = budget.servo_bus_max_ma;
     b["sol_max_ma"]    = budget.solenoid_bus_max_ma;
     b["max_polyphony"] = budget.global_max_polyphony;
     b["smart_reject"]  = budget.smart_rejection;
 
-    JsonArray poly = b.createNestedArray("inst_polyphony");
+    JsonArray poly = b["inst_polyphony"].to<JsonArray>();
     for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
         poly.add(budget.instrument_max_polyphony[i]);
     }
@@ -725,7 +725,7 @@ void WebServer::handleGetPower(AsyncWebServerRequest* request) {
 void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     if (!_safety) { request->send(500); return; }
 
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     const SafetyState& state = _safety->getGlobalState();
 
     doc["total_current_ma"]  = state.total_estimated_current_ma;
@@ -735,7 +735,7 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     doc["over_current"]      = state.over_current;
 
     // Current config
-    JsonObject cfg = doc.createNestedObject("config");
+    JsonObject cfg = doc["config"].to<JsonObject>();
     cfg["max_duty_pct"]    = SAFETY_MAX_DUTY_CYCLE;
     cfg["max_freq_hz"]     = SAFETY_MAX_FREQ_HZ;
     cfg["watchdog_ms"]     = SAFETY_WATCHDOG_MS;
@@ -755,7 +755,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -784,7 +784,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     }
 
     // If an index is provided → update existing instrument
-    if (doc.containsKey("index")) {
+    if (!doc["index"].isNull()) {
         uint8_t idx = (uint8_t)(doc["index"].as<int>());
         InstrumentConfig* instruments = _config->getInstruments();
         uint8_t count = _config->getInstrumentCount();
@@ -821,7 +821,7 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
                                    uint8_t* data, size_t len) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -914,7 +914,7 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
                                uint8_t* data, size_t len) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -939,7 +939,7 @@ void WebServer::handlePostMidi(AsyncWebServerRequest* request,
                                uint8_t* data, size_t len) {
     if (!_config) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -967,7 +967,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
                                   uint8_t* data, size_t len) {
     if (!_config || !_dispatcher) { request->send(500); return; }
 
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -1049,7 +1049,7 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
                                       uint8_t* data, size_t len) {
     if (!_power) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -1057,13 +1057,13 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
         return;
     }
 
-    if (doc.containsKey("global_max_ma"))
+    if (!doc["global_max_ma"].isNull())
         _power->setGlobalMaxMA(doc["global_max_ma"]);
-    if (doc.containsKey("servo_max_ma"))
+    if (!doc["servo_max_ma"].isNull())
         _power->setServoBusMaxMA(doc["servo_max_ma"]);
-    if (doc.containsKey("sol_max_ma"))
+    if (!doc["sol_max_ma"].isNull())
         _power->setSolenoidBusMaxMA(doc["sol_max_ma"]);
-    if (doc.containsKey("max_polyphony"))
+    if (!doc["max_polyphony"].isNull())
         _power->setGlobalMaxPolyphony(doc["max_polyphony"]);
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1073,7 +1073,7 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
                                  uint8_t* data, size_t len) {
     if (!_safety) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -1081,15 +1081,15 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
         return;
     }
 
-    if (doc.containsKey("max_duty_pct"))
+    if (!doc["max_duty_pct"].isNull())
         _safety->setMaxDutyCycle(doc["max_duty_pct"]);
-    if (doc.containsKey("max_freq_hz"))
+    if (!doc["max_freq_hz"].isNull())
         _safety->setMaxFrequency(doc["max_freq_hz"]);
-    if (doc.containsKey("watchdog_ms"))
+    if (!doc["watchdog_ms"].isNull())
         _safety->setWatchdogTimeout(doc["watchdog_ms"]);
-    if (doc.containsKey("max_polyphony"))
+    if (!doc["max_polyphony"].isNull())
         _safety->setMaxPolyphony(doc["max_polyphony"]);
-    if (doc.containsKey("max_current_ma"))
+    if (!doc["max_current_ma"].isNull())
         _safety->setMaxTotalCurrent(doc["max_current_ma"]);
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1128,7 +1128,7 @@ void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
     if (!requireAuth(request)) return;
     if (!_scheduler || !_config) { request->send(500); return; }
 
-    StaticJsonDocument<128> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -1161,7 +1161,7 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
     if (!requireAuth(request)) return;
     if (!_safety) { request->send(500); return; }
 
-    StaticJsonDocument<64> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json",
@@ -1184,17 +1184,17 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
 void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
     if (!_pca) { request->send(500); return; }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     for (uint8_t b = 0; b < 2; b++) {
         uint8_t found = _pca->scanBus(b);
-        JsonObject obj = arr.createNestedObject();
+        JsonObject obj = arr.add<JsonObject>();
         obj["bus"] = b;
         obj["pca_count"] = found;
 
         BusConfig& bus = _pca->getBusConfig(b);
-        JsonArray addrs = obj.createNestedArray("addresses");
+        JsonArray addrs = obj["addresses"].to<JsonArray>();
         for (uint8_t p = 0; p < bus.pca_count; p++) {
             char hex[5];
             snprintf(hex, sizeof(hex), "0x%02X", bus.pca_addresses[p]);
@@ -1314,7 +1314,7 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
             if (info->final && info->index == 0 && info->len == len
                 && info->opcode == WS_TEXT)
             {
-                StaticJsonDocument<128> doc;
+                JsonDocument doc;
                 DeserializationError err = deserializeJson(doc, (const char*)data, len);
                 if (!err) {
                     const char* cmd = doc["cmd"];
@@ -1357,15 +1357,17 @@ void WebServer::broadcastStatus() {
 // ============================================================================
 
 void WebServer::buildStatusJSON(String& output) {
-    // AUDIT FIX: size increased to 4096 (active_actuators + power + safety + midi_msgs + log_count)
-    StaticJsonDocument<4096> doc;
+    // AUDIT FIX (points D/E): ArduinoJson 7 elastic document — grows as needed
+    // (active_actuators + power + safety + midi_msgs + log_count) instead of a
+    // fixed capacity that could silently truncate the status payload.
+    JsonDocument doc;
 
     doc["uptime_s"] = millis() / 1000;
     doc["heap"]     = ESP.getFreeHeap();
 
     // Scheduler
     if (_scheduler) {
-        JsonObject sched = doc.createNestedObject("scheduler");
+        JsonObject sched = doc["scheduler"].to<JsonObject>();
         sched["queued"]    = _scheduler->getQueuedEventCount();
         sched["processed"] = _scheduler->getProcessedCount();
         sched["running"]   = _scheduler->isRunning();
@@ -1373,7 +1375,7 @@ void WebServer::buildStatusJSON(String& output) {
 
     // MIDI Transport
     if (_transport) {
-        JsonObject midi = doc.createNestedObject("midi");
+        JsonObject midi = doc["midi"].to<JsonObject>();
         midi["serial_bytes"] = _transport->getSerialByteCount();
         midi["udp_packets"]  = _transport->getUdpPacketCount();
         midi["rtp_packets"]  = _transport->getRtpPacketCount();
@@ -1381,7 +1383,7 @@ void WebServer::buildStatusJSON(String& output) {
 
     // Dispatcher
     if (_dispatcher) {
-        JsonObject disp = doc.createNestedObject("dispatcher");
+        JsonObject disp = doc["dispatcher"].to<JsonObject>();
         disp["dispatched"]    = _dispatcher->getDispatchedCount();
         disp["dropped"]       = _dispatcher->getDroppedCount();
         disp["pwr_rejected"]  = _dispatcher->getPowerRejectedCount();
@@ -1389,7 +1391,7 @@ void WebServer::buildStatusJSON(String& output) {
 
     // Safety
     if (_safety) {
-        JsonObject safe = doc.createNestedObject("safety");
+        JsonObject safe = doc["safety"].to<JsonObject>();
         const SafetyState& ss = _safety->getGlobalState();
         safe["current_ma"]  = ss.total_estimated_current_ma;
         safe["active"]      = ss.active_actuator_count;
@@ -1400,7 +1402,7 @@ void WebServer::buildStatusJSON(String& output) {
 
     // Power
     if (_power) {
-        JsonObject pwr = doc.createNestedObject("power");
+        JsonObject pwr = doc["power"].to<JsonObject>();
         const PowerStats& ps = _power->getStats();
         const PowerBudget& pb = _power->getBudget();
         pwr["total_ma"]      = ps.total_estimated_ma;
@@ -1415,12 +1417,12 @@ void WebServer::buildStatusJSON(String& output) {
 
     // Active actuators (compact summary)
     if (_config) {
-        JsonArray acts = doc.createNestedArray("active_actuators");
+        JsonArray acts = doc["active_actuators"].to<JsonArray>();
         ActuatorConfig* actuators = _config->getActuators();
         uint8_t count = _config->getActuatorCount();
         for (uint8_t i = 0; i < count; i++) {
             if (actuators[i].state.active) {
-                JsonObject a = acts.createNestedObject();
+                JsonObject a = acts.add<JsonObject>();
                 a["id"]  = actuators[i].id;
                 a["pos"] = actuators[i].state.current_position;
             }
@@ -1428,7 +1430,7 @@ void WebServer::buildStatusJSON(String& output) {
     }
 
     // WiFi
-    JsonObject wifi = doc.createNestedObject("wifi");
+    JsonObject wifi = doc["wifi"].to<JsonObject>();
     wifi["connected"] = WiFi.isConnected();
     wifi["rssi"]      = WiFi.RSSI();
 
@@ -1439,9 +1441,9 @@ void WebServer::buildStatusJSON(String& output) {
         uint8_t n = _dispatcher->drainWsLog(entries, MAX_WS_MIDI);
         if (n > 0) {
             static const char* SRC_NAMES[] = {"serial", "udp", "rtp"};
-            JsonArray msgs = doc.createNestedArray("midi_msgs");
+            JsonArray msgs = doc["midi_msgs"].to<JsonArray>();
             for (uint8_t i = 0; i < n; i++) {
-                JsonObject m = msgs.createNestedObject();
+                JsonObject m = msgs.add<JsonObject>();
                 m["type"]   = (uint8_t)entries[i].msg.type | entries[i].msg.channel;
                 m["d1"]     = entries[i].msg.data1;
                 m["d2"]     = entries[i].msg.data2;
@@ -1459,7 +1461,7 @@ void WebServer::buildStatusJSON(String& output) {
 }
 
 void WebServer::buildActuatorJSON(const ActuatorConfig& act, String& output) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     doc["id"]       = act.id;
     doc["type"]     = act.type;
     doc["bus_id"]   = act.bus_id;
@@ -1470,7 +1472,7 @@ void WebServer::buildActuatorJSON(const ActuatorConfig& act, String& output) {
 }
 
 void WebServer::buildInstrumentJSON(const InstrumentConfig& inst, String& output) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     doc["name"]    = inst.name;
     doc["channel"] = inst.midi_channel;
     doc["enabled"] = inst.enabled;
@@ -1479,7 +1481,7 @@ void WebServer::buildInstrumentJSON(const InstrumentConfig& inst, String& output
 }
 
 void WebServer::buildBusJSON(const BusConfig& bus, String& output) {
-    StaticJsonDocument<128> doc;
+    JsonDocument doc;
     doc["id"]      = bus.id;
     doc["enabled"] = bus.enabled;
     doc["pca_count"] = bus.pca_count;
@@ -1504,7 +1506,7 @@ static const char* calStateName(CalibrationState s) {
 }
 
 void WebServer::handleGetCalibrateStatus(AsyncWebServerRequest* request) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
 
     if (!_calibrator) {
         doc["available"] = false;
@@ -1534,7 +1536,7 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
         return;
     }
 
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     uint8_t count = _calibrator->getResultCount();
@@ -1548,7 +1550,7 @@ void WebServer::handleGetCalibrateResults(AsyncWebServerRequest* request) {
             const CalibrationResult* res =
                 _calibrator->getResult(acts[i].id);
 
-            JsonObject obj = arr.createNestedObject();
+            JsonObject obj = arr.add<JsonObject>();
             obj["actuator_id"]     = acts[i].id;
             obj["current_latency"] = acts[i].latency_ms;
 
@@ -1585,7 +1587,7 @@ void WebServer::handlePostCalibrate(AsyncWebServerRequest* request,
         return;
     }
 
-    StaticJsonDocument<128> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
@@ -1631,7 +1633,7 @@ void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
         }
     }
 
-    StaticJsonDocument<96> doc;
+    JsonDocument doc;
     doc["ok"]      = true;
     doc["applied"] = applied;
     doc["saved"]   = saved;
@@ -1666,7 +1668,7 @@ static const char* testModeName(TestMode m) {
 }
 
 void WebServer::handleGetTestStatus(AsyncWebServerRequest* request) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
 
     if (!_testManager) {
         doc["available"] = false;
@@ -1699,7 +1701,7 @@ void WebServer::handleGetTestLog(AsyncWebServerRequest* request) {
 
     // Limit the number of entries returned (max 32 to save JSON RAM)
     const uint8_t MAX_ENTRIES = 32;
-    DynamicJsonDocument doc(1536);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
     uint8_t count = _testManager->getLogCount();
@@ -1707,7 +1709,7 @@ void WebServer::handleGetTestLog(AsyncWebServerRequest* request) {
 
     for (uint8_t i = 0; i < count; i++) {
         const TestLogEntry& e = _testManager->getLogEntry(i);
-        JsonObject obj = arr.createNestedObject();
+        JsonObject obj = arr.add<JsonObject>();
         obj["t"]    = e.timestamp_ms;
         obj["act"]  = e.actuator_id;
         obj["vel"]  = e.velocity;
@@ -1734,7 +1736,7 @@ void WebServer::handlePostTestSweep(AsyncWebServerRequest* request,
         return;
     }
 
-    StaticJsonDocument<128> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
@@ -1770,7 +1772,7 @@ void WebServer::handlePostTestBurst(AsyncWebServerRequest* request,
         return;
     }
 
-    StaticJsonDocument<128> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
@@ -1810,7 +1812,7 @@ void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
         return;
     }
 
-    StaticJsonDocument<64> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
     if (err) {
         // Body optional for stress

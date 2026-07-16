@@ -83,13 +83,13 @@ bool ConfigManager::load() {
     _version = doc["version"] | CONFIG_VERSION;
 
     // WiFi
-    if (doc.containsKey("wifi")) {
+    if (!doc["wifi"].isNull()) {
         JsonObject wifiObj = doc["wifi"].as<JsonObject>();
         deserializeWiFi(_wifi_config, wifiObj);
     }
 
     // MIDI Input
-    if (doc.containsKey("midi_input")) {
+    if (!doc["midi_input"].isNull()) {
         JsonObject midiObj = doc["midi_input"].as<JsonObject>();
         deserializeMidiInput(_midi_input_config, midiObj);
     }
@@ -123,7 +123,7 @@ bool ConfigManager::load() {
 
     // MIDI Routing
     _routing_count = 0;
-    if (doc.containsKey("routing")) {
+    if (!doc["routing"].isNull()) {
         JsonArray routeArray = doc["routing"].as<JsonArray>();
         for (JsonObject routeObj : routeArray) {
             if (_routing_count >= MAX_INSTRUMENTS) break;
