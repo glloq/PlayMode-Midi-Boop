@@ -40,6 +40,12 @@ public:
     ActuatorConfig* getActuators();
     uint8_t getActuatorCount() const;
 
+    // AUDIT FIX (point B): serialise structural actuator-array edits against
+    // the real-time Scheduler. Web handlers lock() before any add/update/
+    // remove, then unlock() once the scheduler view has been resynced.
+    bool lockActuators(uint32_t timeout_ms = 100);
+    void unlockActuators();
+
     // Adds or updates an actuator (updates if same ID exists)
     bool addActuator(const ActuatorConfig& actuator);
 

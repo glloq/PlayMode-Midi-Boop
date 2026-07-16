@@ -148,16 +148,26 @@ void PCADriver::setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_valu
     setPWM(actuator.bus_id, actuator.pca_address, actuator.pca_channel, pwm_value);
 }
 
-uint16_t PCADriver::angleToPWM(uint16_t angle_degrees) {
+uint16_t PCADriver::angleToPWM(uint16_t angle_degrees, uint8_t bus_id) {
     if (angle_degrees > SERVO_MAX_ANGLE) angle_degrees = SERVO_MAX_ANGLE;
 
-    // Convert angle -> pulse duration (us) -> 12-bit PWM value
-    // For PCA9685 at 50 Hz: period = 20ms = 20000 us
-    // PWM value = (pulse_us / 20000) * 4096
+    // Convert angle -> pulse duration (us) -> 12-bit PWM value.
+    // PWM value = (pulse_us / period_us) * 4096, with period = 1e6 / freq.
+    // AUDIT FIX (point C): derive the period from the target bus' configured
+    // PWM frequency instead of assuming 20 ms (50 Hz). A servo really needs
+    // ~50 Hz, but if a bus is reconfigured this keeps the duty cycle correct
+    // for the actual period (and clamps to the 12-bit range).
     uint32_t pulse_us = map(angle_degrees, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE,
                             SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US);
-    uint16_t pwm = (uint16_t)((pulse_us * 4096UL) / 20000UL);
-    return pwm;
+
+    uint16_t freq = (bus_id <= 1) ? _buses[bus_id].pwm_frequency : PCA_SERVO_FREQ;
+    if (freq == 0) freq = PCA_SERVO_FREQ;
+    uint32_t period_us = 1000000UL / freq;
+    if (period_us == 0) period_us = 20000UL;
+
+    uint32_t pwm = (pulse_us * 4096UL) / period_us;
+    if (pwm > 4095) pwm = 4095;
+    return (uint16_t)pwm;
 }
 
 void PCADriver::enableBus(uint8_t bus_id, bool enable) {

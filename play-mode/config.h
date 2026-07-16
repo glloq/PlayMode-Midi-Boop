@@ -62,8 +62,9 @@
 #define SAFETY_MAX_POLYPHONY        12      // Max simultaneously active actuators
 #define SAFETY_DEGRADATION_THRESHOLD_MA 4000 // Graceful degradation threshold (mA)
 #define SAFETY_DEGRADATION_RELEASE_MA   3500 // Graceful degradation release threshold (hysteresis)
-#define SAFETY_KILL_RELEASE_MA          4000 // Kill switch auto-release threshold (hysteresis)
-#define SAFETY_KILL_RELEASE_MIN_MS      5000 // Min time before automatic kill switch recovery (ms)
+// AUDIT FIX: the over-current kill switch is manual-reset only (latched until
+// cleared from the web UI). Automatic recovery was removed — re-energising a
+// mechanism into a persistent fault (stuck actuator, short) is unsafe.
 
 // --- Power Manager (Phase 5) ---
 #define POWER_SERVO_BUS_MAX_MA          3000    // Max servo bus budget (mA)

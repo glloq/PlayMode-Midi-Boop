@@ -15,8 +15,8 @@ SafetyManager::SafetyManager(PCADriver& pca)
       _max_polyphony(SAFETY_MAX_POLYPHONY),
       _max_total_current_ma(SAFETY_MAX_TOTAL_CURRENT_MA),
       _last_check_us(0),
-      _kill_switch_activated_us(0),
-      _kill_switch_auto(false) {
+      _cached_actuators(nullptr),
+      _cached_actuator_count(0) {
     memset(_actuator_safety, 0, sizeof(_actuator_safety));
     memset(&_global_state, 0, sizeof(_global_state));
 }
@@ -111,6 +111,11 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
     }
     _last_check_us = now_us;
 
+    // AUDIT FIX: remember the actuator array so activateKillSwitch() can reset
+    // every runtime state, even when the kill is triggered from the web task.
+    _cached_actuators      = actuators;
+    _cached_actuator_count = count;
+
     // Update the current estimate
     updateCurrentEstimate(actuators, count);
 
@@ -140,24 +145,14 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
             Serial.printf("[SAFETY] CURRENT OVERLOAD: %dmA > %dmA — KILL SWITCH\n",
                           _global_state.total_estimated_current_ma, _max_total_current_ma);
             activateKillSwitch();
-            _kill_switch_auto = true;
         }
     } else {
         _global_state.over_current = false;
     }
 
-    // AUDIT FIX: automatic kill switch recovery — only when the trigger was
-    // automatic (overcurrent), the load has been below the release threshold
-    // for SAFETY_KILL_RELEASE_MIN_MS, and no manual deactivation happened.
-    if (_global_state.kill_switch_active && _kill_switch_auto &&
-        _global_state.total_estimated_current_ma <= SAFETY_KILL_RELEASE_MA) {
-        uint32_t elapsed_ms = (now_us - _kill_switch_activated_us) / 1000UL;
-        if (elapsed_ms >= SAFETY_KILL_RELEASE_MIN_MS) {
-            Serial.printf("[SAFETY] Auto-recovery from kill switch after %ums (load=%umA)\n",
-                          elapsed_ms, _global_state.total_estimated_current_ma);
-            deactivateKillSwitch();
-        }
-    }
+    // AUDIT FIX: the over-current kill switch is latched — it stays active
+    // until it is cleared manually from the web UI. Automatic recovery was
+    // removed on purpose (re-energising into a persistent fault is unsafe).
 
     // Reset expired counting windows (1 second)
     for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
@@ -173,16 +168,19 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
 
 void SafetyManager::activateKillSwitch() {
     _global_state.kill_switch_active = true;
-    _kill_switch_activated_us = (uint32_t)esp_timer_get_time();
-    // Default to manual; over-current path overrides to true afterwards.
-    _kill_switch_auto = false;
     _pca.killAll();
-    Serial.println("[SAFETY] KILL SWITCH ACTIVATED — all outputs cut off");
+    // AUDIT FIX: the outputs are now physically disabled (OE high), so every
+    // actuator is at rest. Reset the runtime states — otherwise their
+    // scheduled return/off events stay blocked by the latch and the actuators
+    // remain flagged "active" forever, permanently inflating the current
+    // estimate (which also used to freeze the old auto-recovery logic).
+    resetActuatorStates();
+    Serial.println("[SAFETY] KILL SWITCH ACTIVATED — all outputs cut off (manual reset required)");
 }
 
 void SafetyManager::deactivateKillSwitch() {
     _global_state.kill_switch_active = false;
-    _kill_switch_auto = false;
+    _global_state.over_current       = false;
     _pca.enableBus(0, true);
     _pca.enableBus(1, true);
     Serial.println("[SAFETY] Kill switch deactivated — outputs re-enabled");
@@ -303,7 +301,7 @@ void SafetyManager::checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuator)
         if (actuator.type == ACT_SOLENOID) {
             _pca.setActuatorPWM(actuator, 0);
         } else if (actuator.type == ACT_SERVO) {
-            _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial));
+            _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial, actuator.bus_id));
         }
 
         Serial.printf("[SAFETY] Watchdog actuator %d: forced OFF after %dms\n",
@@ -365,4 +363,16 @@ void SafetyManager::resetWindow(uint8_t actuator_id) {
     _actuator_safety[actuator_id].active_time_us = 0;
     _actuator_safety[actuator_id].rate_limited = false;
     _actuator_safety[actuator_id].duty_limited = false;
+}
+
+// AUDIT FIX: mark every registered actuator inactive. Called when the kill
+// switch cuts the outputs so the current estimate reflects the physical
+// reality (OE disabled → nothing is actuating).
+void SafetyManager::resetActuatorStates() {
+    if (_cached_actuators == nullptr) return;
+    for (uint8_t i = 0; i < _cached_actuator_count; i++) {
+        if (_cached_actuators[i] != nullptr) {
+            _cached_actuators[i]->state.active = false;
+        }
+    }
 }

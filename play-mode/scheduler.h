@@ -32,6 +32,14 @@ public:
     // Register an actuator with the scheduler
     void registerActuator(ActuatorConfig* actuator);
 
+    // AUDIT FIX: rebuild the whole actuator pointer table from the first
+    // `count` entries of the contiguous config array `base`. Used after a
+    // runtime add/remove so the scheduler view stays in sync with
+    // ConfigManager. registerActuator alone left stale or duplicate
+    // pointers after a delete-then-add, because the config array shifts
+    // its elements down on removal.
+    void syncActuators(ActuatorConfig* base, uint8_t count);
+
     // Number of pending events in the priority queue
     uint16_t getQueuedEventCount() const;
 

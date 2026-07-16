@@ -290,6 +290,9 @@ uint8_t TestManager::getProgress() const {
         case TEST_SWEEP:
             return (uint8_t)((uint16_t)_sweep_act_idx * 100 / total);
         case TEST_BURST:
+            // AUDIT FIX: guard against division by zero when a burst was
+            // started with count == 0 (would raise a CPU exception/reboot).
+            if (_burst_count == 0) return 100;
             return (uint8_t)(((uint16_t)(_burst_count - _burst_remaining) * 100)
                              / _burst_count);
         case TEST_IDLE:

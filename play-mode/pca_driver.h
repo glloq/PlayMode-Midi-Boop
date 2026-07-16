@@ -33,8 +33,11 @@ public:
     // PWM write by actuator ID (resolved via config)
     void setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value);
 
-    // Convert angle (degrees) to PWM value for servo
-    uint16_t angleToPWM(uint16_t angle_degrees);
+    // Convert angle (degrees) to PWM value for servo.
+    // AUDIT FIX (point C): the PWM period is derived from the target bus'
+    // configured frequency instead of a hardcoded 50 Hz, so servos stay
+    // correct if a bus is reconfigured. Defaults to bus 0 for compatibility.
+    uint16_t angleToPWM(uint16_t angle_degrees, uint8_t bus_id = 0);
 
     // Enable/disable outputs of a bus via OE pin
     void enableBus(uint8_t bus_id, bool enable);

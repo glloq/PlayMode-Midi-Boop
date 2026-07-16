@@ -1,5 +1,6 @@
 #include "scheduler.h"
 #include "safety_manager.h"
+#include <freertos/semphr.h>
 
 // ============================================================================
 // PlayMode — Real-Time Scheduler (implementation)
@@ -7,6 +8,10 @@
 
 // Global queue accessible by actuator_engine for scheduling return events
 QueueHandle_t g_scheduler_queue = NULL;
+
+// AUDIT FIX (point B): defined in config_manager.cpp. Serialises this task's
+// actuator dereferences against structural config edits from the web task.
+extern SemaphoreHandle_t g_actuator_mutex;
 
 Scheduler::Scheduler(ActuatorEngine& engine)
     : _engine(engine),
@@ -84,6 +89,25 @@ void Scheduler::registerActuator(ActuatorConfig* actuator) {
     }
 }
 
+// AUDIT FIX: rebuild the actuator pointer table so it exactly mirrors the
+// ConfigManager array. Ordering matters for the concurrent Core 1 reader:
+// shrink the count first (so it never iterates past a valid pointer), then
+// repoint every slot, then publish the final count last.
+void Scheduler::syncActuators(ActuatorConfig* base, uint8_t count) {
+    if (base == nullptr) {
+        _actuator_count = 0;
+        return;
+    }
+    if (count > MAX_ACTUATORS) count = MAX_ACTUATORS;
+
+    if (count < _actuator_count) _actuator_count = count;
+    for (uint8_t i = 0; i < count; i++) {
+        _actuators[i] = &base[i];
+    }
+    _actuator_count = count;
+    Serial.printf("[SCHED] Actuator table synced (%d actuators)\n", count);
+}
+
 uint16_t Scheduler::getQueuedEventCount() const {
     return _event_count;
 }
@@ -120,15 +144,28 @@ void Scheduler::run() {
     Serial.println("[SCHED] Main loop started");
 
     while (_running) {
-        // 1. Drain events from the FreeRTOS queue
+        // 1. Drain events from the FreeRTOS queue into the (scheduler-private)
+        //    priority buffer. This touches no shared config state, so it runs
+        //    unguarded every tick.
         drainInputQueue();
 
-        // 2. Process events whose timestamp has been reached
-        processReadyEvents();
+        // 2+3. AUDIT FIX (point B): serialise the sections that dereference
+        //    actuator pointers (processReadyEvents + safety update) against
+        //    structural config edits from the web task. If a rare edit briefly
+        //    holds the lock, skip this tick's processing — the events simply
+        //    fire on the next tick. The short timeout guarantees the real-time
+        //    task never blocks. If the mutex could not be created, fall back to
+        //    the previous unguarded behaviour.
+        if (g_actuator_mutex == nullptr ||
+            xSemaphoreTake(g_actuator_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
 
-        // 3. Periodic safety update
-        if (_safety_manager != nullptr) {
-            _safety_manager->update(_actuators, _actuator_count);
+            processReadyEvents();
+
+            if (_safety_manager != nullptr) {
+                _safety_manager->update(_actuators, _actuator_count);
+            }
+
+            if (g_actuator_mutex != nullptr) xSemaphoreGive(g_actuator_mutex);
         }
 
         // 4. Wait for the next tick
