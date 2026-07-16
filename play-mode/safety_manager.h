@@ -79,8 +79,12 @@ private:
     uint16_t _max_total_current_ma;  // mA (default SAFETY_MAX_TOTAL_CURRENT_MA)
 
     uint32_t _last_check_us;         // Last periodic check
-    uint32_t _kill_switch_activated_us; // esp_timer when kill switch was last activated (auto-recovery)
-    bool     _kill_switch_auto;       // true if last activation was automatic (overcurrent)
+
+    // AUDIT FIX: cached view of the actuator array last passed to update(),
+    // so activateKillSwitch() — which may be called from the web task — can
+    // reset every actuator runtime state when the outputs are physically cut.
+    ActuatorConfig** _cached_actuators;
+    uint8_t          _cached_actuator_count;
 
     // Default state (for invalid IDs)
     static const ActuatorSafetyState _default_safety_state;
@@ -104,6 +108,10 @@ private:
 
     // Reset the counting window of an actuator
     void resetWindow(uint8_t actuator_id);
+
+    // AUDIT FIX: mark every actuator runtime state inactive — used when the
+    // kill switch cuts the outputs (they are physically at rest).
+    void resetActuatorStates();
 };
 
 #endif // SAFETY_MANAGER_H
