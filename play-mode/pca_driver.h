@@ -42,8 +42,18 @@ public:
     // Enable/disable outputs of a bus via OE pin
     void enableBus(uint8_t bus_id, bool enable);
 
-    // Global kill switch — disable all outputs
+    // Global kill switch — disable all outputs (OE high) AND clear every PWM
+    // register so re-arming can never resurrect stale drive values.
     void killAll();
+
+    // AUDIT FIX (P0.6): write FULL_OFF to every channel of every detected PCA
+    // on both buses (128 outputs max). Used by the kill switch.
+    void allOff();
+
+    // AUDIT FIX: rescan both buses from scratch, freeing the previous driver
+    // objects first so repeated scans neither leak memory nor corrupt the
+    // driver index table.
+    uint8_t rescanAll();
 
     // Return the config of a bus
     BusConfig& getBusConfig(uint8_t bus_id);
@@ -56,9 +66,15 @@ public:
 
 private:
     BusConfig _buses[2];
+    // AUDIT FIX: each bus owns a fixed region of PCA_MAX_PER_BUS slots
+    // (bus 0 -> [0, PCA_MAX_PER_BUS), bus 1 -> [PCA_MAX_PER_BUS, 2*...)). A
+    // per-bus rescan only touches its own region, so indices stay stable and
+    // no slot leaks across scans.
     Adafruit_PWMServoDriver* _drivers[PCA_TOTAL_MAX];
-    uint8_t _driver_count;
-    uint8_t _bus_driver_start[2];  // Index in _drivers[] where each bus starts
+    uint8_t _bus_driver_start[2];  // Fixed start index in _drivers[] per bus
+
+    // Free every driver object allocated for a bus (used before a rescan).
+    void freeBusDrivers(uint8_t bus_id);
 
     // Find the driver for a bus + address
     Adafruit_PWMServoDriver* getDriver(uint8_t bus_id, uint8_t pca_address);

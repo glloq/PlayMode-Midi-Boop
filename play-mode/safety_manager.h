@@ -6,6 +6,9 @@
 #include "types.h"
 #include "pca_driver.h"
 
+// Forward declaration — the kill switch flushes the scheduler queues.
+class Scheduler;
+
 // ============================================================================
 // PlayMode — Safety Manager + Power Manager
 // ============================================================================
@@ -16,6 +19,10 @@ public:
 
     // Initialize the safety manager
     void begin();
+
+    // AUDIT FIX (P0.6): register the scheduler so the kill switch can flush
+    // every pending event as part of the emergency-stop sequence.
+    void setScheduler(Scheduler* scheduler);
 
     // --- Pre-event check (called by the scheduler before dispatch) ---
 
@@ -66,6 +73,7 @@ public:
 
 private:
     PCADriver& _pca;
+    Scheduler* _scheduler;  // Optional — used to flush queues on kill switch
 
     // Per-actuator safety state
     ActuatorSafetyState _actuator_safety[MAX_ACTUATORS];

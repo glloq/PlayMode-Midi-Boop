@@ -12,6 +12,20 @@ ActuatorEngine::ActuatorEngine(PCADriver& pca) : _pca(pca) {}
 void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent& event) {
     if (!actuator.enabled) return;
 
+    // AUDIT FIX (P0.5): discard a stale deferred return/hold event. If the
+    // actuator moved to a newer generation since this event was scheduled (e.g.
+    // a NOTE_OFF cut a solenoid before its delayed "hold" fired), executing it
+    // would re-energise an output the software believes is off.
+    if (event.deferred && event.generation != actuator.state.generation) {
+        return;
+    }
+
+    // A fresh note event opens a new generation, invalidating any return/hold
+    // events still queued from the previous one.
+    if (event.action == ACTION_NOTE_ON || event.action == ACTION_NOTE_OFF) {
+        actuator.state.generation++;
+    }
+
     if (actuator.type == ACT_SERVO) {
         switch ((ServoBehavior)actuator.behavior) {
             case SERVO_FRAPPE:
@@ -245,14 +259,17 @@ uint16_t ActuatorEngine::velocityToAmplitude(const ActuatorConfig& act, uint8_t 
 }
 
 void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint16_t target_value) {
-    if (g_scheduler_queue == NULL) return;
-
-    SchedulerEvent return_event;
+    SchedulerEvent return_event = {};
     return_event.trigger_time_us = (uint32_t)esp_timer_get_time() + (delay_ms * 1000);
     return_event.actuator_id = act.id;
     return_event.velocity = 0;
     return_event.value = target_value;
     return_event.priority = 1;
+    // AUDIT FIX (P0.5): tag as a deferred event and stamp the current
+    // generation so it is dropped if the actuator is retriggered / released
+    // before it fires.
+    return_event.deferred = true;
+    return_event.generation = act.state.generation;
 
     // Determine the return action type
     if (act.type == ACT_SERVO) {
@@ -261,6 +278,22 @@ void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint
         return_event.action = ACTION_PWM_SET;
     }
 
-    // Send to queue (non-blocking)
-    xQueueSend(g_scheduler_queue, &return_event, 0);
+    // AUDIT FIX (P0.7): a lost return event leaves a solenoid energised or a
+    // servo deflected until the watchdog eventually fires. Verify the enqueue
+    // and, if the queue is full, apply the return target immediately (fail
+    // safe) so the actuator can never stay stuck on.
+    if (g_scheduler_queue == NULL ||
+        xQueueSend(g_scheduler_queue, &return_event, 0) != pdTRUE) {
+        Serial.printf("[ENGINE] Return queue full for actuator %d — applying "
+                      "safe return immediately\n", act.id);
+        if (act.type == ACT_SERVO) {
+            setServoAngle(act, target_value);
+            act.state.active = false;
+        } else {
+            setSolenoidPWM(act, target_value);
+            if (target_value == 0) act.state.active = false;
+        }
+        // Bump generation so any later duplicate of this return is ignored.
+        act.state.generation++;
+    }
 }

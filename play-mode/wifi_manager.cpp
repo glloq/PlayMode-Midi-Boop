@@ -139,7 +139,9 @@ bool WiFiManager::startAP() {
     Serial.printf("[WIFI] Starting AP '%s'...\n", _config.hostname);
 
     WiFi.mode(WIFI_AP);
-    bool result = WiFi.softAP(_config.hostname);
+    // AUDIT FIX (P0.9): protect the SoftAP with WPA2. An open AP let anyone in
+    // radio range reach the control API. The password must be >= 8 chars.
+    bool result = WiFi.softAP(_config.hostname, WIFI_AP_DEFAULT_PASSWORD);
 
     if (result) {
         _ap_mode = true;
@@ -149,8 +151,10 @@ bool WiFiManager::startAP() {
         // This forces phones to open the captive portal automatically.
         _dns.start(53, "*", WiFi.softAPIP());
 
-        Serial.printf("[WIFI] AP started — IP: %s  (DNS captive portal active)\n",
+        Serial.printf("[WIFI] AP started — IP: %s  (WPA2, DNS captive portal active)\n",
                       WiFi.softAPIP().toString().c_str());
+        Serial.printf("[WIFI] AP SSID: %s  password: %s\n",
+                      _config.hostname, WIFI_AP_DEFAULT_PASSWORD);
     } else {
         Serial.println("[WIFI] AP start failed");
     }

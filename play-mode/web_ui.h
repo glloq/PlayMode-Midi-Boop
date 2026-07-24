@@ -1254,8 +1254,27 @@ function showPage(page) {
 // ============================================================================
 // API helpers
 // ============================================================================
+// AUDIT FIX (P0.9): in AP mode the device requires an auth token on writes.
+// Fetch it once at startup and attach it (header + query fallback) to every
+// non-GET request. In STA mode the endpoint reports ap_mode=false and no token
+// is needed.
+let authToken = null;
+
+async function fetchAuthToken() {
+  try {
+    const res = await fetch('/api/auth-token');
+    const d = await res.json();
+    authToken = (d && d.ap_mode && d.token) ? d.token : null;
+  } catch (e) {
+    authToken = null;
+  }
+}
+
 async function api(url, method='GET', body=null) {
   const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (authToken && method !== 'GET') {
+    opts.headers['X-PlayMode-Token'] = authToken;
+  }
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
   return res.json();
@@ -2194,7 +2213,7 @@ function pianoNoteOn(instIdx, note) {
   const piano = document.getElementById('piano-' + instIdx);
   if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
   if (ws && wsConnected) {
-    ws.send(JSON.stringify({cmd:'test', id:actId, vel:100}));
+    ws.send(JSON.stringify({cmd:'test', id:actId, vel:100, token:authToken || undefined}));
   }
 }
 
@@ -2963,6 +2982,8 @@ function updateCountBadges() {
 }
 
 window.addEventListener('load', async () => {
+  // AUDIT FIX (P0.9): obtain the AP auth token before any write can happen.
+  await fetchAuthToken();
   connectWS();
   // Preload data then decide which page to show
   await loadActuators();

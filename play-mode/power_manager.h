@@ -92,6 +92,13 @@ private:
     // Per-actuator tracking: allocated current (0 = inactive)
     uint16_t _actuator_allocated_ma[MAX_ACTUATORS];
     bool     _actuator_tracked[MAX_ACTUATORS];
+    // AUDIT FIX (P0.8): remember which instrument each actuator was activated
+    // for, so the periodic resync can recompute per-instrument polyphony from
+    // the actuators' real active states (0xFF = unknown/none). Without this,
+    // auto-returning strikes (servo frappe / solenoid frappe never send a
+    // NOTE_OFF) incremented the per-instrument counter with nothing to
+    // decrement it — every instrument permanently jammed at max polyphony.
+    uint8_t  _actuator_instrument[MAX_ACTUATORS];
 
     // Timestamp of last full update
     uint32_t _last_update_us;

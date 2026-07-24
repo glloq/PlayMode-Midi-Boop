@@ -220,7 +220,12 @@ void TestManager::scheduleNoteOff(uint8_t act_id, uint16_t delay_ms) {
     off_evt.velocity        = 0;
     off_evt.priority        = 0;
 
-    _scheduler.pushEvent(off_evt);
+    // AUDIT FIX: verify the NOTE_OFF was accepted. If the queue is full the
+    // actuator would rely solely on the safety watchdog to be released.
+    if (!_scheduler.pushEvent(off_evt)) {
+        Serial.printf("[TEST] Warning: NOTE_OFF for act %d dropped (queue full)\n",
+                      act_id);
+    }
 }
 
 void TestManager::logEvent(uint8_t act_id, uint8_t velocity, bool scheduled) {
