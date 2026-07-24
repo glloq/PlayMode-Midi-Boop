@@ -481,7 +481,15 @@ void Calibrator::triggerActuator() {
     on_evt.action          = ACTION_NOTE_ON;
     on_evt.velocity        = CAL_TRIGGER_VELOCITY;
     on_evt.priority        = 0;
-    _scheduler.pushEvent(on_evt);
+    // AUDIT FIX: if the strike could not be scheduled, abort — otherwise the
+    // calibrator would "measure" ambient noise for an actuator that never
+    // actually fired and record a bogus latency.
+    if (!_scheduler.pushEvent(on_evt)) {
+        Serial.printf("[CAL] Scheduler queue full — cannot trigger act %d, aborting\n",
+                      _cur_act_id);
+        _state = CAL_ERROR;
+        return;
+    }
 
     // For solenoids: schedule automatic NOTE_OFF
     if (act_cfg->type == ACT_SOLENOID) {
@@ -491,7 +499,13 @@ void Calibrator::triggerActuator() {
         off_evt.trigger_time_us = _trigger_time_us
                                   + (uint32_t)act_cfg->pulse_ms * 1000UL
                                   + 50000UL;  // +50ms margin
-        _scheduler.pushEvent(off_evt);
+        if (!_scheduler.pushEvent(off_evt)) {
+            // The NOTE_ON is already scheduled. A SOL_FRAPPE auto-returns from
+            // the engine; a SOL_HIT_AND_HOLD would rely on the safety watchdog.
+            // Log so the operator can retry rather than silently mis-measure.
+            Serial.printf("[CAL] Warning: could not schedule NOTE_OFF for act %d "
+                          "(safety watchdog will release it)\n", _cur_act_id);
+        }
     }
 
     Serial.printf("[CAL] Trigger act %d (attempt %d/%d) @ %lu us\n",

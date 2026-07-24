@@ -167,6 +167,18 @@ void setup() {
         Serial.println("[INIT] WARNING: PCA init problem (some buses missing?)");
     }
 
+    // AUDIT FIX: apply the persisted PWM frequency to the detected PCA chips.
+    // The ConfigManager owns the saved BusConfig while the PCADriver keeps its
+    // own copy initialised from compile-time defaults; without this transfer a
+    // saved frequency (e.g. a re-tuned solenoid bus) silently reverted to
+    // 50/200 Hz on every reboot.
+    {
+        BusConfig* cfgBuses = configManager.getBuses();
+        for (uint8_t b = 0; b < 2; b++) {
+            pcaDriver.setFrequency(b, cfgBuses[b].pwm_frequency);
+        }
+    }
+
     // 3. Configure actuators (from config or test)
     Serial.println("\n[INIT] Actuators...");
     if (configManager.getActuatorCount() > 0) {
@@ -196,6 +208,9 @@ void setup() {
     // 6. Start the scheduler on Core 1 (with integrated safety)
     Serial.println("\n[INIT] Scheduler...");
     scheduler.setSafetyManager(&safetyManager);
+    // AUDIT FIX (P0.6): let the kill switch flush the scheduler queues as part
+    // of the emergency-stop sequence.
+    safetyManager.setScheduler(&scheduler);
     if (!scheduler.begin()) {
         Serial.println("[INIT] ERROR: Scheduler");
         logger.log(LOG_ERROR, CAT_SCHED, "Scheduler: Core 1 start failed");
@@ -203,14 +218,15 @@ void setup() {
         logger.log(LOG_INFO, CAT_SCHED, "Scheduler started on Core 1");
     }
 
-    // 7. Initialize WiFi — ALWAYS start at least in AP mode
+    // 7. Initialize WiFi
+    // AUDIT FIX: honour the saved "WiFi disabled" setting instead of forcing
+    // it on at every boot (which made the option impossible to use). Defaults
+    // still have WiFi + AP fallback enabled, so a fresh device comes up as an
+    // access point for first-time configuration.
     Serial.println("\n[INIT] WiFi Manager...");
     {
         WiFiConfig* wifiCfg = configManager.getWiFiConfig();
 
-        // Force enabled + ap_fallback to guarantee web access
-        wifiCfg->enabled     = true;
-        wifiCfg->ap_fallback = true;
         if (wifiCfg->hostname[0] == '\0') {
             strlcpy(wifiCfg->hostname, WIFI_DEFAULT_HOSTNAME, sizeof(wifiCfg->hostname));
         }
@@ -220,7 +236,11 @@ void setup() {
             Serial.println("[INIT] Placeholder SSID detected — switching directly to AP");
         }
 
-        if (wifiManager.begin(*wifiCfg)) {
+        if (!wifiCfg->enabled) {
+            Serial.println("[INIT] WiFi disabled by configuration — no network / web UI");
+            logger.log(LOG_WARN, CAT_SYSTEM, "WiFi disabled by configuration");
+            ledSet(LED_OFF);
+        } else if (wifiManager.begin(*wifiCfg)) {
             if (wifiManager.isAP()) {
                 Serial.printf("[INIT] AP mode: http://%s\n",
                               wifiManager.getIP().toString().c_str());

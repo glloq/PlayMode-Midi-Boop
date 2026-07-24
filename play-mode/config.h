@@ -84,11 +84,18 @@
 #define WIFI_CONNECT_TIMEOUT_MS  10000   // STA connection timeout (ms)
 #define WIFI_RECONNECT_INTERVAL  5000    // Interval between reconnection attempts (ms)
 #define WIFI_AP_FALLBACK         true    // Start in AP mode if STA fails
+// AUDIT FIX (P0.9): the SoftAP is protected with WPA2 (open AP let anyone in
+// radio range reach the control API). Must be >= 8 characters for WPA2.
+#define WIFI_AP_DEFAULT_PASSWORD "playmode"  // Default WPA2 password for the AP
 
 // --- MIDI Input ---
 #define MIDI_SERIAL_BAUD         31250   // Standard MIDI baud rate
 #define MIDI_SERIAL_RX_PIN       4       // GPIO for Serial MIDI input (Serial2 RX)
-#define MIDI_UDP_PORT            5004    // UDP MIDI port
+// AUDIT FIX (P0.4): raw UDP-MIDI and RTP-MIDI (AppleMIDI) must not share a
+// port. AppleMIDI reserves the control port (rtp_port) AND the data port
+// (rtp_port + 1), so raw UDP is moved clear of that pair. RTP-MIDI keeps the
+// AppleMIDI standard 5004; raw UDP moves to 5006.
+#define MIDI_UDP_PORT            5006    // UDP MIDI port (raw byte stream)
 #define MIDI_RTP_PORT            5004    // RTP-MIDI port (AppleMIDI standard)
 #define MIDI_JITTER_BUFFER_MS    30      // Default jitter buffer depth (ms)
 #define MIDI_JITTER_BUFFER_MAX   100     // Max jitter buffer depth (ms)
@@ -106,6 +113,14 @@
 
 // --- MIDI Note Mapping ---
 #define MIDI_NOTE_UNMAPPED       0xFF    // Sentinel value for unmapped note
+
+// --- MIDI Channels ---
+// AUDIT FIX (P0.3): internal channels are ALWAYS 0..15. The web UI uses the
+// musician convention (0 = Omni, 1..16 = channel) and converts to the
+// internal representation on write. Omni is a distinct state stored in
+// InstrumentConfig::midi_channel, not channel 0.
+#define MIDI_CHANNEL_COUNT           16     // Valid internal channels: 0..15
+#define MIDI_CHANNEL_OMNI_INTERNAL   0xFF   // Sentinel: instrument listens on all channels
 
 // --- LED Status ---
 #define LED_STATUS_PIN          2       // GPIO 2 — ESP32 built-in LED

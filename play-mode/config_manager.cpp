@@ -587,6 +587,15 @@ void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject
     midi.rtp_port = obj["rtp_port"] | MIDI_RTP_PORT;
     midi.jitter_buffer_ms = obj["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
     midi.serial_rx_pin = obj["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+
+    // AUDIT FIX (P0.4): heal configs saved before raw UDP and RTP-MIDI were
+    // split onto distinct ports. AppleMIDI reserves rtp_port AND rtp_port+1, so
+    // any UDP port colliding with that pair is moved to the dedicated default.
+    if (midi.udp_port == midi.rtp_port || midi.udp_port == (uint16_t)(midi.rtp_port + 1)) {
+        Serial.printf("[CONFIG] UDP port %d clashes with RTP-MIDI %d — moving UDP to %d\n",
+                      midi.udp_port, midi.rtp_port, MIDI_UDP_PORT);
+        midi.udp_port = MIDI_UDP_PORT;
+    }
 }
 
 // ============================================================================

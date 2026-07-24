@@ -14,7 +14,6 @@ MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
       _power_rejected_count(0),
       _ws_log_head(0),
       _ws_log_count(0) {
-    memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
     memset(_routing_cache, 0, sizeof(_routing_cache));
     memset(_ws_log, 0, sizeof(_ws_log));
@@ -52,29 +51,31 @@ void MidiDispatcher::dispatch(const MidiMessage& msg) {
 
 void MidiDispatcher::refreshConfig() {
     // Reset lookup tables
-    memset(_channel_to_instrument, -1, sizeof(_channel_to_instrument));
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
     memset(_routing_cache, 0, sizeof(_routing_cache));
 
-    InstrumentConfig* instruments = _config.getInstruments();
     uint8_t count = _config.getInstrumentCount();
 
-    for (uint8_t i = 0; i < count; i++) {
-        if (!instruments[i].enabled) continue;
-
-        uint8_t ch = instruments[i].midi_channel;
-        if (ch < 16) {
-            _channel_to_instrument[ch] = (int8_t)i;
-        }
-
-        // Compute the max latency for this instrument
-        _max_latency_ms[i] = computeMaxLatency(instruments[i]);
-
-        // Cache the pointer to the routing config
+    for (uint8_t i = 0; i < count && i < MAX_INSTRUMENTS; i++) {
+        // Cache the pointer to the routing config (single source of truth for
+        // note -> actuator mapping).
         _routing_cache[i] = _config.getRoutingForInstrument(i);
+
+        // Compute the max latency for this instrument from its note_map.
+        _max_latency_ms[i] = computeMaxLatency(i);
     }
 
     Serial.printf("[MIDI-DISP] Config reloaded: %d instruments mapped\n", count);
+}
+
+// ============================================================================
+// AUDIT FIX (P0.3): channel matching — exact channel OR Omni. Internal
+// channels are always 0..15; Omni is the distinct MIDI_CHANNEL_OMNI_INTERNAL
+// sentinel.
+// ============================================================================
+bool MidiDispatcher::channelMatches(const InstrumentConfig& inst, uint8_t channel) const {
+    if (inst.midi_channel == MIDI_CHANNEL_OMNI_INTERNAL) return true;
+    return inst.midi_channel == channel;
 }
 
 uint32_t MidiDispatcher::getDispatchedCount() const {
@@ -94,29 +95,36 @@ void MidiDispatcher::setPowerManager(PowerManager* pm) {
 }
 
 // ============================================================================
-// Note On handling
+// Note On handling — AUDIT FIX (P0.3): bounds-check the channel and dispatch to
+// every instrument that listens on it (exact channel or Omni).
 // ============================================================================
 void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
-    int8_t inst_idx = _channel_to_instrument[msg.channel];
-    if (inst_idx < 0) {
-        _dropped_count++;
-        return;
+    if (msg.channel >= MIDI_CHANNEL_COUNT) { _dropped_count++; return; }
+
+    InstrumentConfig* instruments = _config.getInstruments();
+    uint8_t count = _config.getInstrumentCount();
+    bool matched = false;
+
+    for (uint8_t i = 0; i < count && i < MAX_INSTRUMENTS; i++) {
+        if (!instruments[i].enabled) continue;
+        if (!channelMatches(instruments[i], msg.channel)) continue;
+        if (dispatchNoteOnToInstrument(i, msg)) matched = true;
     }
+
+    if (!matched) _dropped_count++;
+}
+
+bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMessage& msg) {
+    MidiRoutingConfig* routing = _routing_cache[inst_idx];
+    int16_t actuator_id = findActuatorForNote(routing, msg.data1);
+    if (actuator_id < 0) return false;
 
     InstrumentConfig& inst = _config.getInstruments()[inst_idx];
-
-    int8_t act_slot = findActuatorForNote(inst, msg.data1);
-    if (act_slot < 0) {
-        _dropped_count++;
-        return;
-    }
-
-    uint8_t actuator_id = inst.actuator_ids[act_slot];
 
     // Latency compensation
     // AUDIT FIX: use signed arithmetic to avoid uint16_t underflow
     // if actuator_latency > _max_latency_ms (invalid config), compensation = 0.
-    ActuatorConfig* act_config = findActuatorConfig(actuator_id);
+    ActuatorConfig* act_config = findActuatorConfig((uint8_t)actuator_id);
     uint16_t actuator_latency = act_config ? act_config->latency_ms : inst.default_latency_ms;
     int32_t compensation_signed = ((int32_t)_max_latency_ms[inst_idx] - (int32_t)actuator_latency) * 1000;
     uint32_t compensation_us = (compensation_signed > 0) ? (uint32_t)compensation_signed : 0;
@@ -128,13 +136,13 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
     if (_powerManager && act_config) {
         if (!_powerManager->canActivate(*act_config, inst_idx, velocity)) {
             _power_rejected_count++;
-            return;
+            return false;
         }
     }
 
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;
-    evt.actuator_id = actuator_id;
+    evt.actuator_id = (uint8_t)actuator_id;
     evt.action = ACTION_NOTE_ON;
     evt.velocity = velocity;
     evt.priority = 0;
@@ -145,34 +153,39 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
         if (_powerManager && act_config) {
             _powerManager->notifyActivation(*act_config, inst_idx, velocity);
         }
-    } else {
-        _dropped_count++;
+        return true;
     }
+    _dropped_count++;
+    return false;
 }
 
 // ============================================================================
 // Note Off handling
 // ============================================================================
 void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
-    int8_t inst_idx = _channel_to_instrument[msg.channel];
-    if (inst_idx < 0) {
-        _dropped_count++;
-        return;
+    if (msg.channel >= MIDI_CHANNEL_COUNT) { _dropped_count++; return; }
+
+    InstrumentConfig* instruments = _config.getInstruments();
+    uint8_t count = _config.getInstrumentCount();
+    bool matched = false;
+
+    for (uint8_t i = 0; i < count && i < MAX_INSTRUMENTS; i++) {
+        if (!instruments[i].enabled) continue;
+        if (!channelMatches(instruments[i], msg.channel)) continue;
+        if (dispatchNoteOffToInstrument(i, msg)) matched = true;
     }
 
-    InstrumentConfig& inst = _config.getInstruments()[inst_idx];
+    if (!matched) _dropped_count++;
+}
 
-    int8_t act_slot = findActuatorForNote(inst, msg.data1);
-    if (act_slot < 0) {
-        _dropped_count++;
-        return;
-    }
-
-    uint8_t actuator_id = inst.actuator_ids[act_slot];
+bool MidiDispatcher::dispatchNoteOffToInstrument(uint8_t inst_idx, const MidiMessage& msg) {
+    MidiRoutingConfig* routing = _routing_cache[inst_idx];
+    int16_t actuator_id = findActuatorForNote(routing, msg.data1);
+    if (actuator_id < 0) return false;
 
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time();
-    evt.actuator_id = actuator_id;
+    evt.actuator_id = (uint8_t)actuator_id;
     evt.action = ACTION_NOTE_OFF;
     evt.velocity = 0;
     evt.priority = 0;
@@ -181,31 +194,39 @@ void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
         _dispatched_count++;
         // Notify the PowerManager of deactivation
         if (_powerManager) {
-            ActuatorConfig* act_config = findActuatorConfig(actuator_id);
+            ActuatorConfig* act_config = findActuatorConfig((uint8_t)actuator_id);
             if (act_config) {
                 _powerManager->notifyDeactivation(*act_config, inst_idx);
             }
         }
-    } else {
-        _dropped_count++;
+        return true;
     }
+    _dropped_count++;
+    return false;
 }
 
 // ============================================================================
 // Control Change handling -- Phase 4
 // ============================================================================
 void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
-    int8_t inst_idx = _channel_to_instrument[msg.channel];
-    if (inst_idx < 0) {
-        _dropped_count++;
-        return;
+    if (msg.channel >= MIDI_CHANNEL_COUNT) { _dropped_count++; return; }
+
+    InstrumentConfig* instruments = _config.getInstruments();
+    uint8_t count = _config.getInstrumentCount();
+    bool matched = false;
+
+    for (uint8_t i = 0; i < count && i < MAX_INSTRUMENTS; i++) {
+        if (!instruments[i].enabled) continue;
+        if (!channelMatches(instruments[i], msg.channel)) continue;
+        if (dispatchCCToInstrument(i, msg)) matched = true;
     }
 
+    if (!matched) _dropped_count++;
+}
+
+bool MidiDispatcher::dispatchCCToInstrument(uint8_t inst_idx, const MidiMessage& msg) {
     MidiRoutingConfig* routing = _routing_cache[inst_idx];
-    if (routing == nullptr) {
-        _dropped_count++;
-        return;
-    }
+    if (routing == nullptr) return false;
 
     bool dispatched_any = false;
     for (uint8_t i = 0; i < routing->cc_map_count; i++) {
@@ -256,9 +277,7 @@ void MidiDispatcher::handleControlChange(const MidiMessage& msg) {
         }
     }
 
-    if (!dispatched_any) {
-        _dropped_count++;
-    }
+    return dispatched_any;
 }
 
 // ============================================================================
@@ -309,12 +328,16 @@ uint8_t MidiDispatcher::applyVelocityCurve(uint8_t instrument_index, uint8_t vel
 }
 
 // ============================================================================
-// Actuator lookup by MIDI note in an instrument
+// AUDIT FIX (P0.2): note -> actuator resolution via the routing note_map,
+// the single source of truth written by the web UI (/api/routing). Returns the
+// mapped actuator ID or -1.
 // ============================================================================
-int8_t MidiDispatcher::findActuatorForNote(const InstrumentConfig& inst, uint8_t note) {
-    for (uint8_t i = 0; i < inst.actuator_count; i++) {
-        if (inst.midi_notes[i] == note) {
-            return (int8_t)i;
+int16_t MidiDispatcher::findActuatorForNote(const MidiRoutingConfig* routing, uint8_t note) {
+    if (routing == nullptr) return -1;
+    for (uint8_t i = 0; i < routing->note_map_count && i < MAX_NOTE_MAPPINGS; i++) {
+        const NoteMapping& m = routing->note_map[i];
+        if (m.enabled && m.midi_note == note) {
+            return (int16_t)m.actuator_id;
         }
     }
     return -1;
@@ -348,16 +371,25 @@ uint16_t MidiDispatcher::mapCCValue(uint8_t cc_value, uint16_t range_min, uint16
 }
 
 // ============================================================================
-// Max latency computation for an instrument
+// Max latency computation — AUDIT FIX (P0.2): iterate the routing note_map
+// (the actuators actually reachable via MIDI) rather than the vestigial
+// instrument actuator_ids array.
 // ============================================================================
-uint16_t MidiDispatcher::computeMaxLatency(const InstrumentConfig& inst) {
+uint16_t MidiDispatcher::computeMaxLatency(uint8_t inst_idx) {
+    if (inst_idx >= MAX_INSTRUMENTS) return 0;
+
+    InstrumentConfig& inst = _config.getInstruments()[inst_idx];
     uint16_t max_lat = inst.default_latency_ms;
+
+    MidiRoutingConfig* routing = _routing_cache[inst_idx];
+    if (routing == nullptr) return max_lat;
 
     ActuatorConfig* actuators = _config.getActuators();
     uint8_t act_count = _config.getActuatorCount();
 
-    for (uint8_t i = 0; i < inst.actuator_count; i++) {
-        uint8_t target_id = inst.actuator_ids[i];
+    for (uint8_t i = 0; i < routing->note_map_count && i < MAX_NOTE_MAPPINGS; i++) {
+        if (!routing->note_map[i].enabled) continue;
+        uint8_t target_id = routing->note_map[i].actuator_id;
         for (uint8_t j = 0; j < act_count; j++) {
             if (actuators[j].id == target_id && actuators[j].latency_ms > max_lat) {
                 max_lat = actuators[j].latency_ms;

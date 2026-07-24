@@ -13,11 +13,24 @@
 //   - setHandleConnected/Disconnected remain on the session (AppleRTP)
 //
 // APPLEMIDI_CREATE_INSTANCE creates two globals:
-//   AppleRTP -> AppleMIDISession<WiFiUDP>  (network session, port 5004)
+//   AppleRTP -> AppleMIDISession<WiFiUDP>  (network session)
 //   MIDI     -> MidiInterface              (callbacks NoteOn/Off/CC + read())
-APPLEMIDI_CREATE_INSTANCE(WiFiUDP, AppleRTP, "play-mode", 5004);
+// AUDIT FIX (P0.4): bind the AppleMIDI session to MIDI_RTP_PORT (the control
+// port; the data port is MIDI_RTP_PORT + 1). Raw UDP-MIDI is bound to the
+// distinct MIDI_UDP_PORT so the two transports no longer collide.
+APPLEMIDI_CREATE_INSTANCE(WiFiUDP, AppleRTP, "play-mode", MIDI_RTP_PORT);
 
 static MidiTransport* g_transportInstance = nullptr;
+
+// AUDIT FIX (P0.3): the FortySevenEffects/AppleMIDI API delivers MIDI channels
+// in the 1..16 range. Internally PlayMode always works with 0..15. Convert and
+// bounds-check here; drop anything that cannot be represented (e.g. a malformed
+// RTP packet claiming channel 0 or > 16) instead of indexing out of bounds.
+static bool rtpChannelToInternal(byte channel, uint8_t& out) {
+    if (channel < 1 || channel > 16) return false;
+    out = (uint8_t)(channel - 1);
+    return true;
+}
 
 // AppleMIDI callbacks — network connection
 static void onAppleMidiConnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc, const char* name) {
@@ -31,9 +44,12 @@ static void onAppleMidiDisconnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc) {
 static void onAppleMidiNoteOn(byte channel, byte note, byte velocity) {
     if (g_transportInstance == nullptr) return;
 
+    uint8_t ch;
+    if (!rtpChannelToInternal(channel, ch)) return;
+
     MidiMessage msg;
     msg.type = MIDI_NOTE_ON;
-    msg.channel = channel;
+    msg.channel = ch;
     msg.data1 = note;
     msg.data2 = velocity;
     msg.timestamp_us = (uint32_t)esp_timer_get_time();
@@ -45,9 +61,12 @@ static void onAppleMidiNoteOn(byte channel, byte note, byte velocity) {
 static void onAppleMidiNoteOff(byte channel, byte note, byte velocity) {
     if (g_transportInstance == nullptr) return;
 
+    uint8_t ch;
+    if (!rtpChannelToInternal(channel, ch)) return;
+
     MidiMessage msg;
     msg.type = MIDI_NOTE_OFF;
-    msg.channel = channel;
+    msg.channel = ch;
     msg.data1 = note;
     msg.data2 = velocity;
     msg.timestamp_us = (uint32_t)esp_timer_get_time();
@@ -59,9 +78,12 @@ static void onAppleMidiNoteOff(byte channel, byte note, byte velocity) {
 static void onAppleMidiControlChange(byte channel, byte number, byte value) {
     if (g_transportInstance == nullptr) return;
 
+    uint8_t ch;
+    if (!rtpChannelToInternal(channel, ch)) return;
+
     MidiMessage msg;
     msg.type = MIDI_CONTROL_CHANGE;
-    msg.channel = channel;
+    msg.channel = ch;
     msg.data1 = number;
     msg.data2 = value;
     msg.timestamp_us = (uint32_t)esp_timer_get_time();
@@ -175,7 +197,16 @@ bool MidiTransport::initRTP() {
     AppleRTP.begin(MIDI_CHANNEL_OMNI);
 
     _rtpActive = true;
-    Serial.println("[MIDI-TR] RTP-MIDI (AppleMIDI) active (port 5004)");
+    // The AppleMIDI session port is fixed at compile time by
+    // APPLEMIDI_CREATE_INSTANCE (MIDI_RTP_PORT). If the stored config requests a
+    // different RTP port, warn the operator that a rebuild is required rather
+    // than silently listening on the default.
+    if (_config.rtp_port != 0 && _config.rtp_port != MIDI_RTP_PORT) {
+        Serial.printf("[MIDI-TR] WARNING: configured rtp_port=%d ignored; "
+                      "AppleMIDI is bound to %d (compile-time)\n",
+                      _config.rtp_port, MIDI_RTP_PORT);
+    }
+    Serial.printf("[MIDI-TR] RTP-MIDI (AppleMIDI) active (port %d)\n", MIDI_RTP_PORT);
     return true;
 }
 

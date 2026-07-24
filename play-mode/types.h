@@ -49,6 +49,13 @@ struct ActuatorState {
     bool              scratch_direction;  // Scratch direction (+ or -) — Core 1 only
     volatile uint32_t last_trigger_us;    // Last trigger time (µs)
     uint8_t           trigger_count;      // Duty cycle counter — Core 1 only
+    // AUDIT FIX (P0.5): monotonically increasing generation, bumped on every
+    // fresh NOTE_ON/NOTE_OFF. A deferred return/hold event carries the
+    // generation active when it was scheduled; if the actuator has since moved
+    // to a new generation (e.g. a NOTE_OFF cut a solenoid before its delayed
+    // "hold" event fired), the stale event is discarded instead of re-energising
+    // the output. Written by Core 1 only.
+    uint32_t          generation;
 };
 
 // --- Actuator configuration ---
@@ -90,6 +97,12 @@ struct SchedulerEvent {
     uint8_t velocity;            // MIDI velocity 0-127
     uint16_t value;              // Contextual value (angle, PWM, duration)
     uint8_t priority;            // Priority (0 = highest)
+    // AUDIT FIX (P0.5): deferred return/hold events carry the actuator
+    // generation they were scheduled under. Only checked when `deferred` is
+    // true, so direct commands (CC positioning, manual tests) — which leave
+    // these zero-initialised — are never spuriously invalidated.
+    bool     deferred;           // True = auto-scheduled return/hold event
+    uint32_t generation;         // Actuator generation at schedule time
 };
 
 // --- Instrument configuration ---

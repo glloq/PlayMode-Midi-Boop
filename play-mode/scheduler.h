@@ -29,6 +29,12 @@ public:
     // Add an event to the queue (thread-safe, called from Core 0)
     bool pushEvent(const SchedulerEvent& event);
 
+    // AUDIT FIX (P0.6): flush every pending event — both the FreeRTOS input
+    // queue and the internal priority buffer. Called by the kill switch so no
+    // stale NOTE_ON / return event can re-drive an output after the emergency
+    // stop. Safe to call from any core.
+    void clearQueue();
+
     // Register an actuator with the scheduler
     void registerActuator(ActuatorConfig* actuator);
 

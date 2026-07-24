@@ -4,10 +4,12 @@
 // PlayMode — PCA9685 multi-bus I²C driver (implementation)
 // ============================================================================
 
-PCADriver::PCADriver() : _driver_count(0) {
+PCADriver::PCADriver() {
     memset(_drivers, 0, sizeof(_drivers));
+    // Fixed per-bus regions so a rescan of one bus never shifts the other's
+    // driver indices.
     _bus_driver_start[0] = 0;
-    _bus_driver_start[1] = 0;
+    _bus_driver_start[1] = PCA_MAX_PER_BUS;
 
     // Bus 0 configuration — Servos
     _buses[0].id = 0;
@@ -73,14 +75,31 @@ bool PCADriver::initBus(uint8_t bus_id) {
     return true;
 }
 
+// AUDIT FIX: free every driver object allocated in a bus' fixed region so a
+// rescan does not leak the previous Adafruit_PWMServoDriver instances.
+void PCADriver::freeBusDrivers(uint8_t bus_id) {
+    if (bus_id > 1) return;
+    uint8_t base = _bus_driver_start[bus_id];
+    for (uint8_t i = 0; i < PCA_MAX_PER_BUS; i++) {
+        uint8_t idx = base + i;
+        if (idx < PCA_TOTAL_MAX && _drivers[idx] != nullptr) {
+            delete _drivers[idx];
+            _drivers[idx] = nullptr;
+        }
+    }
+}
+
+// AUDIT FIX: fully re-entrant scan. Frees any previously created drivers for
+// this bus and rebuilds its fixed region, so repeated scans neither leak
+// memory nor corrupt driver indices.
 uint8_t PCADriver::scanBus(uint8_t bus_id) {
     if (bus_id > 1) return 0;
 
     TwoWire& wire = getWire(bus_id);
+    freeBusDrivers(bus_id);
     _buses[bus_id].pca_count = 0;
 
-    // Store the starting index in _drivers[] for this bus
-    _bus_driver_start[bus_id] = _driver_count;
+    uint8_t base = _bus_driver_start[bus_id];
 
     // Scan possible PCA9685 addresses (0x40 to 0x43 for 4 PCA chips)
     for (uint8_t i = 0; i < PCA_MAX_PER_BUS; i++) {
@@ -90,25 +109,33 @@ uint8_t PCADriver::scanBus(uint8_t bus_id) {
         uint8_t error = wire.endTransmission();
 
         if (error == 0) {
-            _buses[bus_id].pca_addresses[_buses[bus_id].pca_count] = addr;
-            _buses[bus_id].pca_count++;
-
-            // Create the Adafruit driver for this PCA
+            // Create the Adafruit driver for this PCA in the bus' region, at the
+            // slot matching its discovery order (same order as pca_addresses[]).
+            uint8_t slot = base + _buses[bus_id].pca_count;
             Adafruit_PWMServoDriver* driver = new Adafruit_PWMServoDriver(addr, wire);
             driver->begin();
             driver->setPWMFreq(_buses[bus_id].pwm_frequency);
 
-            // Store in the global array
-            if (_driver_count < PCA_TOTAL_MAX) {
-                _drivers[_driver_count] = driver;
-                _driver_count++;
+            if (slot < PCA_TOTAL_MAX) {
+                _drivers[slot] = driver;
+                _buses[bus_id].pca_addresses[_buses[bus_id].pca_count] = addr;
+                _buses[bus_id].pca_count++;
+                Serial.printf("[PCA] Bus %d: PCA9685 found at 0x%02X\n", bus_id, addr);
+            } else {
+                delete driver;  // region full (should not happen)
             }
-
-            Serial.printf("[PCA] Bus %d: PCA9685 found at 0x%02X\n", bus_id, addr);
         }
     }
 
     return _buses[bus_id].pca_count;
+}
+
+uint8_t PCADriver::rescanAll() {
+    uint8_t total = 0;
+    for (uint8_t b = 0; b < 2; b++) {
+        total += scanBus(b);
+    }
+    return total;
 }
 
 void PCADriver::setFrequency(uint8_t bus_id, uint16_t freq_hz) {
@@ -178,11 +205,28 @@ void PCADriver::enableBus(uint8_t bus_id, bool enable) {
     Serial.printf("[PCA] Bus %d: outputs %s\n", bus_id, enable ? "enabled" : "disabled");
 }
 
+void PCADriver::allOff() {
+    // Write FULL_OFF (datasheet bit 12) to every channel of every detected PCA
+    // on both buses.
+    for (uint8_t b = 0; b < 2; b++) {
+        for (uint8_t p = 0; p < _buses[b].pca_count; p++) {
+            uint8_t addr = _buses[b].pca_addresses[p];
+            for (uint8_t ch = 0; ch < PCA_CHANNELS; ch++) {
+                setPWM(b, addr, ch, 0);  // 0 -> FULL_OFF path in setPWM()
+            }
+        }
+    }
+}
+
 void PCADriver::killAll() {
+    // AUDIT FIX (P0.6): disable the outputs (OE high) FIRST, then clear every
+    // PWM register. Re-arming (OE low) can no longer resurrect the pre-kill
+    // drive values because the registers are all FULL_OFF.
     for (uint8_t b = 0; b < 2; b++) {
         enableBus(b, false);
     }
-    Serial.println("[PCA] KILL SWITCH — all outputs disabled");
+    allOff();
+    Serial.println("[PCA] KILL SWITCH — all outputs disabled and registers cleared");
 }
 
 BusConfig& PCADriver::getBusConfig(uint8_t bus_id) {
@@ -205,13 +249,13 @@ bool PCADriver::isPCAPresent(uint8_t bus_id, uint8_t address) {
 
 Adafruit_PWMServoDriver* PCADriver::getDriver(uint8_t bus_id, uint8_t pca_address) {
     if (bus_id > 1) return nullptr;
-    // Drivers for this bus are stored starting at _bus_driver_start[bus_id]
+    // Drivers for this bus live in its fixed region [base, base+pca_count),
     // in discovery order from scanBus() — same order as pca_addresses[].
     uint8_t base = _bus_driver_start[bus_id];
     for (uint8_t j = 0; j < _buses[bus_id].pca_count; j++) {
         if (_buses[bus_id].pca_addresses[j] == pca_address) {
             uint8_t driver_idx = base + j;
-            if (driver_idx < _driver_count) {
+            if (driver_idx < PCA_TOTAL_MAX) {
                 return _drivers[driver_idx];
             }
         }

@@ -10,6 +10,7 @@ PowerManager::PowerManager()
     memset(&_stats,  0, sizeof(_stats));
     memset(_actuator_allocated_ma, 0, sizeof(_actuator_allocated_ma));
     memset(_actuator_tracked, false, sizeof(_actuator_tracked));
+    memset(_actuator_instrument, 0xFF, sizeof(_actuator_instrument));
 }
 
 void PowerManager::begin(const PowerBudget& budget) {
@@ -35,6 +36,7 @@ void PowerManager::begin(const PowerBudget& budget) {
     memset(&_stats, 0, sizeof(_stats));
     memset(_actuator_allocated_ma, 0, sizeof(_actuator_allocated_ma));
     memset(_actuator_tracked, false, sizeof(_actuator_tracked));
+    memset(_actuator_instrument, 0xFF, sizeof(_actuator_instrument));
 
     _last_update_us = (uint32_t)esp_timer_get_time();
 
@@ -129,6 +131,8 @@ void PowerManager::notifyActivation(const ActuatorConfig& actuator,
     // Allocate current for this actuator
     _actuator_allocated_ma[id] = ma;
     _actuator_tracked[id]      = true;
+    _actuator_instrument[id]   = (instrument_index < MAX_INSTRUMENTS)
+                                 ? instrument_index : 0xFF;
 
     // Update counters
     _stats.total_estimated_ma += ma;
@@ -176,6 +180,7 @@ void PowerManager::notifyDeactivation(const ActuatorConfig& actuator,
 
     _actuator_allocated_ma[id] = 0;
     _actuator_tracked[id]      = false;
+    _actuator_instrument[id]   = 0xFF;
 
     updateDerivedStats();
 }
@@ -232,13 +237,18 @@ void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
             if (act->bus_id == 0)      servo_ma    += ma;
             else if (act->bus_id == 1) solenoid_ma += ma;
 
-            // Note: instrument index is not available here (not stored in ActuatorConfig)
-            // Per-instrument counters are maintained by notify*() only.
+            // AUDIT FIX (P0.8): recompute per-instrument polyphony from the
+            // actuator's REAL active state, using the instrument recorded at
+            // activation. This is what finally decrements counters for
+            // auto-returning strikes that never send a NOTE_OFF.
+            uint8_t inst = _actuator_instrument[id];
+            if (inst < MAX_INSTRUMENTS) inst_active[inst]++;
         } else {
             // Inactive actuator: release the allocation if it is still accounted for
             if (_actuator_tracked[id]) {
                 _actuator_tracked[id]      = false;
                 _actuator_allocated_ma[id] = 0;
+                _actuator_instrument[id]   = 0xFF;
             }
         }
     }
@@ -247,6 +257,8 @@ void PowerManager::update(ActuatorConfig* actuators[], uint8_t count) {
     _stats.servo_bus_ma        = servo_ma;
     _stats.solenoid_bus_ma     = solenoid_ma;
     _stats.global_active_count = active_cnt;
+    // Authoritative per-instrument counts derived from real actuator states.
+    memcpy(_stats.instrument_active_count, inst_active, sizeof(inst_active));
 
     updateDerivedStats();
 }

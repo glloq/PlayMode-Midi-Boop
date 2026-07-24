@@ -1,4 +1,5 @@
 #include "safety_manager.h"
+#include "scheduler.h"
 
 // ============================================================================
 // PlayMode — Safety Manager + Power Manager (implementation)
@@ -9,6 +10,7 @@ const ActuatorSafetyState SafetyManager::_default_safety_state = {};
 
 SafetyManager::SafetyManager(PCADriver& pca)
     : _pca(pca),
+      _scheduler(nullptr),
       _max_duty_cycle(SAFETY_MAX_DUTY_CYCLE),
       _max_freq_hz(SAFETY_MAX_FREQ_HZ),
       _watchdog_ms(SAFETY_WATCHDOG_MS),
@@ -36,6 +38,10 @@ void SafetyManager::begin() {
     Serial.printf("[SAFETY] Limits: duty=%d%%, freq=%dHz, watchdog=%dms, polyphony=%d, current=%dmA\n",
                   _max_duty_cycle, _max_freq_hz, _watchdog_ms,
                   _max_polyphony, _max_total_current_ma);
+}
+
+void SafetyManager::setScheduler(Scheduler* scheduler) {
+    _scheduler = scheduler;
 }
 
 // ============================================================================
@@ -167,15 +173,22 @@ void SafetyManager::update(ActuatorConfig* actuators[], uint8_t count) {
 // ============================================================================
 
 void SafetyManager::activateKillSwitch() {
+    // AUDIT FIX (P0.6): full emergency-stop sequence.
+    // 1. Latch the kill switch so no further events can be accepted/executed.
     _global_state.kill_switch_active = true;
+    // 2. Cut the outputs (OE high) AND clear every PCA PWM register, so a later
+    //    re-arm cannot resurrect stale drive values.
     _pca.killAll();
-    // AUDIT FIX: the outputs are now physically disabled (OE high), so every
-    // actuator is at rest. Reset the runtime states — otherwise their
-    // scheduled return/off events stay blocked by the latch and the actuators
-    // remain flagged "active" forever, permanently inflating the current
-    // estimate (which also used to freeze the old auto-recovery logic).
+    // 3. Flush the scheduler queues — any queued NOTE_ON / return event would
+    //    otherwise sit waiting and could re-drive an output on re-arm.
+    if (_scheduler != nullptr) _scheduler->clearQueue();
+    // 4. Reset every runtime state to "inactive" so the current estimate
+    //    reflects the physical reality (nothing is actuating).
     resetActuatorStates();
-    Serial.println("[SAFETY] KILL SWITCH ACTIVATED — all outputs cut off (manual reset required)");
+    // 5/6. The latch stays engaged; outputs are only re-enabled by an explicit
+    //    deactivateKillSwitch() (manual reset from the web UI).
+    Serial.println("[SAFETY] KILL SWITCH ACTIVATED — outputs cut, registers cleared, "
+                   "queues flushed (manual reset required)");
 }
 
 void SafetyManager::deactivateKillSwitch() {

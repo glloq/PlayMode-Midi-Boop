@@ -75,9 +75,6 @@ private:
     uint8_t _ws_log_count;
     void pushWsLog(const MidiMessage& msg, bool routed);
 
-    // Fast lookup table: [MIDI channel] -> instrument index (-1 = unmapped)
-    int8_t _channel_to_instrument[16];
-
     // Max latency per instrument (for compensation)
     uint16_t _max_latency_ms[MAX_INSTRUMENTS];
 
@@ -93,12 +90,24 @@ private:
     // Handles a Control Change
     void handleControlChange(const MidiMessage& msg);
 
+    // AUDIT FIX (P0.2/P0.3): dispatch to a single matching instrument. Returns
+    // true if at least one actuator event was scheduled.
+    bool dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMessage& msg);
+    bool dispatchNoteOffToInstrument(uint8_t inst_idx, const MidiMessage& msg);
+    bool dispatchCCToInstrument(uint8_t inst_idx, const MidiMessage& msg);
+
+    // AUDIT FIX (P0.3): does this instrument listen on the given internal
+    // channel (0..15)? True for an exact match or when the instrument is Omni.
+    bool channelMatches(const InstrumentConfig& inst, uint8_t channel) const;
+
     // Applies the velocity curve of an instrument
     uint8_t applyVelocityCurve(uint8_t instrument_index, uint8_t velocity);
 
-    // Finds the actuator corresponding to a note in an instrument
-    // Returns the index in actuator_ids or -1
-    int8_t findActuatorForNote(const InstrumentConfig& inst, uint8_t note);
+    // AUDIT FIX (P0.2): resolve a MIDI note to a target actuator ID using the
+    // routing note_map (the single source of truth), not the vestigial
+    // InstrumentConfig::midi_notes/actuator_ids arrays. Returns the actuator ID
+    // or -1 when the note is unmapped.
+    int16_t findActuatorForNote(const MidiRoutingConfig* routing, uint8_t note);
 
     // Finds the config of an actuator by ID
     ActuatorConfig* findActuatorConfig(uint8_t actuator_id);
@@ -106,8 +115,9 @@ private:
     // Maps a CC value (0-127) to an output range
     uint16_t mapCCValue(uint8_t cc_value, uint16_t range_min, uint16_t range_max);
 
-    // Computes the max latency among the actuators of an instrument
-    uint16_t computeMaxLatency(const InstrumentConfig& inst);
+    // Computes the max latency among the actuators referenced by an
+    // instrument's routing note_map.
+    uint16_t computeMaxLatency(uint8_t inst_idx);
 };
 
 #endif // MIDI_DISPATCHER_H

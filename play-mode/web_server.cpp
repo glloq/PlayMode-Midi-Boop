@@ -43,9 +43,23 @@ namespace {
         s_ap_token = String(buf);
     }
 
+    // True when auth is not required (STA / non-AP) — the local LAN is the
+    // trust boundary. In pure AP mode the token is required.
+    bool authExempt() {
+        return !(WiFi.getMode() & WIFI_AP) || (WiFi.getMode() & WIFI_STA);
+    }
+
+    // AUDIT FIX (P0.9): validate a token string carried by a WebSocket command
+    // (WS has no HTTP headers to run requireAuth against).
+    bool wsCommandAuthorized(const String& token) {
+        if (authExempt()) return true;
+        ensureApToken();
+        return token == s_ap_token;
+    }
+
     bool requireAuth(AsyncWebServerRequest* req) {
         // Auth only enforced in AP mode — STA networks are user-trusted.
-        if (!(WiFi.getMode() & WIFI_AP) || (WiFi.getMode() & WIFI_STA)) {
+        if (authExempt()) {
             return true;
         }
         ensureApToken();
@@ -57,6 +71,21 @@ namespace {
         }
         req->send(401, "application/json", "{\"error\":\"auth required (AP mode)\"}");
         return false;
+    }
+
+    // AUDIT FIX (P0.3): the web UI uses the musician convention 0 = Omni,
+    // 1..16 = channel. Convert to the internal representation (0..15, or the
+    // Omni sentinel) on write, and back on read.
+    uint8_t uiChannelToInternal(int ui_channel) {
+        if (ui_channel <= 0)  return MIDI_CHANNEL_OMNI_INTERNAL;   // 0 = Omni
+        if (ui_channel > 16)  ui_channel = 16;
+        return (uint8_t)(ui_channel - 1);                          // 1..16 -> 0..15
+    }
+
+    int internalChannelToUi(uint8_t internal_channel) {
+        if (internal_channel == MIDI_CHANNEL_OMNI_INTERNAL) return 0;
+        if (internal_channel >= MIDI_CHANNEL_COUNT) return 0;      // defensive
+        return internal_channel + 1;                               // 0..15 -> 1..16
     }
 
     // Standard security headers — added to every HTML response.
@@ -397,6 +426,7 @@ void WebServer::setupAPIRoutes() {
     // AUDIT FIX: Bus PWM frequency (missing endpoint — called by the frontend)
     auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            if (!requireAuth(req)) return;
             if (!_pca || !_config) { req->send(500); return; }
             uint8_t bus_id = json["bus_id"] | 0xFF;
             uint16_t freq  = json["freq_pwm"] | 0;
@@ -508,7 +538,7 @@ void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
         JsonObject obj = arr.add<JsonObject>();
         obj["index"]   = i;
         obj["name"]    = instruments[i].name;
-        obj["channel"] = instruments[i].midi_channel;
+        obj["channel"] = internalChannelToUi(instruments[i].midi_channel);
         obj["bus_id"]  = instruments[i].bus_id;
         obj["actuator_count"] = instruments[i].actuator_count;
         obj["latency_ms"]     = instruments[i].default_latency_ms;
@@ -753,6 +783,7 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
 
 void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     JsonDocument doc;
@@ -765,7 +796,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
 
     InstrumentConfig inst = {};
     strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
-    inst.midi_channel       = doc["channel"] | 0;
+    inst.midi_channel       = uiChannelToInternal(doc["channel"] | 0);
     inst.bus_id             = doc["bus_id"] | 0;
     inst.default_latency_ms = doc["latency_ms"] | 10;
     inst.auto_calibration   = doc["auto_cal"] | false;
@@ -819,6 +850,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
 
 void WebServer::handlePostActuator(AsyncWebServerRequest* request,
                                    uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     JsonDocument doc;
@@ -912,6 +944,7 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
 
 void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
                                uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     JsonDocument doc;
@@ -937,6 +970,7 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
 
 void WebServer::handlePostMidi(AsyncWebServerRequest* request,
                                uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     JsonDocument doc;
@@ -965,6 +999,7 @@ void WebServer::handlePostMidi(AsyncWebServerRequest* request,
 
 void WebServer::handlePostRouting(AsyncWebServerRequest* request,
                                   uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_config || !_dispatcher) { request->send(500); return; }
 
     JsonDocument doc;
@@ -1047,6 +1082,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
 
 void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
                                       uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_power) { request->send(500); return; }
 
     JsonDocument doc;
@@ -1071,6 +1107,7 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
 
 void WebServer::handlePostSafety(AsyncWebServerRequest* request,
                                  uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
     if (!_safety) { request->send(500); return; }
 
     JsonDocument doc;
@@ -1182,13 +1219,17 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
 }
 
 void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_pca) { request->send(500); return; }
 
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
+    // AUDIT FIX: full re-entrant rescan (frees old driver objects, keeps driver
+    // indices stable) instead of two independent scanBus() calls.
+    _pca->rescanAll();
     for (uint8_t b = 0; b < 2; b++) {
-        uint8_t found = _pca->scanBus(b);
+        uint8_t found = _pca->getPCACount(b);
         JsonObject obj = arr.add<JsonObject>();
         obj["bus"] = b;
         obj["pca_count"] = found;
@@ -1212,6 +1253,7 @@ void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
 // ============================================================================
 
 void WebServer::handleDeleteInstrument(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     if (!request->hasParam("index")) {
@@ -1240,6 +1282,7 @@ void WebServer::handleDeleteInstrument(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
     if (!request->hasParam("id")) {
@@ -1318,7 +1361,11 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
                 DeserializationError err = deserializeJson(doc, (const char*)data, len);
                 if (!err) {
                     const char* cmd = doc["cmd"];
-                    if (cmd && strcmp(cmd, "test") == 0) {
+                    // AUDIT FIX (P0.9): the WS "test" command drives a real
+                    // actuator — require the AP token in AP mode, same as the
+                    // REST write endpoints.
+                    if (cmd && strcmp(cmd, "test") == 0 &&
+                        wsCommandAuthorized(String(doc["token"] | ""))) {
                         // Quick actuator test via WS
                         uint8_t act_id   = doc["id"] | 0;
                         uint8_t velocity = doc["vel"] | 100;

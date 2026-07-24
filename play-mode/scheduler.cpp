@@ -79,6 +79,18 @@ bool Scheduler::pushEvent(const SchedulerEvent& event) {
     return xQueueSend(_input_queue, &event, 0) == pdTRUE;
 }
 
+void Scheduler::clearQueue() {
+    // Drain the thread-safe FreeRTOS input queue.
+    if (_input_queue != NULL) {
+        SchedulerEvent scratch;
+        while (xQueueReceive(_input_queue, &scratch, 0) == pdTRUE) { /* discard */ }
+    }
+    // Empty the internal priority buffer. A single-word store; the real-time
+    // task reads _event_count at the top of each tick and simply sees an empty
+    // heap. During an emergency stop this is exactly the intended effect.
+    _event_count = 0;
+}
+
 void Scheduler::registerActuator(ActuatorConfig* actuator) {
     if (_actuator_count < MAX_ACTUATORS && actuator != nullptr) {
         _actuators[_actuator_count] = actuator;
