@@ -238,55 +238,57 @@ bool ConfigManager::load() {
     return true;
 }
 
-bool ConfigManager::save() {
-    JsonDocument doc;
-
+void ConfigManager::populateDoc(JsonDocument& doc) {
     doc["version"] = _version;
     // AUDIT FIX: explicit, unambiguous marker so a reload never double-migrates
     // the channel representation regardless of the numeric version.
     doc["channel_encoding"] = "internal";
 
-    // WiFi
     JsonObject wifiObj = doc["wifi"].to<JsonObject>();
     serializeWiFi(_wifi_config, wifiObj);
 
-    // MIDI Input
     JsonObject midiObj = doc["midi_input"].to<JsonObject>();
     serializeMidiInput(_midi_input_config, midiObj);
 
-    // Power budget + Safety limits (persisted)
     JsonObject powerObj = doc["power"].to<JsonObject>();
     serializePower(_power_budget, powerObj);
     JsonObject safetyObj = doc["safety"].to<JsonObject>();
     serializeSafety(_safety_limits, safetyObj);
 
-    // Bus
     JsonArray busArray = doc["buses"].to<JsonArray>();
     for (uint8_t i = 0; i < 2; i++) {
         JsonObject busObj = busArray.add<JsonObject>();
         serializeBus(_buses[i], busObj);
     }
 
-    // Actuators
     JsonArray actArray = doc["actuators"].to<JsonArray>();
     for (uint8_t i = 0; i < _actuator_count; i++) {
         JsonObject actObj = actArray.add<JsonObject>();
         serializeActuator(_actuators[i], actObj);
     }
 
-    // Instruments
     JsonArray instArray = doc["instruments"].to<JsonArray>();
     for (uint8_t i = 0; i < _instrument_count; i++) {
         JsonObject instObj = instArray.add<JsonObject>();
         serializeInstrument(_instruments[i], instObj);
     }
 
-    // MIDI Routing
     JsonArray routeArray = doc["routing"].to<JsonArray>();
     for (uint8_t i = 0; i < _routing_count; i++) {
         JsonObject routeObj = routeArray.add<JsonObject>();
         serializeRouting(_routing_configs[i], routeObj);
     }
+}
+
+bool ConfigManager::exportJson(String& out) {
+    JsonDocument doc;
+    populateDoc(doc);
+    return serializeJsonPretty(doc, out) > 0;
+}
+
+bool ConfigManager::save() {
+    JsonDocument doc;
+    populateDoc(doc);
 
     // AUDIT FIX: atomic write. Serialise to a temp file first; only if that
     // fully succeeds do we rotate it over the live file (keeping a .bak). A
@@ -329,6 +331,50 @@ bool ConfigManager::save() {
     }
 
     Serial.println("[CONFIG] Configuration saved (atomic)");
+    return true;
+}
+
+bool ConfigManager::importJson(const uint8_t* data, size_t len) {
+    // Validate that it parses and looks like a PlayMode config before touching
+    // the live file.
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+        Serial.println("[CONFIG] Import rejected — invalid JSON");
+        return false;
+    }
+    if (doc["version"].isNull() && doc["actuators"].isNull() && doc["buses"].isNull()) {
+        Serial.println("[CONFIG] Import rejected — not a PlayMode config");
+        return false;
+    }
+
+    // Stage the uploaded bytes, then rotate into place (keeping a backup).
+    File f = LittleFS.open(CONFIG_TMP_PATH, "w");
+    if (!f) return false;
+    size_t w = f.write(data, len);
+    f.close();
+    if (w != len) { LittleFS.remove(CONFIG_TMP_PATH); return false; }
+
+    if (LittleFS.exists(CONFIG_FILE_PATH)) {
+        LittleFS.remove(CONFIG_BAK_PATH);
+        LittleFS.rename(CONFIG_FILE_PATH, CONFIG_BAK_PATH);
+    }
+    if (!LittleFS.rename(CONFIG_TMP_PATH, CONFIG_FILE_PATH)) {
+        LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);
+        return false;
+    }
+
+    // Re-load through the normal path (defaults + overlay + validation +
+    // migration). On failure, restore the backup.
+    if (!load()) {
+        Serial.println("[CONFIG] Import failed on reload — restoring previous config");
+        LittleFS.remove(CONFIG_FILE_PATH);
+        if (LittleFS.exists(CONFIG_BAK_PATH)) {
+            LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);
+            load();
+        }
+        return false;
+    }
+    Serial.println("[CONFIG] Configuration imported");
     return true;
 }
 

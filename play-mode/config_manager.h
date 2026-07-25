@@ -42,6 +42,14 @@ public:
     // Saves configuration to the JSON file
     bool save();
 
+    // AUDIT FIX (UX): export the current in-memory configuration as a JSON
+    // string (for download / backup).
+    bool exportJson(String& out);
+
+    // Import a configuration from a JSON buffer: parse, apply, validate and
+    // atomically save. Returns false (config unchanged) on invalid input.
+    bool importJson(const uint8_t* data, size_t len);
+
     // Resets configuration to defaults
     void loadDefaults();
 
@@ -125,6 +133,10 @@ private:
     MidiRoutingConfig _routing_configs[MAX_INSTRUMENTS];
     uint8_t _routing_count;
     uint8_t _version;
+
+    // Fills a JsonDocument with the full current configuration (shared by
+    // save() and exportJson()).
+    void populateDoc(JsonDocument& doc);
 
     // Serializes an actuator to JSON
     void serializeActuator(const ActuatorConfig& act, JsonObject& obj);

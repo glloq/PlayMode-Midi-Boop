@@ -125,6 +125,10 @@
 // --- LED Status ---
 #define LED_STATUS_PIN          2       // GPIO 2 — ESP32 built-in LED
 
+// --- Firmware identity ---
+#define FW_VERSION              "0.9"
+#define FW_BUILD                (__DATE__ " " __TIME__)
+
 // --- Serial ---
 #define SERIAL_BAUD_RATE        115200
 

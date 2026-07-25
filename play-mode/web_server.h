@@ -132,6 +132,11 @@ private:
     void handlePostSetupInstrument(AsyncWebServerRequest* request,
                                    uint8_t* data, size_t len);
 
+    // AUDIT FIX (UX): configuration backup / restore.
+    void handleGetConfigExport(AsyncWebServerRequest* request);
+    void handlePostConfigImport(AsyncWebServerRequest* request,
+                                uint8_t* data, size_t len);
+
     // POST — actions
     void handlePostSave(AsyncWebServerRequest* request);
     void handlePostDefaults(AsyncWebServerRequest* request);

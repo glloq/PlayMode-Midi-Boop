@@ -328,6 +328,21 @@ void WebServer::setupAPIRoutes() {
         handlePostDefaults(req);
     });
 
+    // Export configuration (download / backup)
+    _server.on("/api/config/export", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetConfigExport(req);
+    });
+
+    // Import configuration (restore) — larger body allowed for a full config.
+    auto* importHandler = new AsyncCallbackJsonWebHandler("/api/config/import",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostConfigImport(req, (uint8_t*)body.c_str(), body.length());
+        });
+    importHandler->setMethod(HTTP_POST);
+    _server.addHandler(importHandler);
+
     // Scan I²C
     _server.on("/api/scan/i2c", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostScanI2C(req);
@@ -1457,6 +1472,58 @@ void WebServer::handlePostSave(AsyncWebServerRequest* request) {
     }
 }
 
+// ============================================================================
+// AUDIT FIX (UX): configuration backup / restore
+// ============================================================================
+void WebServer::handleGetConfigExport(AsyncWebServerRequest* request) {
+    // The export is a full backup and includes stored WiFi credentials, so it
+    // is gated behind auth (in AP mode).
+    if (!requireAuth(request)) return;
+    if (!_config) { request->send(500); return; }
+
+    String json;
+    if (!_config->exportJson(json)) {
+        request->send(500, "application/json", "{\"error\":\"export failed\"}");
+        return;
+    }
+    AsyncWebServerResponse* resp =
+        request->beginResponse(200, "application/json", json);
+    resp->addHeader("Content-Disposition", "attachment; filename=\"playmode-config.json\"");
+    request->send(resp);
+}
+
+void WebServer::handlePostConfigImport(AsyncWebServerRequest* request,
+                                       uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
+    if (!_config) { request->send(500); return; }
+
+    // Cut outputs before swapping the whole configuration, then reboot so the
+    // new WiFi/MIDI/actuator setup is applied cleanly from a known state.
+    if (_safety) _safety->requestKillSwitch();
+
+    bool ok;
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json", "{\"error\":\"configuration busy\"}");
+            return;
+        }
+        ok = _config->importJson(data, len);
+        if (ok && _scheduler)
+            _scheduler->syncActuators(_config->getActuators(), _config->getActuatorCount());
+    }
+
+    if (!ok) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid or rejected configuration\"}");
+        return;
+    }
+    logger.log(LOG_WARN, CAT_SYSTEM, "Configuration imported — restarting");
+    _restart_at_ms = millis() + 400;
+    request->send(200, "application/json",
+                  "{\"ok\":true,\"note\":\"configuration imported — device is restarting\"}");
+}
+
 void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
@@ -1752,6 +1819,17 @@ void WebServer::buildStatusJSON(String& output) {
 
     doc["uptime_s"] = millis() / 1000;
     doc["heap"]     = ESP.getFreeHeap();
+    doc["fw_version"] = FW_VERSION;
+    doc["fw_build"]   = FW_BUILD;
+
+    // AUDIT FIX (UI/UX): a single, explicit machine state for the permanent
+    // dashboard: FAULT (latched over-current) / DISARMED (kill active) / ARMED.
+    if (_safety) {
+        const SafetyState& ss0 = _safety->getGlobalState();
+        const char* mstate = ss0.over_current ? "fault"
+                           : ss0.kill_switch_active ? "disarmed" : "armed";
+        doc["machine_state"] = mstate;
+    }
 
     // Scheduler
     if (_scheduler) {

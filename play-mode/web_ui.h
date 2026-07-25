@@ -45,6 +45,12 @@ a{color:var(--accent);text-decoration:none}
 .header .dot{width:8px;height:8px;border-radius:50%;display:inline-block;
   margin-right:4px;background:var(--green)}
 .header .dot.off{background:var(--red)}
+.mstate{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  padding:3px 8px;border-radius:10px;margin:0 8px;white-space:nowrap}
+.mstate-armed{background:rgba(46,160,67,.18);color:var(--green);border:1px solid var(--green)}
+.mstate-disarmed{background:rgba(210,153,34,.18);color:var(--yellow);border:1px solid var(--yellow)}
+.mstate-fault{background:rgba(248,81,73,.18);color:var(--red);border:1px solid var(--red)}
+.mstate-unknown{background:var(--bg2);color:var(--fg2);border:1px solid var(--border)}
 
 nav{background:var(--bg2);border-bottom:1px solid var(--border);
   display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -302,6 +308,9 @@ tr:hover td{background:var(--bg2)}
   <div class="status">
     <span class="dot" id="ws-dot"></span>
   </div>
+  <!-- AUDIT FIX (UX): permanent machine state + arm/kill control in the header -->
+  <span id="machine-state" class="mstate mstate-unknown" title="Output state">—</span>
+  <button id="arm-btn" class="btn sm" onclick="toggleArm()" title="Arm or disable the outputs" style="display:none">Arm</button>
   <button class="gear-btn" onclick="showPage('settings')" title="System settings">&#9881;</button>
 </div>
 
@@ -534,9 +543,13 @@ tr:hover td{background:var(--bg2)}
   <div class="section-title" style="margin-top:24px">Configuration</div>
   <div class="btn-row">
     <button class="btn primary" onclick="saveConfig()">Save to flash</button>
+    <button class="btn" onclick="exportConfig()">Export &darr;</button>
+    <button class="btn" onclick="document.getElementById('import-file').click()">Import &uarr;</button>
     <button class="btn danger" onclick="confirmResetDefaults()">Reset</button>
+    <input type="file" id="import-file" accept="application/json,.json" style="display:none" onchange="importConfig(this)">
   </div>
   <div class="sub" style="margin-top:8px">Config version: <span id="set-version">-</span></div>
+  <div class="sub" style="margin-top:4px">Firmware: <span id="set-fw">-</span> &middot; build <span id="set-build">-</span></div>
 </div>
 
 <!-- ============ MIDI (MIDI Inputs + Received Messages) ============ -->
@@ -1128,6 +1141,7 @@ function connectWS() {
   ws.onmessage = (evt) => {
     try {
       const d = JSON.parse(evt.data);
+      if (d.machine_state) updateMachineState(d.machine_state);
       updateDashboard(d);
       // MIDI messages received via WebSocket
       if (d.midi_msg) pushMidiLog(d.midi_msg);
@@ -1141,7 +1155,45 @@ function connectWS() {
   };
 }
 
+// AUDIT FIX (UX): permanent machine-state indicator + arm/kill control.
+let currentMachineState = 'unknown';
+function updateMachineState(state) {
+  currentMachineState = state;
+  const chip = document.getElementById('machine-state');
+  const btn = document.getElementById('arm-btn');
+  if (!chip) return;
+  const labels = { armed: 'Armed', disarmed: 'Disarmed', fault: 'Fault' };
+  chip.textContent = labels[state] || '—';
+  chip.className = 'mstate mstate-' + (labels[state] ? state : 'unknown');
+  if (btn) {
+    btn.style.display = '';
+    if (state === 'armed') {
+      btn.textContent = 'Kill'; btn.className = 'btn sm danger';
+    } else if (state === 'disarmed') {
+      btn.textContent = 'Arm'; btn.className = 'btn sm primary';
+    } else { // fault
+      btn.textContent = 'Clear'; btn.className = 'btn sm';
+    }
+  }
+}
+
+async function toggleArm() {
+  if (currentMachineState === 'armed') {
+    if (!await appConfirm('Disable outputs', 'Cut all outputs now (kill switch)?',
+        {danger:true, confirmText:'Kill', icon:'🛑'})) return;
+    await api('/api/killswitch', 'POST', {active: true});
+  } else {
+    // disarmed OR fault: re-arm (backend refuses re-arm while over-current is latched)
+    if (!await appConfirm('Arm outputs', 'Re-enable the outputs? Make sure the machine is clear.',
+        {confirmText:'Arm', icon:'⚡'})) return;
+    await api('/api/killswitch', 'POST', {active: false});
+  }
+}
+
 function updateDashboard(d) {
+  // AUDIT FIX (UX): firmware identity (set once when present).
+  if (d.fw_version) { el('set-fw', d.fw_version); el('set-build', d.fw_build || '-'); }
+
   // MIDI Transport
   // AUDIT FIX (UI-P1): do NOT sum incompatible units (serial bytes + UDP
   // packets + RTP messages). Show each source separately with its unit.
@@ -2502,6 +2554,42 @@ async function saveConfig() {
   } else {
     appAlert('Error', 'Save failed.', {icon:'\u274c'});
   }
+}
+
+// AUDIT FIX (UX): configuration backup / restore.
+async function exportConfig() {
+  // Fetch with auth header, then trigger a client-side download.
+  try {
+    const headers = {};
+    if (authToken) headers['X-PlayMode-Token'] = authToken;
+    const res = await fetch('/api/config/export', { headers });
+    if (!res.ok) { toast('Export failed (HTTP ' + res.status + ')', 'error'); return; }
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'playmode-config.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast('Configuration exported', 'ok');
+  } catch (e) { toast('Export failed', 'error'); }
+}
+
+async function importConfig(input) {
+  const file = input.files && input.files[0];
+  input.value = '';           // allow re-selecting the same file later
+  if (!file) return;
+  if (!await appConfirm('Import configuration',
+      'Replace the current configuration with "' + file.name + '"? The device will restart.',
+      {danger:true, confirmText:'Import', icon:'\u26a0\ufe0f'})) return;
+  let text;
+  try { text = await file.text(); } catch (e) { toast('Could not read file', 'error'); return; }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { toast('Not a valid JSON file', 'error'); return; }
+  const resp = await api('/api/config/import', 'POST', parsed);
+  if (!resp || !resp.ok) return;   // api() surfaced the error
+  await appAlert('Import complete', 'Configuration imported. The device is restarting \u2014 the page will reload shortly.', {icon:'\u2705'});
+  setTimeout(() => location.reload(), 6000);
 }
 
 async function confirmResetDefaults() {
