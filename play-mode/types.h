@@ -104,7 +104,7 @@ struct SchedulerEvent {
     bool     deferred;           // True = auto-scheduled return/hold event
     uint32_t generation;         // Actuator generation at schedule time
     // AUDIT FIX (P1.3): instrument that emitted a NOTE_ON/NOTE_OFF, so the
-    // scheduler can bill the PowerManager AFTER the event really executes
+    // scheduler can bill the ResourceManager AFTER the event really executes
     // (0xFF = unknown / not from the dispatcher).
     uint8_t  instrument_index;
     // AUDIT FIX (P1.5): per-note behaviour override from the routing map
@@ -137,6 +137,16 @@ struct BusConfig {
     bool enabled;
     uint8_t pca_addresses[PCA_MAX_PER_BUS]; // Detected PCA addresses
     uint8_t pca_count;           // Number of detected PCAs
+};
+
+// --- Scheduler command (atomic unit crossing the FreeRTOS queue) ---
+// AUDIT FIX (P0.1): a NOTE_ON/NOTE_OFF pair must reach the internal priority
+// heap all-or-nothing. Carrying them as ONE queue element (not two) makes the
+// FreeRTOS enqueue atomic, and Core 1 only inserts the whole command when the
+// heap has room for every event it contains.
+struct SchedulerCommand {
+    uint8_t event_count;          // 1 or 2
+    SchedulerEvent events[2];
 };
 
 // --- Comparator for priority queue (sorted by timestamp) ---
@@ -221,6 +231,17 @@ struct SafetyState {
 // ============================================================================
 // Phase 5 — Power Manager
 // ============================================================================
+
+// --- Safety limits (persisted configuration) ---
+// AUDIT FIX (UI-P1): the safety limits are persisted so they survive a reboot
+// instead of always reverting to the compile-time constants.
+struct SafetyLimits {
+    uint8_t  max_duty_pct;
+    uint16_t max_freq_hz;
+    uint16_t watchdog_ms;
+    uint8_t  max_polyphony;
+    uint16_t max_current_ma;
+};
 
 // --- Power budget (configuration) ---
 struct PowerBudget {

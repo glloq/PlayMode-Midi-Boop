@@ -27,6 +27,8 @@ ConfigManager::ConfigManager()
       _version(CONFIG_VERSION) {
     memset(&_wifi_config, 0, sizeof(_wifi_config));
     memset(&_midi_input_config, 0, sizeof(_midi_input_config));
+    memset(&_power_budget, 0, sizeof(_power_budget));
+    memset(&_safety_limits, 0, sizeof(_safety_limits));
     memset(_actuators, 0, sizeof(_actuators));
     memset(_instruments, 0, sizeof(_instruments));
     memset(_routing_configs, 0, sizeof(_routing_configs));
@@ -40,12 +42,20 @@ bool ConfigManager::begin() {
         g_actuator_mutex = xSemaphoreCreateMutex();
     }
 
-    // AUDIT FIX: do NOT auto-format on mount failure — that silently wipes
-    // every saved instrument, mapping and calibration result. Try first
-    // without format; only format if a mount still fails afterwards
-    // (corrupted FS on a brand-new flash).
-    if (!LittleFS.begin(false)) {
-        Serial.println("[CONFIG] LittleFS mount failed — attempting one-time format");
+    // AUDIT FIX: never eagerly format on a mount failure — that silently wipes
+    // every saved instrument, mapping and calibration result. A mount failure
+    // is often transient, so retry a few times first; only format as a last
+    // resort (genuinely blank/corrupt flash on a new board).
+    bool mounted = false;
+    for (uint8_t attempt = 0; attempt < 3 && !mounted; attempt++) {
+        mounted = LittleFS.begin(false);
+        if (!mounted) {
+            Serial.printf("[CONFIG] LittleFS mount attempt %d failed\n", attempt + 1);
+            delay(100);
+        }
+    }
+    if (!mounted) {
+        Serial.println("[CONFIG] LittleFS unmountable after retries — one-time format");
         if (!LittleFS.begin(true)) {
             Serial.println("[CONFIG] LittleFS mount error after format attempt");
             return false;
@@ -55,12 +65,24 @@ bool ConfigManager::begin() {
         Serial.println("[CONFIG] LittleFS mounted");
     }
 
-    // Load config if it exists, otherwise load defaults
+    // Load config; on failure fall back to the atomic-save backup before
+    // resorting to defaults.
     if (configExists()) {
         if (!load()) {
-            Serial.println("[CONFIG] Load error, using defaults");
-            loadDefaults();
+            Serial.println("[CONFIG] Primary config load failed — trying backup");
+            // Remove the corrupt primary so the backup can be renamed into place.
+            LittleFS.remove(CONFIG_FILE_PATH);
+            if (LittleFS.exists(CONFIG_BAK_PATH) &&
+                LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH) && load()) {
+                Serial.println("[CONFIG] Recovered configuration from backup");
+            } else {
+                Serial.println("[CONFIG] Load error, using defaults");
+                loadDefaults();
+            }
         }
+    } else if (LittleFS.exists(CONFIG_BAK_PATH) &&
+               LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH) && load()) {
+        Serial.println("[CONFIG] Primary missing — recovered from backup");
     } else {
         Serial.println("[CONFIG] No config found, loading defaults");
         loadDefaults();
@@ -87,6 +109,11 @@ bool ConfigManager::load() {
         return false;
     }
 
+    // AUDIT FIX: start from a fully-populated default set, THEN overlay the JSON
+    // fields that are present. This guarantees every field (both buses, WiFi,
+    // MIDI) has a sane per-item default even if the file is partial.
+    loadDefaults();
+
     // Version (capture what was on disk so we can migrate below).
     uint8_t loaded_version = doc["version"] | 0;
     _version = CONFIG_VERSION;
@@ -103,6 +130,16 @@ bool ConfigManager::load() {
         deserializeMidiInput(_midi_input_config, midiObj);
     }
 
+    // Power budget + Safety limits (persisted)
+    if (!doc["power"].isNull()) {
+        JsonObject p = doc["power"].as<JsonObject>();
+        deserializePower(_power_budget, p);
+    }
+    if (!doc["safety"].isNull()) {
+        JsonObject s = doc["safety"].as<JsonObject>();
+        deserializeSafety(_safety_limits, s);
+    }
+
     // Bus
     JsonArray busArray = doc["buses"].as<JsonArray>();
     uint8_t busIdx = 0;
@@ -113,11 +150,34 @@ bool ConfigManager::load() {
     }
 
     // Actuators
+    // AUDIT FIX (P0.2): validate on load — skip actuators with an out-of-range
+    // ID, a duplicate ID, or a duplicate bus/address/channel target so a
+    // corrupt file can never poison the runtime tables.
     _actuator_count = 0;
     JsonArray actArray = doc["actuators"].as<JsonArray>();
     for (JsonObject actObj : actArray) {
         if (_actuator_count >= MAX_ACTUATORS) break;
-        deserializeActuator(_actuators[_actuator_count], actObj);
+        ActuatorConfig cand = {};
+        deserializeActuator(cand, actObj);
+        if (cand.id >= MAX_ACTUATORS) {
+            Serial.printf("[CONFIG] Skipping actuator with invalid id %d\n", cand.id);
+            continue;
+        }
+        bool dup = false;
+        for (uint8_t j = 0; j < _actuator_count; j++) {
+            if (_actuators[j].id == cand.id ||
+                (_actuators[j].bus_id == cand.bus_id &&
+                 _actuators[j].pca_address == cand.pca_address &&
+                 _actuators[j].pca_channel == cand.pca_channel)) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            Serial.printf("[CONFIG] Skipping duplicate actuator id %d\n", cand.id);
+            continue;
+        }
+        _actuators[_actuator_count] = cand;
         _actuator_count++;
     }
 
@@ -141,25 +201,36 @@ bool ConfigManager::load() {
         }
     }
 
-    // AUDIT FIX (P1.1): migrate pre-v8 configs whose midi_channel used the UI
-    // convention (0=Omni, 1..16) to the internal representation (0..15, or the
-    // Omni sentinel). Persist the migrated config so the conversion runs once.
-    if (loaded_version < CONFIG_VERSION_CHANNELS_INTERNAL) {
-        Serial.printf("[CONFIG] Migrating config v%d -> v%d (MIDI channels)\n",
-                      loaded_version, CONFIG_VERSION);
+    // AUDIT FIX (P1.1): migrate the MIDI channel representation UNAMBIGUOUSLY.
+    // A config written by this firmware carries channel_encoding="internal" and
+    // is never migrated. A legacy file without that marker is inspected:
+    //   - any 0xFF present  -> already internal (Omni sentinel) -> keep;
+    //   - any value  > 15   -> old UI convention (had a 16)     -> migrate;
+    //   - only values 0..15 -> AMBIGUOUS: keep as-is (assume internal) and warn
+    //     rather than risk corrupting an already-internal config.
+    const char* enc = doc["channel_encoding"] | "";
+    bool already_internal = (strcmp(enc, "internal") == 0);
+    if (!already_internal && loaded_version < CONFIG_VERSION_CHANNELS_INTERNAL) {
+        bool has_sentinel = false, has_over_15 = false;
         for (uint8_t i = 0; i < _instrument_count; i++) {
-            uint8_t old_ch = _instruments[i].midi_channel;
-            uint8_t new_ch;
-            if (old_ch == 0) {
-                new_ch = MIDI_CHANNEL_OMNI_INTERNAL;   // old "0 = Omni"
-            } else if (old_ch <= 16) {
-                new_ch = (uint8_t)(old_ch - 1);        // old 1..16 -> 0..15
-            } else {
-                new_ch = MIDI_CHANNEL_OMNI_INTERNAL;   // invalid -> Omni (safe)
-            }
-            _instruments[i].midi_channel = new_ch;
+            uint8_t ch = _instruments[i].midi_channel;
+            if (ch == MIDI_CHANNEL_OMNI_INTERNAL) has_sentinel = true;
+            else if (ch > 15) has_over_15 = true;
         }
-        save();  // persist so the migration is one-shot
+        if (has_over_15 && !has_sentinel) {
+            Serial.println("[CONFIG] Migrating legacy MIDI channels (UI 0/1-16 -> internal)");
+            for (uint8_t i = 0; i < _instrument_count; i++) {
+                uint8_t old_ch = _instruments[i].midi_channel;
+                _instruments[i].midi_channel =
+                    (old_ch == 0) ? MIDI_CHANNEL_OMNI_INTERNAL
+                  : (old_ch <= 16) ? (uint8_t)(old_ch - 1)
+                  : MIDI_CHANNEL_OMNI_INTERNAL;
+            }
+        } else if (!has_sentinel) {
+            Serial.println("[CONFIG] WARNING: ambiguous legacy channel encoding "
+                           "(0..15 only) — assuming already internal, not migrating");
+        }
+        save();  // re-write with the channel_encoding marker (one-shot)
     }
 
     Serial.printf("[CONFIG] Loaded: %d actuators, %d instruments, %d routings\n",
@@ -167,57 +238,143 @@ bool ConfigManager::load() {
     return true;
 }
 
-bool ConfigManager::save() {
-    JsonDocument doc;
-
+void ConfigManager::populateDoc(JsonDocument& doc) {
     doc["version"] = _version;
+    // AUDIT FIX: explicit, unambiguous marker so a reload never double-migrates
+    // the channel representation regardless of the numeric version.
+    doc["channel_encoding"] = "internal";
 
-    // WiFi
     JsonObject wifiObj = doc["wifi"].to<JsonObject>();
     serializeWiFi(_wifi_config, wifiObj);
 
-    // MIDI Input
     JsonObject midiObj = doc["midi_input"].to<JsonObject>();
     serializeMidiInput(_midi_input_config, midiObj);
 
-    // Bus
+    JsonObject powerObj = doc["power"].to<JsonObject>();
+    serializePower(_power_budget, powerObj);
+    JsonObject safetyObj = doc["safety"].to<JsonObject>();
+    serializeSafety(_safety_limits, safetyObj);
+
     JsonArray busArray = doc["buses"].to<JsonArray>();
     for (uint8_t i = 0; i < 2; i++) {
         JsonObject busObj = busArray.add<JsonObject>();
         serializeBus(_buses[i], busObj);
     }
 
-    // Actuators
     JsonArray actArray = doc["actuators"].to<JsonArray>();
     for (uint8_t i = 0; i < _actuator_count; i++) {
         JsonObject actObj = actArray.add<JsonObject>();
         serializeActuator(_actuators[i], actObj);
     }
 
-    // Instruments
     JsonArray instArray = doc["instruments"].to<JsonArray>();
     for (uint8_t i = 0; i < _instrument_count; i++) {
         JsonObject instObj = instArray.add<JsonObject>();
         serializeInstrument(_instruments[i], instObj);
     }
 
-    // MIDI Routing
     JsonArray routeArray = doc["routing"].to<JsonArray>();
     for (uint8_t i = 0; i < _routing_count; i++) {
         JsonObject routeObj = routeArray.add<JsonObject>();
         serializeRouting(_routing_configs[i], routeObj);
     }
+}
 
-    File file = LittleFS.open(CONFIG_FILE_PATH, "w");
+bool ConfigManager::exportJson(String& out) {
+    JsonDocument doc;
+    populateDoc(doc);
+    return serializeJsonPretty(doc, out) > 0;
+}
+
+bool ConfigManager::save() {
+    JsonDocument doc;
+    populateDoc(doc);
+
+    // AUDIT FIX: atomic write. Serialise to a temp file first; only if that
+    // fully succeeds do we rotate it over the live file (keeping a .bak). A
+    // power loss mid-write can now only corrupt the temp file, never the live
+    // config or its backup.
+    File file = LittleFS.open(CONFIG_TMP_PATH, "w");
     if (!file) {
-        Serial.println("[CONFIG] Unable to write config file");
+        Serial.println("[CONFIG] Unable to open temp config file");
         return false;
     }
 
-    serializeJsonPretty(doc, file);
+    size_t written = serializeJsonPretty(doc, file);
     file.close();
 
-    Serial.println("[CONFIG] Configuration saved");
+    if (written == 0) {
+        Serial.println("[CONFIG] Serialization produced 0 bytes — aborting save");
+        LittleFS.remove(CONFIG_TMP_PATH);
+        return false;
+    }
+
+    // Verify the temp file is non-empty on disk before committing.
+    File verify = LittleFS.open(CONFIG_TMP_PATH, "r");
+    size_t on_disk = verify ? verify.size() : 0;
+    if (verify) verify.close();
+    if (on_disk == 0) {
+        Serial.println("[CONFIG] Temp file empty on disk — aborting save");
+        LittleFS.remove(CONFIG_TMP_PATH);
+        return false;
+    }
+
+    // Rotate: current -> backup, temp -> current.
+    if (LittleFS.exists(CONFIG_FILE_PATH)) {
+        LittleFS.remove(CONFIG_BAK_PATH);
+        LittleFS.rename(CONFIG_FILE_PATH, CONFIG_BAK_PATH);
+    }
+    if (!LittleFS.rename(CONFIG_TMP_PATH, CONFIG_FILE_PATH)) {
+        Serial.println("[CONFIG] Rename temp->config failed — restoring backup");
+        LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);
+        return false;
+    }
+
+    Serial.println("[CONFIG] Configuration saved (atomic)");
+    return true;
+}
+
+bool ConfigManager::importJson(const uint8_t* data, size_t len) {
+    // Validate that it parses and looks like a PlayMode config before touching
+    // the live file.
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+        Serial.println("[CONFIG] Import rejected — invalid JSON");
+        return false;
+    }
+    if (doc["version"].isNull() && doc["actuators"].isNull() && doc["buses"].isNull()) {
+        Serial.println("[CONFIG] Import rejected — not a PlayMode config");
+        return false;
+    }
+
+    // Stage the uploaded bytes, then rotate into place (keeping a backup).
+    File f = LittleFS.open(CONFIG_TMP_PATH, "w");
+    if (!f) return false;
+    size_t w = f.write(data, len);
+    f.close();
+    if (w != len) { LittleFS.remove(CONFIG_TMP_PATH); return false; }
+
+    if (LittleFS.exists(CONFIG_FILE_PATH)) {
+        LittleFS.remove(CONFIG_BAK_PATH);
+        LittleFS.rename(CONFIG_FILE_PATH, CONFIG_BAK_PATH);
+    }
+    if (!LittleFS.rename(CONFIG_TMP_PATH, CONFIG_FILE_PATH)) {
+        LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);
+        return false;
+    }
+
+    // Re-load through the normal path (defaults + overlay + validation +
+    // migration). On failure, restore the backup.
+    if (!load()) {
+        Serial.println("[CONFIG] Import failed on reload — restoring previous config");
+        LittleFS.remove(CONFIG_FILE_PATH);
+        if (LittleFS.exists(CONFIG_BAK_PATH)) {
+            LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);
+            load();
+        }
+        return false;
+    }
+    Serial.println("[CONFIG] Configuration imported");
     return true;
 }
 
@@ -255,6 +412,24 @@ void ConfigManager::loadDefaults() {
     strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
     _wifi_config.enabled = true;
     _wifi_config.ap_fallback = true;
+
+    // Power budget defaults
+    memset(&_power_budget, 0, sizeof(_power_budget));
+    _power_budget.global_max_ma        = POWER_GLOBAL_MAX_MA;
+    _power_budget.servo_bus_max_ma     = POWER_SERVO_BUS_MAX_MA;
+    _power_budget.solenoid_bus_max_ma  = POWER_SOLENOID_BUS_MAX_MA;
+    _power_budget.global_max_polyphony = POWER_MAX_POLYPHONY;
+    _power_budget.smart_rejection      = true;
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+        _power_budget.instrument_max_polyphony[i] = 4;
+    }
+
+    // Safety limit defaults
+    _safety_limits.max_duty_pct   = SAFETY_MAX_DUTY_CYCLE;
+    _safety_limits.max_freq_hz    = SAFETY_MAX_FREQ_HZ;
+    _safety_limits.watchdog_ms    = SAFETY_WATCHDOG_MS;
+    _safety_limits.max_polyphony  = SAFETY_MAX_POLYPHONY;
+    _safety_limits.max_current_ma = SAFETY_MAX_TOTAL_CURRENT_MA;
 
     // MIDI Input defaults
     _midi_input_config.serial_enabled = true;
@@ -325,6 +500,7 @@ bool ConfigManager::addActuator(const ActuatorConfig& actuator) {
 }
 
 bool ConfigManager::removeActuator(uint8_t id) {
+    bool found = false;
     for (uint8_t i = 0; i < _actuator_count; i++) {
         if (_actuators[i].id == id) {
             // Shift subsequent actuators
@@ -333,10 +509,56 @@ bool ConfigManager::removeActuator(uint8_t id) {
             }
             _actuators[_actuator_count - 1] = {};
             _actuator_count--;
-            return true;
+            found = true;
+            break;
         }
     }
-    return false;
+    if (!found) return false;
+
+    // AUDIT FIX: purge every reference to the removed actuator so no orphan
+    // mapping survives (a note that still "routes" to a missing actuator).
+    for (uint8_t r = 0; r < _routing_count; r++) {
+        MidiRoutingConfig& routing = _routing_configs[r];
+        // Compact note_map, dropping entries that referenced this actuator.
+        uint8_t w = 0;
+        for (uint8_t k = 0; k < routing.note_map_count; k++) {
+            if (routing.note_map[k].actuator_id != id) {
+                routing.note_map[w++] = routing.note_map[k];
+            }
+        }
+        routing.note_map_count = w;
+        // Compact cc_map likewise.
+        w = 0;
+        for (uint8_t k = 0; k < routing.cc_map_count; k++) {
+            if (routing.cc_map[k].actuator_id != id) {
+                routing.cc_map[w++] = routing.cc_map[k];
+            }
+        }
+        routing.cc_map_count = w;
+        // Keep the legacy instrument arrays consistent.
+        if (routing.instrument_index < _instrument_count) {
+            rebuildInstrumentFromRouting(routing.instrument_index);
+        }
+    }
+    return true;
+}
+
+void ConfigManager::rebuildInstrumentFromRouting(uint8_t instrument_index) {
+    if (instrument_index >= _instrument_count) return;
+    InstrumentConfig& inst = _instruments[instrument_index];
+    MidiRoutingConfig* routing = getRoutingForInstrument(instrument_index);
+
+    memset(inst.midi_notes, MIDI_NOTE_UNMAPPED, sizeof(inst.midi_notes));
+    inst.actuator_count = 0;
+    if (routing == nullptr) return;
+
+    for (uint8_t i = 0; i < routing->note_map_count &&
+                        inst.actuator_count < MAX_ACTUATORS_PER_INSTRUMENT; i++) {
+        if (!routing->note_map[i].enabled) continue;
+        inst.actuator_ids[inst.actuator_count] = routing->note_map[i].actuator_id;
+        inst.midi_notes[inst.actuator_count]   = routing->note_map[i].midi_note;
+        inst.actuator_count++;
+    }
 }
 
 bool ConfigManager::addInstrument(const InstrumentConfig& instrument) {
@@ -386,6 +608,22 @@ MidiInputConfig* ConfigManager::getMidiInputConfig() {
 
 void ConfigManager::setMidiInputConfig(const MidiInputConfig& config) {
     _midi_input_config = config;
+}
+
+PowerBudget* ConfigManager::getPowerBudget() {
+    return &_power_budget;
+}
+
+void ConfigManager::setPowerBudget(const PowerBudget& budget) {
+    _power_budget = budget;
+}
+
+SafetyLimits* ConfigManager::getSafetyLimits() {
+    return &_safety_limits;
+}
+
+void ConfigManager::setSafetyLimits(const SafetyLimits& limits) {
+    _safety_limits = limits;
 }
 
 MidiRoutingConfig* ConfigManager::getRoutingConfigs() {
@@ -515,13 +753,16 @@ void ConfigManager::serializeBus(const BusConfig& bus, JsonObject& obj) {
 }
 
 void ConfigManager::deserializeBus(BusConfig& bus, const JsonObject& obj) {
-    bus.id = obj["id"] | 0;
-    bus.sda_pin = obj["sda_pin"] | I2C0_SDA_PIN;
-    bus.scl_pin = obj["scl_pin"] | I2C0_SCL_PIN;
-    bus.oe_pin = obj["oe_pin"] | I2C0_OE_PIN;
-    bus.i2c_frequency = obj["i2c_frequency"] | I2C0_FREQUENCY;
-    bus.pwm_frequency = obj["pwm_frequency"] | PCA_SERVO_FREQ;
-    bus.enabled = obj["enabled"] | true;
+    // AUDIT FIX: fall back to the bus's CURRENT (already-defaulted) values, not
+    // the bus-0 constants — otherwise a bus-1 entry missing a field would be
+    // silently rewritten with bus-0 pins/frequency.
+    bus.id = obj["id"] | bus.id;
+    bus.sda_pin = obj["sda_pin"] | bus.sda_pin;
+    bus.scl_pin = obj["scl_pin"] | bus.scl_pin;
+    bus.oe_pin = obj["oe_pin"] | bus.oe_pin;
+    bus.i2c_frequency = obj["i2c_frequency"] | bus.i2c_frequency;
+    bus.pwm_frequency = obj["pwm_frequency"] | bus.pwm_frequency;
+    bus.enabled = obj["enabled"] | bus.enabled;
     bus.pca_count = 0;
 }
 
@@ -630,6 +871,51 @@ void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject
                       midi.udp_port, midi.rtp_port, MIDI_UDP_PORT);
         midi.udp_port = MIDI_UDP_PORT;
     }
+}
+
+// ============================================================================
+// Serialization / Deserialization — Power budget + Safety limits
+// ============================================================================
+
+void ConfigManager::serializePower(const PowerBudget& p, JsonObject& obj) {
+    obj["global_max_ma"]   = p.global_max_ma;
+    obj["servo_max_ma"]    = p.servo_bus_max_ma;
+    obj["sol_max_ma"]      = p.solenoid_bus_max_ma;
+    obj["max_polyphony"]   = p.global_max_polyphony;
+    obj["smart_rejection"] = p.smart_rejection;
+    JsonArray poly = obj["inst_polyphony"].to<JsonArray>();
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) poly.add(p.instrument_max_polyphony[i]);
+}
+
+void ConfigManager::deserializePower(PowerBudget& p, const JsonObject& obj) {
+    p.global_max_ma        = obj["global_max_ma"]   | (uint32_t)POWER_GLOBAL_MAX_MA;
+    p.servo_bus_max_ma     = obj["servo_max_ma"]    | (uint32_t)POWER_SERVO_BUS_MAX_MA;
+    p.solenoid_bus_max_ma  = obj["sol_max_ma"]      | (uint32_t)POWER_SOLENOID_BUS_MAX_MA;
+    p.global_max_polyphony = obj["max_polyphony"]   | (uint8_t)POWER_MAX_POLYPHONY;
+    p.smart_rejection      = obj["smart_rejection"] | true;
+    JsonArray poly = obj["inst_polyphony"].as<JsonArray>();
+    uint8_t i = 0;
+    for (JsonVariant v : poly) {
+        if (i >= MAX_INSTRUMENTS) break;
+        p.instrument_max_polyphony[i++] = v.as<uint8_t>();
+    }
+    for (; i < MAX_INSTRUMENTS; i++) p.instrument_max_polyphony[i] = 4;
+}
+
+void ConfigManager::serializeSafety(const SafetyLimits& s, JsonObject& obj) {
+    obj["max_duty_pct"]   = s.max_duty_pct;
+    obj["max_freq_hz"]    = s.max_freq_hz;
+    obj["watchdog_ms"]    = s.watchdog_ms;
+    obj["max_polyphony"]  = s.max_polyphony;
+    obj["max_current_ma"] = s.max_current_ma;
+}
+
+void ConfigManager::deserializeSafety(SafetyLimits& s, const JsonObject& obj) {
+    s.max_duty_pct   = obj["max_duty_pct"]   | (uint8_t)SAFETY_MAX_DUTY_CYCLE;
+    s.max_freq_hz    = obj["max_freq_hz"]    | (uint16_t)SAFETY_MAX_FREQ_HZ;
+    s.watchdog_ms    = obj["watchdog_ms"]    | (uint16_t)SAFETY_WATCHDOG_MS;
+    s.max_polyphony  = obj["max_polyphony"]  | (uint8_t)SAFETY_MAX_POLYPHONY;
+    s.max_current_ma = obj["max_current_ma"] | (uint16_t)SAFETY_MAX_TOTAL_CURRENT_MA;
 }
 
 // ============================================================================

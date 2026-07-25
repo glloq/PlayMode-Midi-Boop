@@ -56,11 +56,13 @@ private:
     // Solenoid — Hit-and-Hold: initial PWM -> ramp down -> hold
     void solenoidHitAndHold(ActuatorConfig& act, const SchedulerEvent& event);
 
-    // Utility: apply a servo position
-    void setServoAngle(ActuatorConfig& act, uint16_t angle);
+    // Utility: apply a servo position. Returns false if the hardware write
+    // failed (PCA missing), so the caller does not flip state.active on a
+    // command that never reached the actuator.
+    bool setServoAngle(ActuatorConfig& act, uint16_t angle);
 
-    // Utility: apply a solenoid PWM value
-    void setSolenoidPWM(ActuatorConfig& act, uint16_t pwm);
+    // Utility: apply a solenoid PWM value. Returns false on hardware failure.
+    bool setSolenoidPWM(ActuatorConfig& act, uint16_t pwm);
 
     // Utility: calculate servo amplitude based on velocity
     uint16_t velocityToAmplitude(const ActuatorConfig& act, uint8_t velocity);

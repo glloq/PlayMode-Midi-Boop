@@ -10,8 +10,7 @@
 // Forward declarations
 class ConfigManager;
 class Scheduler;
-class SafetyManager;
-class PowerManager;
+class ResourceManager;
 class MidiDispatcher;
 class MidiTransport;
 class PCADriver;
@@ -38,7 +37,7 @@ public:
 
     // Registers references to system modules
     void setModules(ConfigManager* config, Scheduler* scheduler,
-                    SafetyManager* safety, PowerManager* power,
+                    ResourceManager* resources,
                     MidiDispatcher* dispatcher, MidiTransport* transport,
                     PCADriver* pca, ActuatorEngine* engine);
 
@@ -73,8 +72,7 @@ private:
     // Module references (not owned)
     ConfigManager*   _config;
     Scheduler*       _scheduler;
-    SafetyManager*   _safety;
-    PowerManager*    _power;
+    ResourceManager* _resources;   // unified safety + power
     MidiDispatcher*  _dispatcher;
     MidiTransport*   _transport;
     PCADriver*       _pca;
@@ -126,6 +124,16 @@ private:
                                uint8_t* data, size_t len);
     void handlePostSafety(AsyncWebServerRequest* request,
                           uint8_t* data, size_t len);
+
+    // AUDIT FIX (UI-P0): transactional creation of an instrument + its
+    // actuators + routing in one validated, atomic operation.
+    void handlePostSetupInstrument(AsyncWebServerRequest* request,
+                                   uint8_t* data, size_t len);
+
+    // AUDIT FIX (UX): configuration backup / restore.
+    void handleGetConfigExport(AsyncWebServerRequest* request);
+    void handlePostConfigImport(AsyncWebServerRequest* request,
+                                uint8_t* data, size_t len);
 
     // POST — actions
     void handlePostSave(AsyncWebServerRequest* request);

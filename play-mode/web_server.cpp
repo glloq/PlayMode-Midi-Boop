@@ -3,8 +3,7 @@
 #include "config_manager.h"
 #include <WiFi.h>
 #include "scheduler.h"
-#include "safety_manager.h"
-#include "power_manager.h"
+#include "resource_manager.h"
 #include "midi_dispatcher.h"
 #include "midi_transport.h"
 #include "pca_driver.h"
@@ -116,8 +115,7 @@ WebServer::WebServer(uint16_t port)
     , _running(false)
     , _config(nullptr)
     , _scheduler(nullptr)
-    , _safety(nullptr)
-    , _power(nullptr)
+    , _resources(nullptr)
     , _dispatcher(nullptr)
     , _transport(nullptr)
     , _pca(nullptr)
@@ -130,14 +128,13 @@ WebServer::WebServer(uint16_t port)
 }
 
 void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
-                           SafetyManager* safety, PowerManager* power,
+                           ResourceManager* resources,
                            MidiDispatcher* dispatcher, MidiTransport* transport,
                            PCADriver* pca, ActuatorEngine* engine)
 {
     _config     = config;
     _scheduler  = scheduler;
-    _safety     = safety;
-    _power      = power;
+    _resources  = resources;
     _dispatcher = dispatcher;
     _transport  = transport;
     _pca        = pca;
@@ -328,6 +325,21 @@ void WebServer::setupAPIRoutes() {
         handlePostDefaults(req);
     });
 
+    // Export configuration (download / backup)
+    _server.on("/api/config/export", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetConfigExport(req);
+    });
+
+    // Import configuration (restore) — larger body allowed for a full config.
+    auto* importHandler = new AsyncCallbackJsonWebHandler("/api/config/import",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostConfigImport(req, (uint8_t*)body.c_str(), body.length());
+        });
+    importHandler->setMethod(HTTP_POST);
+    _server.addHandler(importHandler);
+
     // Scan I²C
     _server.on("/api/scan/i2c", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostScanI2C(req);
@@ -342,6 +354,16 @@ void WebServer::setupAPIRoutes() {
         });
     instrHandler->setMethod(HTTP_POST | HTTP_PUT);
     _server.addHandler(instrHandler);
+
+    // Transactional wizard endpoint (validate-all-then-apply)
+    auto* setupHandler = new AsyncCallbackJsonWebHandler("/api/setup/instrument",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostSetupInstrument(req, (uint8_t*)body.c_str(), body.length());
+        });
+    setupHandler->setMethod(HTTP_POST);
+    _server.addHandler(setupHandler);
 
     _server.on("/api/instrument", HTTP_DELETE, [this](AsyncWebServerRequest* req) {
         handleDeleteInstrument(req);
@@ -435,16 +457,18 @@ void WebServer::setupAPIRoutes() {
     auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
             if (!requireAuth(req)) return;
-            if (!_pca || !_config) { req->send(500); return; }
+            if (!_resources || !_config) { req->send(500); return; }
             uint8_t bus_id = json["bus_id"] | 0xFF;
             uint16_t freq  = json["freq_pwm"] | 0;
-            if (bus_id > 1 || freq == 0) {
+            if (bus_id > 1 || freq < 24) {
                 req->send(400, "application/json",
-                          "{\"error\":\"invalid bus_id or freq_pwm\"}");
+                          "{\"error\":\"invalid bus_id or freq_pwm (>= 24 Hz)\"}");
                 return;
             }
-            _pca->setFrequency(bus_id, freq);
-            // Update config for persistence
+            // AUDIT FIX (P0.3): defer the prescaler write to Core 1 (the sole
+            // I²C/PCA owner) instead of writing from the web task.
+            _resources->requestBusFrequency(bus_id, freq);
+            // Persist the requested value.
             _config->getBuses()[bus_id].pwm_frequency = freq;
             req->send(200, "application/json", "{\"ok\":true}");
         });
@@ -727,11 +751,11 @@ void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handleGetPower(AsyncWebServerRequest* request) {
-    if (!_power) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
-    const PowerStats& stats = _power->getStats();
-    const PowerBudget& budget = _power->getBudget();
+    const PowerStats& stats = _resources->getStats();
+    const PowerBudget& budget = _resources->getBudget();
 
     JsonObject s = doc["stats"].to<JsonObject>();
     s["total_ma"]      = stats.total_estimated_ma;
@@ -761,10 +785,10 @@ void WebServer::handleGetPower(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
-    const SafetyState& state = _safety->getGlobalState();
+    const SafetyState& state = _resources->getGlobalState();
 
     doc["total_current_ma"]  = state.total_estimated_current_ma;
     doc["active_count"]      = state.active_actuator_count;
@@ -772,13 +796,14 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     doc["degradation"]       = state.degradation_active;
     doc["over_current"]      = state.over_current;
 
-    // Current config
+    // AUDIT FIX (UI-P1): report the RUNTIME limits actually in effect (not the
+    // compile-time constants), so the form reflects what the user set.
     JsonObject cfg = doc["config"].to<JsonObject>();
-    cfg["max_duty_pct"]    = SAFETY_MAX_DUTY_CYCLE;
-    cfg["max_freq_hz"]     = SAFETY_MAX_FREQ_HZ;
-    cfg["watchdog_ms"]     = SAFETY_WATCHDOG_MS;
-    cfg["max_polyphony"]   = SAFETY_MAX_POLYPHONY;
-    cfg["max_current_ma"]  = SAFETY_MAX_TOTAL_CURRENT_MA;
+    cfg["max_duty_pct"]    = _resources->getMaxDutyCycle();
+    cfg["max_freq_hz"]     = _resources->getMaxFrequency();
+    cfg["watchdog_ms"]     = _resources->getWatchdogTimeout();
+    cfg["max_polyphony"]   = _resources->getMaxPolyphony();
+    cfg["max_current_ma"]  = _resources->getMaxTotalCurrent();
 
     String output;
     serializeJson(doc, output);
@@ -856,6 +881,184 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     }
 }
 
+// ============================================================================
+// AUDIT FIX (UI-P0): transactional wizard — validate the WHOLE request first
+// (no mutation), then create the instrument + actuators + routing atomically,
+// save, and roll back everything if the save fails. IDs are auto-assigned to
+// the first free slots.
+// ============================================================================
+void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
+                                          uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
+    if (!_config) { request->send(500); return; }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+        request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    JsonArray acts = doc["actuators"].as<JsonArray>();
+    size_t nsz = acts.isNull() ? 0 : acts.size();
+
+    // ---- Phase 1: validate everything, mutating nothing ----
+    if (_config->getInstrumentCount() >= MAX_INSTRUMENTS) {
+        request->send(400, "application/json", "{\"error\":\"max instruments reached\"}");
+        return;
+    }
+    // Bound-check the count BEFORE truncating to uint8_t (avoids a wrap that
+    // could pass validation yet iterate past the fixed staging arrays).
+    if (nsz == 0 || nsz > MAX_ACTUATORS_PER_INSTRUMENT) {
+        request->send(400, "application/json", "{\"error\":\"1.." "64" " actuators required\"}");
+        return;
+    }
+    uint8_t n = (uint8_t)nsz;
+    ActuatorConfig* existing = _config->getActuators();
+    uint8_t ecount = _config->getActuatorCount();
+    if ((uint16_t)(ecount + n) > MAX_ACTUATORS) {
+        request->send(400, "application/json", "{\"error\":\"not enough free actuator slots\"}");
+        return;
+    }
+
+    // Collect free IDs.
+    bool used_id[MAX_ACTUATORS] = {false};
+    for (uint8_t i = 0; i < ecount; i++)
+        if (existing[i].id < MAX_ACTUATORS) used_id[existing[i].id] = true;
+    uint8_t free_ids[MAX_ACTUATORS_PER_INSTRUMENT];
+    uint8_t nid = 0;
+    for (uint16_t id = 0; id < MAX_ACTUATORS && nid < n; id++)
+        if (!used_id[id]) free_ids[nid++] = (uint8_t)id;
+    if (nid < n) {
+        request->send(400, "application/json", "{\"error\":\"not enough free actuator IDs\"}");
+        return;
+    }
+
+    // Validate each actuator + reject duplicate output targets (new set and existing).
+    struct Target { uint8_t bus, addr, ch; };
+    Target targets[MAX_ACTUATORS_PER_INSTRUMENT];
+    uint8_t k = 0;
+    for (JsonObject a : acts) {
+        int type = a["type"] | -1;
+        if (type != ACT_SERVO && type != ACT_SOLENOID) {
+            request->send(400, "application/json", "{\"error\":\"invalid actuator type\"}");
+            return;
+        }
+        uint8_t bus  = a["bus_id"]  | 0;
+        uint8_t addr = a["pca_addr"] | PCA_BASE_ADDRESS;
+        uint8_t ch   = a["pca_ch"]  | 0;
+        if (bus > 1 || addr < PCA_BASE_ADDRESS ||
+            addr >= PCA_BASE_ADDRESS + PCA_MAX_PER_BUS || ch >= PCA_CHANNELS) {
+            request->send(400, "application/json", "{\"error\":\"invalid bus/address/channel\"}");
+            return;
+        }
+        // duplicate within the new set
+        for (uint8_t j = 0; j < k; j++)
+            if (targets[j].bus == bus && targets[j].addr == addr && targets[j].ch == ch) {
+                request->send(400, "application/json", "{\"error\":\"duplicate output in request\"}");
+                return;
+            }
+        // duplicate vs existing
+        for (uint8_t j = 0; j < ecount; j++)
+            if (existing[j].bus_id == bus && existing[j].pca_address == addr &&
+                existing[j].pca_channel == ch) {
+                request->send(400, "application/json", "{\"error\":\"output already in use\"}");
+                return;
+            }
+        targets[k++] = { bus, addr, ch };
+    }
+
+    // ---- Phase 2: apply atomically under the actuator lock ----
+    ActuatorLockGuard guard(*_config);
+    if (!guard.locked()) {
+        request->send(503, "application/json", "{\"error\":\"configuration busy\"}");
+        return;
+    }
+
+    // Build the instrument.
+    InstrumentConfig inst = {};
+    strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
+    inst.midi_channel       = uiChannelToInternal(doc["channel"] | 0);
+    inst.bus_id             = doc["bus_id"] | 0;
+    inst.default_latency_ms = doc["latency_ms"] | 10;
+    inst.auto_calibration   = doc["auto_cal"] | false;
+    inst.enabled            = doc["enabled"] | true;
+    inst.actuator_count     = 0;
+
+    if (!_config->addInstrument(inst)) {
+        request->send(500, "application/json", "{\"error\":\"instrument add failed\"}");
+        return;
+    }
+    uint8_t inst_idx = _config->getInstrumentCount() - 1;
+
+    // Create actuators with the assigned free IDs.
+    k = 0;
+    MidiRoutingConfig routing = {};
+    routing.instrument_index = inst_idx;
+    for (JsonObject a : acts) {
+        ActuatorConfig act = {};
+        act.id          = free_ids[k];
+        act.type        = (ActuatorType)(uint8_t)(a["type"] | 0);
+        act.bus_id      = targets[k].bus;
+        act.pca_address = targets[k].addr;
+        act.pca_channel = targets[k].ch;
+        act.behavior    = a["behavior"] | 0;
+        act.enabled     = a["enabled"] | true;
+        act.latency_ms  = a["latency_ms"] | 10;
+        act.angle_initial = a["angle_init"] | 90;
+        act.amplitude     = a["amplitude"]  | 45;
+        act.speed_ms      = a["speed_ms"]   | 150;
+        act.angle_b       = a["angle_b"]    | 120;
+        act.hit_reverse   = a["hit_reverse"] | false;
+        act.pulse_min_ms  = a["pulse_min_ms"] | SOLENOID_MIN_PULSE_MS;
+        act.pulse_ms      = a["pulse_ms"]     | 20;
+        act.pwm_initial   = a["pwm_initial"]  | 4095;
+        act.pwm_hold      = a["pwm_hold"]     | 2048;
+        act.ramp_ms       = a["ramp_ms"]      | 50;
+        if (act.speed_ms == 0) act.speed_ms = 1;
+        _config->addActuator(act);
+        ActuatorConfig* stored = _config->getActuators();
+        for (uint8_t i = 0; i < _config->getActuatorCount(); i++) {
+            if (stored[i].id == act.id) { if (_engine) _engine->initActuator(stored[i]); break; }
+        }
+        // Note mapping for this actuator.
+        int note = a["note"] | -1;
+        if (note >= 0 && note <= 127 && routing.note_map_count < MAX_NOTE_MAPPINGS) {
+            NoteMapping& m = routing.note_map[routing.note_map_count++];
+            m.midi_note = (uint8_t)note;
+            m.actuator_id = act.id;
+            m.behavior_override = 0xFF;
+            m.enabled = true;
+        }
+        k++;
+    }
+
+    _config->addRoutingConfig(routing);
+    _config->rebuildInstrumentFromRouting(inst_idx);
+    if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
+                                              _config->getActuatorCount());
+    if (_dispatcher) _dispatcher->refreshConfig();
+
+    // Atomic save. On failure, roll back the whole thing.
+    if (!_config->save()) {
+        // Remove the created actuators and instrument.
+        for (uint8_t i = 0; i < n; i++) _config->removeActuator(free_ids[i]);
+        _config->removeInstrument(inst_idx);
+        if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
+                                                  _config->getActuatorCount());
+        if (_dispatcher) _dispatcher->refreshConfig();
+        request->send(500, "application/json", "{\"error\":\"save failed, rolled back\"}");
+        return;
+    }
+
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["instrument"] = inst_idx;
+    JsonArray ids = resp["actuator_ids"].to<JsonArray>();
+    for (uint8_t i = 0; i < n; i++) ids.add(free_ids[i]);
+    String out; serializeJson(resp, out);
+    request->send(200, "application/json", out);
+}
+
 void WebServer::handlePostActuator(AsyncWebServerRequest* request,
                                    uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
@@ -869,9 +1072,25 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
         return;
     }
 
+    // AUDIT FIX (P0.2): reject an out-of-range ID or an unknown type BEFORE it
+    // can reach the runtime tables (a bogus ID would index _actuator_safety[]
+    // out of bounds; a bad type would hit no behaviour handler).
+    int raw_id   = doc["id"]   | -1;
+    int raw_type = doc["type"] | -1;
+    if (raw_id < 0 || raw_id >= MAX_ACTUATORS) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid actuator id (0.." "127" ")\"}");
+        return;
+    }
+    if (raw_type != ACT_SERVO && raw_type != ACT_SOLENOID) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid actuator type (0=servo,1=solenoid)\"}");
+        return;
+    }
+
     ActuatorConfig act = {};
-    act.id           = doc["id"] | 0;
-    act.type         = (ActuatorType)(uint8_t)(doc["type"] | 0);
+    act.id           = (uint8_t)raw_id;
+    act.type         = (ActuatorType)(uint8_t)raw_type;
     act.bus_id       = doc["bus_id"] | 0;
     act.pca_address  = doc["pca_addr"] | PCA_BASE_ADDRESS;
     act.pca_channel  = doc["pca_ch"] | 0;
@@ -924,6 +1143,24 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     // underneath it. The RAII guard guarantees the unlock and its locked()
     // result IS checked — if the lock times out the edit is refused rather than
     // performed unguarded.
+    // AUDIT FIX (P0.2): reject a duplicate output target (same bus + PCA
+    // address + channel as a DIFFERENT actuator) — two actuators driving one
+    // physical channel is a wiring/config error.
+    {
+        ActuatorConfig* existing = _config->getActuators();
+        uint8_t ecount = _config->getActuatorCount();
+        for (uint8_t i = 0; i < ecount; i++) {
+            if (existing[i].id != act.id &&
+                existing[i].bus_id == act.bus_id &&
+                existing[i].pca_address == act.pca_address &&
+                existing[i].pca_channel == act.pca_channel) {
+                request->send(400, "application/json",
+                              "{\"error\":\"another actuator already uses this bus/address/channel\"}");
+                return;
+            }
+        }
+    }
+
     bool added = false;
     {
         ActuatorLockGuard guard(*_config);
@@ -968,22 +1205,45 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
         return;
     }
 
-    WiFiConfig wifi = {};
-    strlcpy(wifi.ssid, doc["ssid"] | "", sizeof(wifi.ssid));
-    strlcpy(wifi.password, doc["password"] | "", sizeof(wifi.password));
-    // AUDIT FIX (P1.9): configurable per-device AP password. Empty keeps the
-    // MAC-derived default; a non-empty value must be a valid WPA2 key (>= 8).
-    const char* ap_pw = doc["ap_password"] | "";
-    if (ap_pw[0] != '\0' && strlen(ap_pw) < 8) {
-        request->send(400, "application/json",
-                      "{\"error\":\"AP password must be >= 8 characters\"}");
-        return;
+    // AUDIT FIX (UI-P1): start from the EXISTING config and only overlay the
+    // fields present, so a save with blank password fields does not wipe the
+    // stored passwords. Password semantics:
+    //   - field absent            -> keep the current password;
+    //   - non-empty string        -> replace;
+    //   - "clear_password":true    -> explicitly clear (STA);
+    //   - "clear_ap_password":true -> explicitly clear (AP, -> MAC default).
+    WiFiConfig wifi = *_config->getWiFiConfig();
+
+    if (!doc["ssid"].isNull())
+        strlcpy(wifi.ssid, doc["ssid"] | "", sizeof(wifi.ssid));
+    if (!doc["hostname"].isNull())
+        strlcpy(wifi.hostname, doc["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(wifi.hostname));
+    if (!doc["enabled"].isNull())
+        wifi.enabled = doc["enabled"];
+    if (!doc["ap_fallback"].isNull())
+        wifi.ap_fallback = doc["ap_fallback"];
+
+    // STA password
+    if (doc["clear_password"] | false) {
+        wifi.password[0] = '\0';
+    } else if (doc["password"].is<const char*>() &&
+               (doc["password"].as<const char*>())[0] != '\0') {
+        strlcpy(wifi.password, doc["password"], sizeof(wifi.password));
     }
-    strlcpy(wifi.ap_password, ap_pw, sizeof(wifi.ap_password));
-    strlcpy(wifi.hostname, doc["hostname"] | WIFI_DEFAULT_HOSTNAME,
-            sizeof(wifi.hostname));
-    wifi.enabled     = doc["enabled"] | true;
-    wifi.ap_fallback = doc["ap_fallback"] | true;
+
+    // AP password (must be >= 8 chars when set)
+    if (doc["clear_ap_password"] | false) {
+        wifi.ap_password[0] = '\0';
+    } else if (doc["ap_password"].is<const char*>() &&
+               (doc["ap_password"].as<const char*>())[0] != '\0') {
+        const char* ap_pw = doc["ap_password"];
+        if (strlen(ap_pw) < 8) {
+            request->send(400, "application/json",
+                          "{\"error\":\"AP password must be >= 8 characters\"}");
+            return;
+        }
+        strlcpy(wifi.ap_password, ap_pw, sizeof(wifi.ap_password));
+    }
 
     _config->setWiFiConfig(wifi);
     request->send(200, "application/json",
@@ -1105,7 +1365,10 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
         }
     }
 
-    // Reload the dispatcher lookup tables
+    // AUDIT FIX: keep the instrument's legacy actuator_ids/midi_notes cache in
+    // sync with the routing note_map (single source of truth), then reload the
+    // dispatcher lookup tables.
+    _config->rebuildInstrumentFromRouting(inst_idx);
     _dispatcher->refreshConfig();
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1114,7 +1377,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
 void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
                                       uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
-    if (!_power) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -1125,13 +1388,17 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
     }
 
     if (!doc["global_max_ma"].isNull())
-        _power->setGlobalMaxMA(doc["global_max_ma"]);
+        _resources->setGlobalMaxMA(doc["global_max_ma"]);
     if (!doc["servo_max_ma"].isNull())
-        _power->setServoBusMaxMA(doc["servo_max_ma"]);
+        _resources->setBusMaxMA(0, doc["servo_max_ma"]);
     if (!doc["sol_max_ma"].isNull())
-        _power->setSolenoidBusMaxMA(doc["sol_max_ma"]);
+        _resources->setBusMaxMA(1, doc["sol_max_ma"]);
     if (!doc["max_polyphony"].isNull())
-        _power->setGlobalMaxPolyphony(doc["max_polyphony"]);
+        _resources->setGlobalMaxPolyphony(doc["max_polyphony"]);
+
+    // AUDIT FIX (UI-P1): mirror the change into the persisted config so a
+    // subsequent "Save to flash" keeps it across reboots.
+    if (_config) _config->setPowerBudget(_resources->getBudget());
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1139,7 +1406,7 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
 void WebServer::handlePostSafety(AsyncWebServerRequest* request,
                                  uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -1159,15 +1426,27 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
     };
 
     if (!doc["max_duty_pct"].isNull())
-        _safety->setMaxDutyCycle((uint8_t)clampU(doc["max_duty_pct"] | 0, 1, 100));
+        _resources->setMaxDutyCycle((uint8_t)clampU(doc["max_duty_pct"] | 0, 1, 100));
     if (!doc["max_freq_hz"].isNull())
-        _safety->setMaxFrequency((uint16_t)clampU(doc["max_freq_hz"] | 0, 1, 1000));
+        _resources->setMaxFrequency((uint16_t)clampU(doc["max_freq_hz"] | 0, 1, 1000));
     if (!doc["watchdog_ms"].isNull())
-        _safety->setWatchdogTimeout((uint16_t)clampU(doc["watchdog_ms"] | 0, 100, 60000));
+        _resources->setWatchdogTimeout((uint16_t)clampU(doc["watchdog_ms"] | 0, 100, 60000));
     if (!doc["max_polyphony"].isNull())
-        _safety->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
+        _resources->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
     if (!doc["max_current_ma"].isNull())
-        _safety->setMaxTotalCurrent((uint16_t)clampU(doc["max_current_ma"] | 0, 100, 60000));
+        _resources->setMaxTotalCurrent((uint16_t)clampU(doc["max_current_ma"] | 0, 100, 60000));
+
+    // AUDIT FIX (UI-P1): mirror the runtime limits into the persisted config so
+    // a subsequent "Save to flash" keeps them across reboots.
+    if (_config) {
+        SafetyLimits sl;
+        sl.max_duty_pct   = _resources->getMaxDutyCycle();
+        sl.max_freq_hz    = _resources->getMaxFrequency();
+        sl.watchdog_ms    = _resources->getWatchdogTimeout();
+        sl.max_polyphony  = _resources->getMaxPolyphony();
+        sl.max_current_ma = _resources->getMaxTotalCurrent();
+        _config->setSafetyLimits(sl);
+    }
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1190,6 +1469,58 @@ void WebServer::handlePostSave(AsyncWebServerRequest* request) {
     }
 }
 
+// ============================================================================
+// AUDIT FIX (UX): configuration backup / restore
+// ============================================================================
+void WebServer::handleGetConfigExport(AsyncWebServerRequest* request) {
+    // The export is a full backup and includes stored WiFi credentials, so it
+    // is gated behind auth (in AP mode).
+    if (!requireAuth(request)) return;
+    if (!_config) { request->send(500); return; }
+
+    String json;
+    if (!_config->exportJson(json)) {
+        request->send(500, "application/json", "{\"error\":\"export failed\"}");
+        return;
+    }
+    AsyncWebServerResponse* resp =
+        request->beginResponse(200, "application/json", json);
+    resp->addHeader("Content-Disposition", "attachment; filename=\"playmode-config.json\"");
+    request->send(resp);
+}
+
+void WebServer::handlePostConfigImport(AsyncWebServerRequest* request,
+                                       uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
+    if (!_config) { request->send(500); return; }
+
+    // Cut outputs before swapping the whole configuration, then reboot so the
+    // new WiFi/MIDI/actuator setup is applied cleanly from a known state.
+    if (_resources) _resources->requestKillSwitch();
+
+    bool ok;
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json", "{\"error\":\"configuration busy\"}");
+            return;
+        }
+        ok = _config->importJson(data, len);
+        if (ok && _scheduler)
+            _scheduler->syncActuators(_config->getActuators(), _config->getActuatorCount());
+    }
+
+    if (!ok) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid or rejected configuration\"}");
+        return;
+    }
+    logger.log(LOG_WARN, CAT_SYSTEM, "Configuration imported — restarting");
+    _restart_at_ms = millis() + 400;
+    request->send(200, "application/json",
+                  "{\"ok\":true,\"note\":\"configuration imported — device is restarting\"}");
+}
+
 void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
@@ -1202,7 +1533,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     //   4. persist the defaults;
     //   5. reboot — at boot OE starts HIGH (outputs disabled) until the fresh
     //      config is applied, satisfying "OE off until next start completes".
-    if (_safety) _safety->requestKillSwitch();
+    if (_resources) _resources->requestKillSwitch();
 
     {
         ActuatorLockGuard guard(*_config);
@@ -1262,7 +1593,7 @@ void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
 void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -1279,10 +1610,10 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
     // atomic kill-request flag.
     bool activate = doc["active"] | false;
     if (activate) {
-        _safety->requestKillSwitch();
+        _resources->requestKillSwitch();
         logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch requested from web UI");
     } else {
-        _safety->requestRearm();
+        _resources->requestRearm();
         logger.log(LOG_INFO, CAT_SAFETY, "Kill switch re-arm requested from web UI");
     }
 
@@ -1291,14 +1622,14 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
 
 void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     // AUDIT FIX (P0.2): the web task must not delete/recreate driver objects
     // while the scheduler (Core 1) may be dereferencing a getDriver() pointer.
     // Request the rescan; the scheduler runs it after activating the kill
     // switch and leaves the outputs disabled until a manual re-arm. Results are
     // read afterwards via GET /api/buses.
-    _safety->requestRescan();
+    _resources->requestRescan();
     logger.log(LOG_WARN, CAT_SYSTEM, "I2C rescan requested (outputs will be disabled)");
     request->send(202, "application/json",
                   "{\"ok\":true,\"note\":\"rescan scheduled; outputs disabled, "
@@ -1413,6 +1744,12 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
             break;
         case WS_EVT_DISCONNECT:
             Serial.printf("[WEB] WS client #%u disconnected\n", client->id());
+            // AUDIT FIX: a virtual-piano client that drops mid-note would leave
+            // Key / Hit-and-Hold actuators held. When the last client leaves,
+            // release everything.
+            if (_ws.count() == 0 && _dispatcher) {
+                _dispatcher->allNotesOff();
+            }
             break;
         case WS_EVT_DATA: {
             // Incoming WebSocket commands (future: virtual piano test)
@@ -1429,15 +1766,18 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
                     // REST write endpoints.
                     if (cmd && strcmp(cmd, "test") == 0 &&
                         wsCommandAuthorized(String(doc["token"] | ""))) {
-                        // Quick actuator test via WS
+                        // AUDIT FIX (UI-P1): both NOTE_ON and NOTE_OFF travel
+                        // over the SAME WebSocket, so a network drop between
+                        // press and release can no longer strand a held note.
                         uint8_t act_id   = doc["id"] | 0;
                         uint8_t velocity = doc["vel"] | 100;
+                        bool on          = doc["on"] | true;
                         if (_scheduler) {
                             SchedulerEvent evt = {};
                             evt.trigger_time_us = (uint32_t)esp_timer_get_time();
                             evt.actuator_id = act_id;
-                            evt.action = ACTION_NOTE_ON;
-                            evt.velocity = velocity;
+                            evt.action = on ? ACTION_NOTE_ON : ACTION_NOTE_OFF;
+                            evt.velocity = on ? velocity : 0;
                             evt.priority = 0;
                             evt.behavior_override = 0xFF;
                             evt.instrument_index  = 0xFF;
@@ -1476,6 +1816,17 @@ void WebServer::buildStatusJSON(String& output) {
 
     doc["uptime_s"] = millis() / 1000;
     doc["heap"]     = ESP.getFreeHeap();
+    doc["fw_version"] = FW_VERSION;
+    doc["fw_build"]   = FW_BUILD;
+
+    // AUDIT FIX (UI/UX): a single, explicit machine state for the permanent
+    // dashboard: FAULT (latched over-current) / DISARMED (kill active) / ARMED.
+    if (_resources) {
+        const SafetyState& ss0 = _resources->getGlobalState();
+        const char* mstate = ss0.over_current ? "fault"
+                           : ss0.kill_switch_active ? "disarmed" : "armed";
+        doc["machine_state"] = mstate;
+    }
 
     // Scheduler
     if (_scheduler) {
@@ -1498,13 +1849,15 @@ void WebServer::buildStatusJSON(String& output) {
         JsonObject disp = doc["dispatcher"].to<JsonObject>();
         disp["dispatched"]    = _dispatcher->getDispatchedCount();
         disp["dropped"]       = _dispatcher->getDroppedCount();
-        disp["pwr_rejected"]  = _dispatcher->getPowerRejectedCount();
+        // AUDIT FIX (core): power rejections are now counted by the ResourceManager
+        // (the scheduler makes the admission decision on Core 1).
+        disp["pwr_rejected"]  = _resources ? _resources->getStats().total_rejected : 0;
     }
 
     // Safety
-    if (_safety) {
+    if (_resources) {
         JsonObject safe = doc["safety"].to<JsonObject>();
-        const SafetyState& ss = _safety->getGlobalState();
+        const SafetyState& ss = _resources->getGlobalState();
         safe["current_ma"]  = ss.total_estimated_current_ma;
         safe["active"]      = ss.active_actuator_count;
         safe["kill_switch"] = ss.kill_switch_active;
@@ -1513,10 +1866,10 @@ void WebServer::buildStatusJSON(String& output) {
     }
 
     // Power
-    if (_power) {
+    if (_resources) {
         JsonObject pwr = doc["power"].to<JsonObject>();
-        const PowerStats& ps = _power->getStats();
-        const PowerBudget& pb = _power->getBudget();
+        const PowerStats& ps = _resources->getStats();
+        const PowerBudget& pb = _resources->getBudget();
         pwr["total_ma"]      = ps.total_estimated_ma;
         pwr["servo_ma"]      = ps.servo_bus_ma;
         pwr["sol_ma"]        = ps.solenoid_bus_ma;

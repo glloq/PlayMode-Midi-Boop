@@ -1,19 +1,15 @@
 #include "scheduler.h"
-#include "safety_manager.h"
-#include "power_manager.h"
+#include "resource_manager.h"
 #include <freertos/semphr.h>
 
 // ============================================================================
 // PlayMode — Real-Time Scheduler (implementation)
 // ============================================================================
 
-// Global queue accessible by actuator_engine for scheduling return events
+// Global queue accessible by actuator_engine for scheduling return events.
+// AUDIT FIX (P0.1): the queue now carries SchedulerCommand elements (1-2
+// events each), so an atomic pair is a single, indivisible enqueue.
 QueueHandle_t g_scheduler_queue = NULL;
-
-// AUDIT FIX (P0.6): serialises every producer (dispatcher, engine returns,
-// test/calibrator) so a NOTE_ON/NOTE_OFF pair can be enqueued atomically. All
-// pushes take it, so a single push can never split a pushPulse() pair.
-SemaphoreHandle_t g_scheduler_push_mutex = NULL;
 
 // AUDIT FIX (point B): defined in config_manager.cpp. Serialises this task's
 // actuator dereferences against structural config edits from the web task.
@@ -21,8 +17,7 @@ extern SemaphoreHandle_t g_actuator_mutex;
 
 Scheduler::Scheduler(ActuatorEngine& engine)
     : _engine(engine),
-      _safety_manager(nullptr),
-      _power_manager(nullptr),
+      _resources(nullptr),
       _task_handle(NULL),
       _input_queue(NULL),
       _running(false),
@@ -34,8 +29,8 @@ Scheduler::Scheduler(ActuatorEngine& engine)
 }
 
 bool Scheduler::begin() {
-    // Create the FreeRTOS queue for incoming events
-    _input_queue = xQueueCreate(SCHEDULER_QUEUE_SIZE, sizeof(SchedulerEvent));
+    // Create the FreeRTOS queue for incoming commands (1-2 events each).
+    _input_queue = xQueueCreate(SCHEDULER_QUEUE_SIZE, sizeof(SchedulerCommand));
     if (_input_queue == NULL) {
         Serial.println("[SCHED] Error creating queue");
         return false;
@@ -43,11 +38,6 @@ bool Scheduler::begin() {
 
     // Expose the queue globally for actuator_engine
     g_scheduler_queue = _input_queue;
-
-    // Push serialisation mutex (see pushPulse / pushEvent).
-    if (g_scheduler_push_mutex == NULL) {
-        g_scheduler_push_mutex = xSemaphoreCreateMutex();
-    }
 
     // Create the task on Core 1
     BaseType_t result = xTaskCreatePinnedToCore(
@@ -87,37 +77,32 @@ void Scheduler::stop() {
 
 bool Scheduler::pushEvent(const SchedulerEvent& event) {
     if (_input_queue == NULL) return false;
-    // Serialise with pushPulse() so an atomic pair is never split.
-    bool taken = (g_scheduler_push_mutex != NULL) &&
-                 (xSemaphoreTake(g_scheduler_push_mutex, portMAX_DELAY) == pdTRUE);
-    bool ok = xQueueSend(_input_queue, &event, 0) == pdTRUE;
-    if (taken) xSemaphoreGive(g_scheduler_push_mutex);
-    return ok;
+    SchedulerCommand cmd;
+    cmd.event_count = 1;
+    cmd.events[0] = event;
+    // A single queue element — xQueueSend is itself thread-safe.
+    return xQueueSend(_input_queue, &cmd, 0) == pdTRUE;
 }
 
 bool Scheduler::pushPulse(const SchedulerEvent& on, const SchedulerEvent& off) {
     if (_input_queue == NULL) return false;
-    bool taken = (g_scheduler_push_mutex != NULL) &&
-                 (xSemaphoreTake(g_scheduler_push_mutex, portMAX_DELAY) == pdTRUE);
-    bool ok = false;
-    // Only commit if BOTH slots are free — guarantees all-or-nothing.
-    if (uxQueueSpacesAvailable(_input_queue) >= 2) {
-        bool a = xQueueSend(_input_queue, &on, 0) == pdTRUE;
-        bool b = a && (xQueueSend(_input_queue, &off, 0) == pdTRUE);
-        ok = a && b;
-    }
-    if (taken) xSemaphoreGive(g_scheduler_push_mutex);
-    return ok;
+    // AUDIT FIX (P0.1): both events travel as ONE command, so the enqueue is
+    // atomic and drainInputQueue() inserts the pair into the heap all-or-nothing.
+    SchedulerCommand cmd;
+    cmd.event_count = 2;
+    cmd.events[0] = on;
+    cmd.events[1] = off;
+    return xQueueSend(_input_queue, &cmd, 0) == pdTRUE;
 }
 
-void Scheduler::setPowerManager(PowerManager* power) {
-    _power_manager = power;
+void Scheduler::setResourceManager(ResourceManager* resources) {
+    _resources = resources;
 }
 
 void Scheduler::clearQueue() {
     // Drain the thread-safe FreeRTOS input queue.
     if (_input_queue != NULL) {
-        SchedulerEvent scratch;
+        SchedulerCommand scratch;
         while (xQueueReceive(_input_queue, &scratch, 0) == pdTRUE) { /* discard */ }
     }
     // Empty the internal priority buffer. A single-word store; the real-time
@@ -156,7 +141,14 @@ void Scheduler::syncActuators(ActuatorConfig* base, uint8_t count) {
 }
 
 uint16_t Scheduler::getQueuedEventCount() const {
-    return _event_count;
+    // AUDIT FIX (UI-P1): include the FreeRTOS input queue (pending commands not
+    // yet drained into the heap), not just the heap, so the reported backlog is
+    // truthful.
+    uint16_t pending_input = 0;
+    if (_input_queue != NULL) {
+        pending_input = (uint16_t)uxQueueMessagesWaiting(_input_queue);
+    }
+    return _event_count + pending_input;
 }
 
 uint32_t Scheduler::getProcessedCount() const {
@@ -169,11 +161,6 @@ QueueHandle_t Scheduler::getQueueHandle() const {
 
 bool Scheduler::isRunning() const {
     return _running;
-}
-
-void Scheduler::setSafetyManager(SafetyManager* safety) {
-    _safety_manager = safety;
-    Serial.printf("[SCHED] Safety Manager %s\n", safety ? "registered" : "disabled");
 }
 
 // ============================================================================
@@ -210,23 +197,16 @@ void Scheduler::run() {
             // priority heap and the PCA9685 drivers. Web-initiated emergency
             // stop / re-arm / I²C rescan are only *requested* (atomic flags) and
             // are executed HERE, on Core 1, so there is never concurrent I²C
-            // access or unsynchronised heap mutation.
-            if (_safety_manager != nullptr) {
-                _safety_manager->processPendingRequests(_actuators, _actuator_count);
+            // access or unsynchronised heap mutation. The unified ResourceManager
+            // also owns admission, observation and reconciliation on this core.
+            if (_resources != nullptr) {
+                _resources->processPendingRequests(_actuators, _actuator_count);
             }
 
             processReadyEvents();
 
-            if (_safety_manager != nullptr) {
-                _safety_manager->update(_actuators, _actuator_count);
-            }
-
-            // AUDIT FIX (P1.3): the PowerManager is now mutated exclusively on
-            // this (Core 1) task — billed per executed event above and
-            // reconciled here — so its update() must run here too, not from the
-            // Core 0 loop(), otherwise both cores would write its counters.
-            if (_power_manager != nullptr) {
-                _power_manager->update(_actuators, _actuator_count);
+            if (_resources != nullptr) {
+                _resources->update(_actuators, _actuator_count);
             }
 
             if (g_actuator_mutex != nullptr) xSemaphoreGive(g_actuator_mutex);
@@ -243,11 +223,21 @@ void Scheduler::run() {
 // Transfer FreeRTOS queue -> internal priority queue
 // ============================================================================
 void Scheduler::drainInputQueue() {
-    SchedulerEvent event;
+    SchedulerCommand cmd;
 
-    // Read all available events from the queue (non-blocking)
-    while (xQueueReceive(_input_queue, &event, 0) == pdTRUE) {
-        insertEvent(event);
+    // Read all available commands from the queue (non-blocking).
+    while (xQueueReceive(_input_queue, &cmd, 0) == pdTRUE) {
+        // AUDIT FIX (P0.1): insert the command's events all-or-nothing. If the
+        // heap cannot hold every event of the command, drop the WHOLE command
+        // so a NOTE_ON is never inserted without its paired NOTE_OFF.
+        if ((uint16_t)(_event_count + cmd.event_count) > SCHEDULER_MAX_EVENTS) {
+            Serial.printf("[SCHED] WARNING: heap full, dropping command (%d events)\n",
+                          cmd.event_count);
+            continue;
+        }
+        for (uint8_t i = 0; i < cmd.event_count; i++) {
+            insertEvent(cmd.events[i]);
+        }
     }
 }
 
@@ -320,32 +310,29 @@ void Scheduler::processReadyEvents() {
         // Find the target actuator
         ActuatorConfig* actuator = findActuator(event.actuator_id);
         if (actuator != nullptr) {
-            // Safety check before execution
-            bool safe = true;
-            if (_safety_manager != nullptr) {
-                safe = _safety_manager->checkEvent(*actuator, event);
+            // AUDIT FIX (architecture): one unified admission gate on Core 1
+            // (frequency, duty, polyphony, current budget). The dispatcher no
+            // longer makes any budget decision on Core 0.
+            bool admitted = true;
+            if (_resources != nullptr) {
+                admitted = _resources->admit(*actuator, event, event.instrument_index);
             }
 
-            if (safe) {
+            if (admitted) {
+                // Bill on the REAL activation state transition (before/after),
+                // not on the event type — correct for no-op NOTE_OFFs,
+                // auto-returns and retriggers.
+                bool was_active = actuator->state.active;
                 _engine.processEvent(*actuator, event);
+                bool is_active = actuator->state.active;
                 _processed_count++;
 
-                // AUDIT FIX (P1.3): bill the PowerManager only after the event
-                // has REALLY executed (and passed the safety gate), so a note
-                // rejected by the SafetyManager never inflates the power /
-                // polyphony accounting.
-                if (_power_manager != nullptr) {
-                    if (event.action == ACTION_NOTE_ON) {
-                        _power_manager->notifyActivation(*actuator,
-                                                         event.instrument_index,
-                                                         event.velocity);
-                    } else if (event.action == ACTION_NOTE_OFF) {
-                        _power_manager->notifyDeactivation(*actuator,
-                                                           event.instrument_index);
-                    }
+                if (_resources != nullptr) {
+                    _resources->observe(*actuator, was_active, is_active,
+                                        event.instrument_index, event.velocity);
                 }
             }
-            // Event blocked by safety: silently ignored
+            // Event blocked by the resource gate: silently ignored
         } else {
             Serial.printf("[SCHED] Actuator %d not found\n", event.actuator_id);
         }

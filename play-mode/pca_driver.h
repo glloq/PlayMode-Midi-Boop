@@ -32,11 +32,14 @@ public:
     // actually used instead of the compile-time defaults.
     void setBusConfig(uint8_t bus_id, const BusConfig& cfg);
 
-    // Direct PWM write to a channel
-    void setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uint16_t value);
+    // Direct PWM write to a channel.
+    // AUDIT FIX: returns false when the target driver is missing / bus or
+    // channel invalid, so the caller does not mark an output active on a write
+    // that never reached the hardware.
+    bool setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uint16_t value);
 
-    // PWM write by actuator ID (resolved via config)
-    void setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value);
+    // PWM write by actuator ID (resolved via config). Returns false on failure.
+    bool setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value);
 
     // Convert angle (degrees) to PWM value for servo.
     // AUDIT FIX (point C): the PWM period is derived from the target bus'

@@ -42,6 +42,14 @@ public:
     // Saves configuration to the JSON file
     bool save();
 
+    // AUDIT FIX (UX): export the current in-memory configuration as a JSON
+    // string (for download / backup).
+    bool exportJson(String& out);
+
+    // Import a configuration from a JSON buffer: parse, apply, validate and
+    // atomically save. Returns false (config unchanged) on invalid input.
+    bool importJson(const uint8_t* data, size_t len);
+
     // Resets configuration to defaults
     void loadDefaults();
 
@@ -89,6 +97,12 @@ public:
     MidiInputConfig* getMidiInputConfig();
     void setMidiInputConfig(const MidiInputConfig& config);
 
+    // --- Power budget + Safety limits (persisted) ---
+    PowerBudget*  getPowerBudget();
+    void setPowerBudget(const PowerBudget& budget);
+    SafetyLimits* getSafetyLimits();
+    void setSafetyLimits(const SafetyLimits& limits);
+
     // --- MIDI Routing ---
 
     MidiRoutingConfig* getRoutingConfigs();
@@ -98,12 +112,19 @@ public:
     // Finds the routing for a given instrument (by index)
     MidiRoutingConfig* getRoutingForInstrument(uint8_t instrument_index);
 
+    // AUDIT FIX: rebuild an instrument's cached actuator_ids[]/midi_notes[]/
+    // actuator_count from its routing note_map (the single source of truth), so
+    // the legacy arrays can never diverge. Call after any routing edit.
+    void rebuildInstrumentFromRouting(uint8_t instrument_index);
+
     // Config version
     uint8_t getVersion() const;
 
 private:
     WiFiConfig _wifi_config;
     MidiInputConfig _midi_input_config;
+    PowerBudget _power_budget;
+    SafetyLimits _safety_limits;
     BusConfig _buses[2];
     ActuatorConfig _actuators[MAX_ACTUATORS];
     uint8_t _actuator_count;
@@ -112,6 +133,10 @@ private:
     MidiRoutingConfig _routing_configs[MAX_INSTRUMENTS];
     uint8_t _routing_count;
     uint8_t _version;
+
+    // Fills a JsonDocument with the full current configuration (shared by
+    // save() and exportJson()).
+    void populateDoc(JsonDocument& doc);
 
     // Serializes an actuator to JSON
     void serializeActuator(const ActuatorConfig& act, JsonObject& obj);
@@ -142,6 +167,12 @@ private:
 
     // Deserializes the MIDI Input config from JSON
     void deserializeMidiInput(MidiInputConfig& midi, const JsonObject& obj);
+
+    // Power budget + Safety limits (de)serialization
+    void serializePower(const PowerBudget& p, JsonObject& obj);
+    void deserializePower(PowerBudget& p, const JsonObject& obj);
+    void serializeSafety(const SafetyLimits& s, JsonObject& obj);
+    void deserializeSafety(SafetyLimits& s, const JsonObject& obj);
 
     // Serializes a MIDI routing to JSON
     void serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj);

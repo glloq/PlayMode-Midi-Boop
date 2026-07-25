@@ -86,10 +86,15 @@ pio device monitor
 
 ### Connection
 
-1. On first boot, the ESP32 creates a WiFi access point **PlayMode-XXXX**
-2. Connect to the hotspot and open `http://192.168.4.1`
-3. The home page guides you in 3 steps: **Create → Connect → Play**
-4. Configure your WiFi in Settings to switch to Station mode (`http://play-mode.local`)
+1. On first boot, the ESP32 creates a **WPA2-protected** WiFi access point named
+   `play-mode-XXXXXX`, where `XXXXXX` is the last 3 bytes of the board's MAC
+   address (e.g. `play-mode-A1B2C3`).
+2. The default password is `pm-XXXXXX` using that **same** suffix
+   (e.g. SSID `play-mode-A1B2C3` → password `pm-A1B2C3`). You can set your own
+   AP password later in **Settings → WiFi**.
+3. Connect to the hotspot and open `http://192.168.4.1`
+4. The home page guides you in 3 steps: **Create → Connect → Play**
+5. Configure your WiFi in Settings to switch to Station mode (`http://play-mode.local`)
 
 ### Dependencies
 

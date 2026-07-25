@@ -1,5 +1,4 @@
 #include "midi_dispatcher.h"
-#include "power_manager.h"
 
 // ============================================================================
 // PlayMode — MIDI Dispatcher (implementation)
@@ -8,10 +7,8 @@
 MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
     : _scheduler(scheduler),
       _config(config),
-      _powerManager(nullptr),
       _dispatched_count(0),
       _dropped_count(0),
-      _power_rejected_count(0),
       _ws_log_head(0),
       _ws_log_count(0) {
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
@@ -68,6 +65,27 @@ void MidiDispatcher::refreshConfig() {
     Serial.printf("[MIDI-DISP] Config reloaded: %d instruments mapped\n", count);
 }
 
+void MidiDispatcher::allNotesOff() {
+    ActuatorConfig* actuators = _config.getActuators();
+    uint8_t count = _config.getActuatorCount();
+    uint8_t released = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        if (!actuators[i].state.active) continue;
+        SchedulerEvent evt = {};
+        evt.trigger_time_us = (uint32_t)esp_timer_get_time();
+        evt.actuator_id = actuators[i].id;
+        evt.action = ACTION_NOTE_OFF;
+        evt.velocity = 0;
+        evt.priority = 0;
+        evt.behavior_override = 0xFF;
+        evt.instrument_index  = 0xFF;
+        if (_scheduler.pushEvent(evt)) released++;
+    }
+    if (released > 0) {
+        Serial.printf("[MIDI-DISP] All notes off — released %d active actuator(s)\n", released);
+    }
+}
+
 // ============================================================================
 // AUDIT FIX (P0.3): channel matching — exact channel OR Omni. Internal
 // channels are always 0..15; Omni is the distinct MIDI_CHANNEL_OMNI_INTERNAL
@@ -84,14 +102,6 @@ uint32_t MidiDispatcher::getDispatchedCount() const {
 
 uint32_t MidiDispatcher::getDroppedCount() const {
     return _dropped_count;
-}
-
-uint32_t MidiDispatcher::getPowerRejectedCount() const {
-    return _power_rejected_count;
-}
-
-void MidiDispatcher::setPowerManager(PowerManager* pm) {
-    _powerManager = pm;
 }
 
 // ============================================================================
@@ -133,13 +143,9 @@ bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMess
     // Apply the velocity curve
     uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);
 
-    // Phase 5: check energy budget before activation
-    if (_powerManager && act_config) {
-        if (!_powerManager->canActivate(*act_config, inst_idx, velocity)) {
-            _power_rejected_count++;
-            return false;
-        }
-    }
+    // AUDIT FIX (core): the energy-budget admission decision is now made by the
+    // scheduler on Core 1 (ResourceManager is single-core owned). The dispatcher
+    // only produces the activation request.
 
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;
@@ -148,7 +154,7 @@ bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMess
     evt.velocity = velocity;
     evt.priority = 0;
     // AUDIT FIX (P1.3): carry the instrument so the scheduler can bill the
-    // PowerManager after real execution. (P1.5) carry the per-note behaviour
+    // ResourceManager after real execution. (P1.5) carry the per-note behaviour
     // override so the engine can apply it.
     evt.instrument_index = inst_idx;
     evt.behavior_override = mapping->behavior_override;
@@ -194,7 +200,7 @@ bool MidiDispatcher::dispatchNoteOffToInstrument(uint8_t inst_idx, const MidiMes
     evt.instrument_index = inst_idx;
     evt.behavior_override = mapping->behavior_override;
 
-    // AUDIT FIX (P1.3): the PowerManager is billed by the scheduler after the
+    // AUDIT FIX (P1.3): the ResourceManager is billed by the scheduler after the
     // NOTE_OFF really executes, not here at enqueue time.
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;

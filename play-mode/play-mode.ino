@@ -25,8 +25,7 @@
 #include "actuator_engine.h"
 #include "scheduler.h"
 #include "config_manager.h"
-#include "safety_manager.h"
-#include "power_manager.h"
+#include "resource_manager.h"
 #include "wifi_manager.h"
 #include "jitter_buffer.h"
 #include "midi_transport.h"
@@ -42,17 +41,14 @@ ActuatorEngine actuatorEngine(pcaDriver);
 Scheduler      scheduler(actuatorEngine);
 ConfigManager  configManager;
 
-// --- Global objects (Phase 2) ---
-SafetyManager safetyManager(pcaDriver);
+// --- Global objects (unified Safety + Power) ---
+ResourceManager resourceManager(pcaDriver);
 
 // --- Global objects (Phase 3+4 — MIDI Pipeline) ---
 WiFiManager wifiManager;
 JitterBuffer jitterBuffer;
 MidiTransport midiTransport(jitterBuffer);
 MidiDispatcher midiDispatcher(scheduler, configManager);
-
-// --- Global objects (Phase 5) ---
-PowerManager powerManager;
 
 // --- Global objects (Phase 6) ---
 WebServer webServer;
@@ -200,36 +196,36 @@ void setup() {
     }
 #endif
 
-    // 4. Enable PCA buses (OE = LOW) — only when the configuration is trusted.
-    if (configOk) {
-        Serial.println("\n[INIT] Enabling PCA outputs...");
-        pcaDriver.enableBus(0, true);
-        pcaDriver.enableBus(1, true);
-    } else {
-        Serial.println("\n[INIT] SAFE MODE — PCA outputs left disabled");
-    }
+    // AUDIT FIX (P0.5): outputs are NOT armed here. OE stays HIGH (disabled)
+    // through the whole init chain and is only lowered at the very end, once
+    // every subsystem has been verified. `bootHealthy` accumulates that state.
+    bool bootHealthy = configOk;
 
-    // 5. Initialize the Safety Manager
-    Serial.println("\n[INIT] Safety Manager...");
-    safetyManager.begin();
-    if (!configOk) {
-        // Latch the kill switch so no event can drive an output until the fault
-        // is cleared. Called once at setup (scheduler loop not yet running).
-        safetyManager.activateKillSwitch();
-        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch latched (config failure)");
-    }
+    // 5. Initialize the unified Resource Manager (safety + power) with the
+    // PERSISTED budget + limits so saved settings survive a reboot.
+    Serial.println("\n[INIT] Resource Manager (safety + power)...");
+    resourceManager.begin(*configManager.getPowerBudget(),
+                          *configManager.getSafetyLimits());
 
-    // 6. Start the scheduler on Core 1 (with integrated safety)
+    // 6. Start the scheduler on Core 1 (with the integrated resource manager)
     Serial.println("\n[INIT] Scheduler...");
-    scheduler.setSafetyManager(&safetyManager);
+    scheduler.setResourceManager(&resourceManager);
     // AUDIT FIX (P0.6): let the kill switch flush the scheduler queues as part
     // of the emergency-stop sequence.
-    safetyManager.setScheduler(&scheduler);
+    resourceManager.setScheduler(&scheduler);
     if (!scheduler.begin()) {
-        Serial.println("[INIT] ERROR: Scheduler");
+        Serial.println("[INIT] ERROR: Scheduler — outputs will stay disabled");
         logger.log(LOG_ERROR, CAT_SCHED, "Scheduler: Core 1 start failed");
+        bootHealthy = false;
     } else {
         logger.log(LOG_INFO, CAT_SCHED, "Scheduler started on Core 1");
+    }
+
+    // If any critical subsystem failed, latch the kill switch so the outputs
+    // stay disabled until the fault is cleared and the operator re-arms.
+    if (!bootHealthy) {
+        resourceManager.activateKillSwitch();
+        logger.log(LOG_CRITICAL, CAT_SAFETY, "Boot fault — outputs latched OFF");
     }
 
     // 7. Initialize WiFi
@@ -287,35 +283,18 @@ void setup() {
                    midiCfg->jitter_buffer_ms);
     }
 
-    // 9. Initialize the Power Manager (Phase 5)
-    Serial.println("\n[INIT] Power Manager...");
-    {
-        PowerBudget budget = {};
-        budget.global_max_ma         = POWER_GLOBAL_MAX_MA;
-        budget.servo_bus_max_ma      = POWER_SERVO_BUS_MAX_MA;
-        budget.solenoid_bus_max_ma   = POWER_SOLENOID_BUS_MAX_MA;
-        budget.global_max_polyphony  = POWER_MAX_POLYPHONY;
-        budget.smart_rejection       = true;
-        for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
-            budget.instrument_max_polyphony[i] = 4;
-        }
-        powerManager.begin(budget);
-        logger.log(LOG_INFO, CAT_POWER, "Power Manager: max %dmA poly=%d",
-                   POWER_GLOBAL_MAX_MA, POWER_MAX_POLYPHONY);
-    }
-    // AUDIT FIX (P1.3): the scheduler bills the PowerManager after real
-    // execution (see Scheduler::processReadyEvents).
-    scheduler.setPowerManager(&powerManager);
+    // (Resource Manager already initialised at step 5 with persisted config.)
 
-    // 10. Initialize the MIDI Dispatcher with PowerManager (note/CC mapping)
+    // 10. Initialize the MIDI Dispatcher (note/CC mapping)
     Serial.println("\n[INIT] MIDI Dispatcher...");
-    midiDispatcher.setPowerManager(&powerManager);
     midiDispatcher.refreshConfig();
+    // AUDIT FIX: release held notes when an RTP-MIDI session drops.
+    midiTransport.setDisconnectHandler([]() { midiDispatcher.allNotesOff(); });
 
     // 11. Start the Web Server (Phase 6) — only if WiFi is active
     Serial.println("\n[INIT] Web Server...");
-    webServer.setModules(&configManager, &scheduler, &safetyManager,
-                         &powerManager, &midiDispatcher, &midiTransport,
+    webServer.setModules(&configManager, &scheduler, &resourceManager,
+                         &midiDispatcher, &midiTransport,
                          &pcaDriver, &actuatorEngine);
     webServer.setCalibrator(&calibrator);
     webServer.setTestManager(&testManager);
@@ -341,10 +320,25 @@ void setup() {
         logger.log(LOG_INFO, CAT_CAL, "Acoustic calibrator ready");
     }
 
+    // 13. AUDIT FIX (P0.5): arm the outputs ONLY now, after every subsystem has
+    // been verified. If anything failed, leave OE HIGH (kill latched) — the
+    // operator re-arms from the web UI once the fault is resolved.
+    if (bootHealthy && !resourceManager.isKillSwitchActive()) {
+        Serial.println("\n[INIT] All checks passed — arming PCA outputs...");
+        pcaDriver.enableBus(0, pcaDriver.getBusConfig(0).enabled);
+        pcaDriver.enableBus(1, pcaDriver.getBusConfig(1).enabled);
+        logger.log(LOG_INFO, CAT_SAFETY, "Outputs armed after successful boot");
+    } else {
+        Serial.println("\n[INIT] Boot not healthy — outputs remain DISABLED (re-arm required)");
+        logger.log(LOG_WARN, CAT_SAFETY, "Outputs disabled after boot (re-arm required)");
+    }
+
     Serial.println("\n========================================");
     Serial.println("  Initialization complete — Phase 9");
     Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
     Serial.printf("  Mode: %s\n", wifiManager.isAP() ? "AP (hotspot)" : "STA (WiFi)");
+    Serial.printf("  Outputs: %s\n",
+                  (bootHealthy && !resourceManager.isKillSwitchActive()) ? "ARMED" : "DISABLED");
     Serial.println("========================================\n");
 
     logger.log(LOG_INFO, CAT_SYSTEM, "Init complete — free heap: %d bytes",
@@ -391,9 +385,9 @@ void loop() {
         static bool last_wifi = false;
         static bool last_degrad = false;
 
-        bool cur_kill  = safetyManager.isKillSwitchActive();
+        bool cur_kill  = resourceManager.isKillSwitchActive();
         bool cur_wifi  = WiFi.isConnected();
-        bool cur_degrad = safetyManager.isDegradationActive();
+        bool cur_degrad = resourceManager.isDegradationActive();
 
         if (cur_kill != last_kill) {
             logger.log(cur_kill ? LOG_CRITICAL : LOG_INFO, CAT_SAFETY,
@@ -409,6 +403,9 @@ void loop() {
             } else {
                 logger.log(LOG_WARN, CAT_SYSTEM, "WiFi disconnected");
                 if (wifiManager.isAP()) ledSet(LED_AP);
+                // AUDIT FIX: releasing network MIDI means no NOTE_OFF will
+                // arrive for held notes — release everything now.
+                midiDispatcher.allNotesOff();
             }
             last_wifi = cur_wifi;
         }
@@ -430,7 +427,7 @@ void loop() {
     if (now - last_status > 5000) {
         last_status = now;
 
-        const PowerStats& pwr = powerManager.getStats();
+        const PowerStats& pwr = resourceManager.getStats();
 
         Serial.printf("[STATUS] Sched: %d queue, %d processed | "
                       "MIDI: S:%d U:%d R:%d | Disp: %d routed, %d dropped, %d pwr-rejected | "
@@ -444,13 +441,13 @@ void loop() {
                       midiTransport.getRtpPacketCount(),
                       midiDispatcher.getDispatchedCount(),
                       midiDispatcher.getDroppedCount(),
-                      midiDispatcher.getPowerRejectedCount(),
-                      safetyManager.getEstimatedCurrentMA(),
-                      safetyManager.getActiveActuatorCount(),
-                      safetyManager.isKillSwitchActive() ? " [KILL]" :
-                          (safetyManager.isDegradationActive() ? " [DEGRAD]" : ""),
+                      resourceManager.getTotalRejected(),
+                      resourceManager.getEstimatedCurrentMA(),
+                      resourceManager.getActiveActuatorCount(),
+                      resourceManager.isKillSwitchActive() ? " [KILL]" :
+                          (resourceManager.isDegradationActive() ? " [DEGRAD]" : ""),
                       pwr.total_estimated_ma,
-                      powerManager.getBudget().global_max_ma,
+                      resourceManager.getBudget().global_max_ma,
                       pwr.budget_used_percent,
                       pwr.servo_bus_ma,
                       pwr.solenoid_bus_ma,
