@@ -2,6 +2,7 @@
 #define SAFETY_MANAGER_H
 
 #include <Arduino.h>
+#include <atomic>
 #include "config.h"
 #include "types.h"
 #include "pca_driver.h"
@@ -37,14 +38,26 @@ public:
 
     // --- Kill switch ---
 
-    // Activate the global kill switch (disable all outputs)
+    // Activate the global kill switch (disable all outputs).
+    // MUST run on the scheduler task (Core 1) — the sole PCA/queue owner.
     void activateKillSwitch();
 
-    // Deactivate the kill switch (re-enable outputs)
+    // Deactivate the kill switch (re-enable outputs). Core 1 only.
     void deactivateKillSwitch();
 
     // Check if the kill switch is active
     bool isKillSwitchActive() const;
+
+    // --- AUDIT FIX (P0.1/P0.2): cross-task requests ---
+    // Called from the web task (Core 0). They only raise atomic flags; the
+    // actual hardware/queue work happens on Core 1 in processPendingRequests().
+    void requestKillSwitch();
+    void requestRearm();
+    void requestRescan();
+
+    // Executed by the scheduler task (Core 1) every tick, inside the actuator
+    // lock. Processes any pending kill / re-arm / rescan request.
+    void processPendingRequests(ActuatorConfig* actuators[], uint8_t count);
 
     // --- State accessors ---
 
@@ -74,6 +87,16 @@ public:
 private:
     PCADriver& _pca;
     Scheduler* _scheduler;  // Optional — used to flush queues on kill switch
+
+    // AUDIT FIX (P0.1/P0.2): cross-task request flags set by the web task,
+    // consumed on Core 1 in processPendingRequests().
+    std::atomic<bool> _kill_requested;
+    std::atomic<bool> _rearm_requested;
+    std::atomic<bool> _rescan_requested;
+
+    // Perform the I²C rescan safely on Core 1 (kill first, rebuild drivers,
+    // leave outputs disabled until a manual re-arm).
+    void doRescan();
 
     // Per-actuator safety state
     ActuatorSafetyState _actuator_safety[MAX_ACTUATORS];

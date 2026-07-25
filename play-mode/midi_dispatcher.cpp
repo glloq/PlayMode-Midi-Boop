@@ -116,15 +116,16 @@ void MidiDispatcher::handleNoteOn(const MidiMessage& msg) {
 
 bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMessage& msg) {
     MidiRoutingConfig* routing = _routing_cache[inst_idx];
-    int16_t actuator_id = findActuatorForNote(routing, msg.data1);
-    if (actuator_id < 0) return false;
+    const NoteMapping* mapping = findNoteMapping(routing, msg.data1);
+    if (mapping == nullptr) return false;
+    uint8_t actuator_id = mapping->actuator_id;
 
     InstrumentConfig& inst = _config.getInstruments()[inst_idx];
 
     // Latency compensation
     // AUDIT FIX: use signed arithmetic to avoid uint16_t underflow
     // if actuator_latency > _max_latency_ms (invalid config), compensation = 0.
-    ActuatorConfig* act_config = findActuatorConfig((uint8_t)actuator_id);
+    ActuatorConfig* act_config = findActuatorConfig(actuator_id);
     uint16_t actuator_latency = act_config ? act_config->latency_ms : inst.default_latency_ms;
     int32_t compensation_signed = ((int32_t)_max_latency_ms[inst_idx] - (int32_t)actuator_latency) * 1000;
     uint32_t compensation_us = (compensation_signed > 0) ? (uint32_t)compensation_signed : 0;
@@ -142,17 +143,18 @@ bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMess
 
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;
-    evt.actuator_id = (uint8_t)actuator_id;
+    evt.actuator_id = actuator_id;
     evt.action = ACTION_NOTE_ON;
     evt.velocity = velocity;
     evt.priority = 0;
+    // AUDIT FIX (P1.3): carry the instrument so the scheduler can bill the
+    // PowerManager after real execution. (P1.5) carry the per-note behaviour
+    // override so the engine can apply it.
+    evt.instrument_index = inst_idx;
+    evt.behavior_override = mapping->behavior_override;
 
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
-        // Notify the PowerManager of activation
-        if (_powerManager && act_config) {
-            _powerManager->notifyActivation(*act_config, inst_idx, velocity);
-        }
         return true;
     }
     _dropped_count++;
@@ -180,25 +182,22 @@ void MidiDispatcher::handleNoteOff(const MidiMessage& msg) {
 
 bool MidiDispatcher::dispatchNoteOffToInstrument(uint8_t inst_idx, const MidiMessage& msg) {
     MidiRoutingConfig* routing = _routing_cache[inst_idx];
-    int16_t actuator_id = findActuatorForNote(routing, msg.data1);
-    if (actuator_id < 0) return false;
+    const NoteMapping* mapping = findNoteMapping(routing, msg.data1);
+    if (mapping == nullptr) return false;
 
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time();
-    evt.actuator_id = (uint8_t)actuator_id;
+    evt.actuator_id = mapping->actuator_id;
     evt.action = ACTION_NOTE_OFF;
     evt.velocity = 0;
     evt.priority = 0;
+    evt.instrument_index = inst_idx;
+    evt.behavior_override = mapping->behavior_override;
 
+    // AUDIT FIX (P1.3): the PowerManager is billed by the scheduler after the
+    // NOTE_OFF really executes, not here at enqueue time.
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;
-        // Notify the PowerManager of deactivation
-        if (_powerManager) {
-            ActuatorConfig* act_config = findActuatorConfig((uint8_t)actuator_id);
-            if (act_config) {
-                _powerManager->notifyDeactivation(*act_config, inst_idx);
-            }
-        }
         return true;
     }
     _dropped_count++;
@@ -249,6 +248,9 @@ bool MidiDispatcher::dispatchCCToInstrument(uint8_t inst_idx, const MidiMessage&
                 evt.velocity = msg.data2;
                 evt.value = mapped_value;
                 evt.priority = 1;
+                // Direct CC position: use the actuator's own behaviour.
+                evt.behavior_override = 0xFF;
+                evt.instrument_index  = 0xFF;
 
                 if (_scheduler.pushEvent(evt)) {
                     _dispatched_count++;
@@ -332,15 +334,15 @@ uint8_t MidiDispatcher::applyVelocityCurve(uint8_t instrument_index, uint8_t vel
 // the single source of truth written by the web UI (/api/routing). Returns the
 // mapped actuator ID or -1.
 // ============================================================================
-int16_t MidiDispatcher::findActuatorForNote(const MidiRoutingConfig* routing, uint8_t note) {
-    if (routing == nullptr) return -1;
+const NoteMapping* MidiDispatcher::findNoteMapping(const MidiRoutingConfig* routing, uint8_t note) {
+    if (routing == nullptr) return nullptr;
     for (uint8_t i = 0; i < routing->note_map_count && i < MAX_NOTE_MAPPINGS; i++) {
         const NoteMapping& m = routing->note_map[i];
         if (m.enabled && m.midi_note == note) {
-            return (int16_t)m.actuator_id;
+            return &m;
         }
     }
-    return -1;
+    return nullptr;
 }
 
 // ============================================================================

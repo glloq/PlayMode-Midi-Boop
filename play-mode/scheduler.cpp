@@ -1,5 +1,6 @@
 #include "scheduler.h"
 #include "safety_manager.h"
+#include "power_manager.h"
 #include <freertos/semphr.h>
 
 // ============================================================================
@@ -9,6 +10,11 @@
 // Global queue accessible by actuator_engine for scheduling return events
 QueueHandle_t g_scheduler_queue = NULL;
 
+// AUDIT FIX (P0.6): serialises every producer (dispatcher, engine returns,
+// test/calibrator) so a NOTE_ON/NOTE_OFF pair can be enqueued atomically. All
+// pushes take it, so a single push can never split a pushPulse() pair.
+SemaphoreHandle_t g_scheduler_push_mutex = NULL;
+
 // AUDIT FIX (point B): defined in config_manager.cpp. Serialises this task's
 // actuator dereferences against structural config edits from the web task.
 extern SemaphoreHandle_t g_actuator_mutex;
@@ -16,6 +22,7 @@ extern SemaphoreHandle_t g_actuator_mutex;
 Scheduler::Scheduler(ActuatorEngine& engine)
     : _engine(engine),
       _safety_manager(nullptr),
+      _power_manager(nullptr),
       _task_handle(NULL),
       _input_queue(NULL),
       _running(false),
@@ -36,6 +43,11 @@ bool Scheduler::begin() {
 
     // Expose the queue globally for actuator_engine
     g_scheduler_queue = _input_queue;
+
+    // Push serialisation mutex (see pushPulse / pushEvent).
+    if (g_scheduler_push_mutex == NULL) {
+        g_scheduler_push_mutex = xSemaphoreCreateMutex();
+    }
 
     // Create the task on Core 1
     BaseType_t result = xTaskCreatePinnedToCore(
@@ -75,8 +87,31 @@ void Scheduler::stop() {
 
 bool Scheduler::pushEvent(const SchedulerEvent& event) {
     if (_input_queue == NULL) return false;
-    // Non-blocking send to the queue
-    return xQueueSend(_input_queue, &event, 0) == pdTRUE;
+    // Serialise with pushPulse() so an atomic pair is never split.
+    bool taken = (g_scheduler_push_mutex != NULL) &&
+                 (xSemaphoreTake(g_scheduler_push_mutex, portMAX_DELAY) == pdTRUE);
+    bool ok = xQueueSend(_input_queue, &event, 0) == pdTRUE;
+    if (taken) xSemaphoreGive(g_scheduler_push_mutex);
+    return ok;
+}
+
+bool Scheduler::pushPulse(const SchedulerEvent& on, const SchedulerEvent& off) {
+    if (_input_queue == NULL) return false;
+    bool taken = (g_scheduler_push_mutex != NULL) &&
+                 (xSemaphoreTake(g_scheduler_push_mutex, portMAX_DELAY) == pdTRUE);
+    bool ok = false;
+    // Only commit if BOTH slots are free — guarantees all-or-nothing.
+    if (uxQueueSpacesAvailable(_input_queue) >= 2) {
+        bool a = xQueueSend(_input_queue, &on, 0) == pdTRUE;
+        bool b = a && (xQueueSend(_input_queue, &off, 0) == pdTRUE);
+        ok = a && b;
+    }
+    if (taken) xSemaphoreGive(g_scheduler_push_mutex);
+    return ok;
+}
+
+void Scheduler::setPowerManager(PowerManager* power) {
+    _power_manager = power;
 }
 
 void Scheduler::clearQueue() {
@@ -171,10 +206,27 @@ void Scheduler::run() {
         if (g_actuator_mutex == nullptr ||
             xSemaphoreTake(g_actuator_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
 
+            // AUDIT FIX (P0.1/P0.2): the scheduler task is the sole owner of the
+            // priority heap and the PCA9685 drivers. Web-initiated emergency
+            // stop / re-arm / I²C rescan are only *requested* (atomic flags) and
+            // are executed HERE, on Core 1, so there is never concurrent I²C
+            // access or unsynchronised heap mutation.
+            if (_safety_manager != nullptr) {
+                _safety_manager->processPendingRequests(_actuators, _actuator_count);
+            }
+
             processReadyEvents();
 
             if (_safety_manager != nullptr) {
                 _safety_manager->update(_actuators, _actuator_count);
+            }
+
+            // AUDIT FIX (P1.3): the PowerManager is now mutated exclusively on
+            // this (Core 1) task — billed per executed event above and
+            // reconciled here — so its update() must run here too, not from the
+            // Core 0 loop(), otherwise both cores would write its counters.
+            if (_power_manager != nullptr) {
+                _power_manager->update(_actuators, _actuator_count);
             }
 
             if (g_actuator_mutex != nullptr) xSemaphoreGive(g_actuator_mutex);
@@ -277,6 +329,21 @@ void Scheduler::processReadyEvents() {
             if (safe) {
                 _engine.processEvent(*actuator, event);
                 _processed_count++;
+
+                // AUDIT FIX (P1.3): bill the PowerManager only after the event
+                // has REALLY executed (and passed the safety gate), so a note
+                // rejected by the SafetyManager never inflates the power /
+                // polyphony accounting.
+                if (_power_manager != nullptr) {
+                    if (event.action == ACTION_NOTE_ON) {
+                        _power_manager->notifyActivation(*actuator,
+                                                         event.instrument_index,
+                                                         event.velocity);
+                    } else if (event.action == ACTION_NOTE_OFF) {
+                        _power_manager->notifyDeactivation(*actuator,
+                                                           event.instrument_index);
+                    }
+                }
             }
             // Event blocked by safety: silently ignored
         } else {

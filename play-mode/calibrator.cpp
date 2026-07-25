@@ -481,31 +481,35 @@ void Calibrator::triggerActuator() {
     on_evt.action          = ACTION_NOTE_ON;
     on_evt.velocity        = CAL_TRIGGER_VELOCITY;
     on_evt.priority        = 0;
-    // AUDIT FIX: if the strike could not be scheduled, abort — otherwise the
-    // calibrator would "measure" ambient noise for an actuator that never
-    // actually fired and record a bogus latency.
-    if (!_scheduler.pushEvent(on_evt)) {
-        Serial.printf("[CAL] Scheduler queue full — cannot trigger act %d, aborting\n",
-                      _cur_act_id);
-        _state = CAL_ERROR;
-        return;
-    }
+    // Use the actuator's own behaviour, and don't bill an instrument.
+    on_evt.behavior_override = 0xFF;
+    on_evt.instrument_index  = 0xFF;
 
-    // For solenoids: schedule automatic NOTE_OFF
+    bool scheduled;
     if (act_cfg->type == ACT_SOLENOID) {
+        // AUDIT FIX (P0.6): enqueue the ON/OFF pair atomically. Either both are
+        // scheduled or neither — a lone NOTE_ON can never leave a hit-and-hold
+        // coil energised waiting on the watchdog.
         SchedulerEvent off_evt = on_evt;
         off_evt.action          = ACTION_NOTE_OFF;
         off_evt.velocity        = 0;
         off_evt.trigger_time_us = _trigger_time_us
                                   + (uint32_t)act_cfg->pulse_ms * 1000UL
                                   + 50000UL;  // +50ms margin
-        if (!_scheduler.pushEvent(off_evt)) {
-            // The NOTE_ON is already scheduled. A SOL_FRAPPE auto-returns from
-            // the engine; a SOL_HIT_AND_HOLD would rely on the safety watchdog.
-            // Log so the operator can retry rather than silently mis-measure.
-            Serial.printf("[CAL] Warning: could not schedule NOTE_OFF for act %d "
-                          "(safety watchdog will release it)\n", _cur_act_id);
-        }
+        scheduled = _scheduler.pushPulse(on_evt, off_evt);
+    } else {
+        scheduled = _scheduler.pushEvent(on_evt);
+    }
+
+    // AUDIT FIX: if the strike could not be scheduled, abort — otherwise the
+    // calibrator would "measure" ambient noise for an actuator that never
+    // actually fired and record a bogus latency. With pushPulse() nothing was
+    // queued on failure, so there is no orphan activation to clean up.
+    if (!scheduled) {
+        Serial.printf("[CAL] Scheduler queue full — cannot trigger act %d, aborting\n",
+                      _cur_act_id);
+        _state = CAL_ERROR;
+        return;
     }
 
     Serial.printf("[CAL] Trigger act %d (attempt %d/%d) @ %lu us\n",

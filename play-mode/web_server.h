@@ -85,6 +85,10 @@ private:
     // Timing WebSocket broadcast
     uint32_t _last_ws_broadcast_ms;
 
+    // AUDIT FIX (P0.4): deferred restart after a factory reset, so the HTTP
+    // response is flushed before ESP.restart(). 0 = no restart pending.
+    uint32_t _restart_at_ms;
+
     // -------------------------------------------------------------------------
     // Static routes (HTML pages)
     // -------------------------------------------------------------------------

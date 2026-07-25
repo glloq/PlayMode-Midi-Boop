@@ -9,8 +9,9 @@
 #include "types.h"
 #include "actuator_engine.h"
 
-// Forward declaration
+// Forward declarations
 class SafetyManager;
+class PowerManager;
 
 // ============================================================================
 // PlayMode — Real-Time Scheduler (Core 1)
@@ -29,11 +30,19 @@ public:
     // Add an event to the queue (thread-safe, called from Core 0)
     bool pushEvent(const SchedulerEvent& event);
 
+    // AUDIT FIX (P0.6): enqueue a NOTE_ON / NOTE_OFF pair atomically — either
+    // both events are accepted or neither is. Prevents a lost NOTE_OFF from
+    // leaving a hit-and-hold solenoid energised. Thread-safe.
+    bool pushPulse(const SchedulerEvent& on, const SchedulerEvent& off);
+
     // AUDIT FIX (P0.6): flush every pending event — both the FreeRTOS input
-    // queue and the internal priority buffer. Called by the kill switch so no
-    // stale NOTE_ON / return event can re-drive an output after the emergency
-    // stop. Safe to call from any core.
+    // queue and the internal priority buffer. Owner-only: must run on the
+    // scheduler task (Core 1). Used by the kill switch sequence.
     void clearQueue();
+
+    // AUDIT FIX (P1.3): register the PowerManager so activation is billed AFTER
+    // an event really executes (not merely when it is queued).
+    void setPowerManager(PowerManager* power);
 
     // Register an actuator with the scheduler
     void registerActuator(ActuatorConfig* actuator);
@@ -64,6 +73,7 @@ public:
 private:
     ActuatorEngine& _engine;
     SafetyManager* _safety_manager;  // Safety pointer (can be null)
+    PowerManager*  _power_manager;   // Power pointer (can be null)
     TaskHandle_t _task_handle;
     QueueHandle_t _input_queue;     // FreeRTOS queue for incoming events
     bool _running;

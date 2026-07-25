@@ -27,6 +27,11 @@ public:
     // Set PWM frequency for a bus
     void setFrequency(uint8_t bus_id, uint16_t freq_hz);
 
+    // AUDIT FIX (P1.7): copy a persisted BusConfig (pins, I²C + PWM frequency,
+    // enabled state) into the driver BEFORE begin(), so the saved bus setup is
+    // actually used instead of the compile-time defaults.
+    void setBusConfig(uint8_t bus_id, const BusConfig& cfg);
+
     // Direct PWM write to a channel
     void setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uint16_t value);
 

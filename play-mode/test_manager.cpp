@@ -198,34 +198,31 @@ bool TestManager::triggerActuator(uint8_t act_id) {
     on_evt.action          = ACTION_NOTE_ON;
     on_evt.velocity        = _velocity;
     on_evt.priority        = 0;
-
-    bool ok = _scheduler.pushEvent(on_evt);
-
-    if (ok) {
-        scheduleNoteOff(act_id, _hold_ms);
-        _events_sent++;
-    }
-
-    logEvent(act_id, _velocity, ok);
-    return ok;
-}
-
-void TestManager::scheduleNoteOff(uint8_t act_id, uint16_t delay_ms) {
-    uint32_t now_us = (uint32_t)esp_timer_get_time();
+    on_evt.behavior_override = 0xFF;   // use the actuator's own behaviour
+    on_evt.instrument_index  = 0xFF;   // not tied to a MIDI instrument
 
     SchedulerEvent off_evt = {};
-    off_evt.trigger_time_us = now_us + (uint32_t)delay_ms * 1000UL;
+    off_evt.trigger_time_us = now_us + (uint32_t)_hold_ms * 1000UL;
     off_evt.actuator_id     = act_id;
     off_evt.action          = ACTION_NOTE_OFF;
     off_evt.velocity        = 0;
     off_evt.priority        = 0;
+    off_evt.behavior_override = 0xFF;
+    off_evt.instrument_index  = 0xFF;
 
-    // AUDIT FIX: verify the NOTE_OFF was accepted. If the queue is full the
-    // actuator would rely solely on the safety watchdog to be released.
-    if (!_scheduler.pushEvent(off_evt)) {
-        Serial.printf("[TEST] Warning: NOTE_OFF for act %d dropped (queue full)\n",
+    // AUDIT FIX (P0.6): schedule the ON/OFF pair atomically — a lost NOTE_OFF
+    // could otherwise hold a solenoid far longer than requested.
+    bool ok = _scheduler.pushPulse(on_evt, off_evt);
+
+    if (ok) {
+        _events_sent++;
+    } else {
+        Serial.printf("[TEST] Could not schedule ON/OFF pair for act %d (queue full)\n",
                       act_id);
     }
+
+    logEvent(act_id, _velocity, ok);
+    return ok;
 }
 
 void TestManager::logEvent(uint8_t act_id, uint8_t velocity, bool scheduled) {

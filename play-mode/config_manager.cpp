@@ -12,6 +12,14 @@
 // Defined here, referenced by the Scheduler via an extern declaration.
 SemaphoreHandle_t g_actuator_mutex = nullptr;
 
+// AUDIT FIX (P0.5): RAII guard implementation.
+ActuatorLockGuard::ActuatorLockGuard(ConfigManager& cfg, uint32_t timeout_ms)
+    : _cfg(cfg), _locked(cfg.lockActuators(timeout_ms)) {}
+
+ActuatorLockGuard::~ActuatorLockGuard() {
+    if (_locked) _cfg.unlockActuators();
+}
+
 ConfigManager::ConfigManager()
     : _actuator_count(0),
       _instrument_count(0),
@@ -79,8 +87,9 @@ bool ConfigManager::load() {
         return false;
     }
 
-    // Version
-    _version = doc["version"] | CONFIG_VERSION;
+    // Version (capture what was on disk so we can migrate below).
+    uint8_t loaded_version = doc["version"] | 0;
+    _version = CONFIG_VERSION;
 
     // WiFi
     if (!doc["wifi"].isNull()) {
@@ -130,6 +139,27 @@ bool ConfigManager::load() {
             deserializeRouting(_routing_configs[_routing_count], routeObj);
             _routing_count++;
         }
+    }
+
+    // AUDIT FIX (P1.1): migrate pre-v8 configs whose midi_channel used the UI
+    // convention (0=Omni, 1..16) to the internal representation (0..15, or the
+    // Omni sentinel). Persist the migrated config so the conversion runs once.
+    if (loaded_version < CONFIG_VERSION_CHANNELS_INTERNAL) {
+        Serial.printf("[CONFIG] Migrating config v%d -> v%d (MIDI channels)\n",
+                      loaded_version, CONFIG_VERSION);
+        for (uint8_t i = 0; i < _instrument_count; i++) {
+            uint8_t old_ch = _instruments[i].midi_channel;
+            uint8_t new_ch;
+            if (old_ch == 0) {
+                new_ch = MIDI_CHANNEL_OMNI_INTERNAL;   // old "0 = Omni"
+            } else if (old_ch <= 16) {
+                new_ch = (uint8_t)(old_ch - 1);        // old 1..16 -> 0..15
+            } else {
+                new_ch = MIDI_CHANNEL_OMNI_INTERNAL;   // invalid -> Omni (safe)
+            }
+            _instruments[i].midi_channel = new_ch;
+        }
+        save();  // persist so the migration is one-shot
     }
 
     Serial.printf("[CONFIG] Loaded: %d actuators, %d instruments, %d routings\n",
@@ -220,6 +250,8 @@ void ConfigManager::loadDefaults() {
     // WiFi defaults — AP enabled by default for first access without configuration
     strlcpy(_wifi_config.ssid, "", sizeof(_wifi_config.ssid));
     strlcpy(_wifi_config.password, "", sizeof(_wifi_config.password));
+    // Empty AP password → WiFiManager derives a unique one from the chip MAC.
+    strlcpy(_wifi_config.ap_password, "", sizeof(_wifi_config.ap_password));
     strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
     _wifi_config.enabled = true;
     _wifi_config.ap_fallback = true;
@@ -552,6 +584,7 @@ void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObje
 void ConfigManager::serializeWiFi(const WiFiConfig& wifi, JsonObject& obj) {
     obj["ssid"] = wifi.ssid;
     obj["password"] = wifi.password;
+    obj["ap_password"] = wifi.ap_password;
     obj["hostname"] = wifi.hostname;
     obj["enabled"] = wifi.enabled;
     obj["ap_fallback"] = wifi.ap_fallback;
@@ -560,6 +593,7 @@ void ConfigManager::serializeWiFi(const WiFiConfig& wifi, JsonObject& obj) {
 void ConfigManager::deserializeWiFi(WiFiConfig& wifi, const JsonObject& obj) {
     strlcpy(wifi.ssid, obj["ssid"] | "", sizeof(wifi.ssid));
     strlcpy(wifi.password, obj["password"] | "", sizeof(wifi.password));
+    strlcpy(wifi.ap_password, obj["ap_password"] | "", sizeof(wifi.ap_password));
     strlcpy(wifi.hostname, obj["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(wifi.hostname));
     wifi.enabled = obj["enabled"] | true;
     wifi.ap_fallback = obj["ap_fallback"] | WIFI_AP_FALLBACK;

@@ -103,11 +103,10 @@ private:
     // Applies the velocity curve of an instrument
     uint8_t applyVelocityCurve(uint8_t instrument_index, uint8_t velocity);
 
-    // AUDIT FIX (P0.2): resolve a MIDI note to a target actuator ID using the
-    // routing note_map (the single source of truth), not the vestigial
-    // InstrumentConfig::midi_notes/actuator_ids arrays. Returns the actuator ID
-    // or -1 when the note is unmapped.
-    int16_t findActuatorForNote(const MidiRoutingConfig* routing, uint8_t note);
+    // AUDIT FIX (P0.2/P1.5): resolve a MIDI note to its routing note_map entry
+    // (the single source of truth). Returns the mapping (actuator + behaviour
+    // override) or nullptr when the note is unmapped.
+    const NoteMapping* findNoteMapping(const MidiRoutingConfig* routing, uint8_t note);
 
     // Finds the config of an actuator by ID
     ActuatorConfig* findActuatorConfig(uint8_t actuator_id);

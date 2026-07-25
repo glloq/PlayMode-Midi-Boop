@@ -167,6 +167,10 @@
 
 // --- Config file ---
 #define CONFIG_FILE_PATH        "/config.json"
-#define CONFIG_VERSION          7       // v7: + real-time log manager (phase 9)
+// AUDIT FIX (P1.1): v8 migrates the MIDI channel representation. Pre-v8 files
+// stored the UI convention (0=Omni, 1..16); v8 stores the internal form
+// (0..15, or MIDI_CHANNEL_OMNI_INTERNAL). Also adds WiFiConfig::ap_password.
+#define CONFIG_VERSION          8
+#define CONFIG_VERSION_CHANNELS_INTERNAL 8   // first version with internal channels
 
 #endif // CONFIG_H

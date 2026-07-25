@@ -139,9 +139,21 @@ bool WiFiManager::startAP() {
     Serial.printf("[WIFI] Starting AP '%s'...\n", _config.hostname);
 
     WiFi.mode(WIFI_AP);
-    // AUDIT FIX (P0.9): protect the SoftAP with WPA2. An open AP let anyone in
-    // radio range reach the control API. The password must be >= 8 chars.
-    bool result = WiFi.softAP(_config.hostname, WIFI_AP_DEFAULT_PASSWORD);
+
+    // AUDIT FIX (P0.9/P1.9): protect the SoftAP with WPA2 using a PER-DEVICE
+    // password. Use the configured one if set (>= 8 chars); otherwise derive a
+    // unique password from the chip MAC so boards do not share a single key.
+    char ap_pass[65];
+    if (strlen(_config.ap_password) >= 8) {
+        strlcpy(ap_pass, _config.ap_password, sizeof(ap_pass));
+    } else {
+        uint8_t mac[6];
+        WiFi.softAPmacAddress(mac);
+        snprintf(ap_pass, sizeof(ap_pass), "pm-%02X%02X%02X",
+                 mac[3], mac[4], mac[5]);   // e.g. "pm-A1B2C3" (9 chars)
+    }
+
+    bool result = WiFi.softAP(_config.hostname, ap_pass);
 
     if (result) {
         _ap_mode = true;
@@ -154,7 +166,7 @@ bool WiFiManager::startAP() {
         Serial.printf("[WIFI] AP started — IP: %s  (WPA2, DNS captive portal active)\n",
                       WiFi.softAPIP().toString().c_str());
         Serial.printf("[WIFI] AP SSID: %s  password: %s\n",
-                      _config.hostname, WIFI_AP_DEFAULT_PASSWORD);
+                      _config.hostname, ap_pass);
     } else {
         Serial.println("[WIFI] AP start failed");
     }
