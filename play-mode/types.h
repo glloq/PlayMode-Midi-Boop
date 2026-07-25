@@ -104,7 +104,7 @@ struct SchedulerEvent {
     bool     deferred;           // True = auto-scheduled return/hold event
     uint32_t generation;         // Actuator generation at schedule time
     // AUDIT FIX (P1.3): instrument that emitted a NOTE_ON/NOTE_OFF, so the
-    // scheduler can bill the PowerManager AFTER the event really executes
+    // scheduler can bill the ResourceManager AFTER the event really executes
     // (0xFF = unknown / not from the dispatcher).
     uint8_t  instrument_index;
     // AUDIT FIX (P1.5): per-note behaviour override from the routing map

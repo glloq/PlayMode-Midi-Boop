@@ -9,9 +9,8 @@
 #include "types.h"
 #include "actuator_engine.h"
 
-// Forward declarations
-class SafetyManager;
-class PowerManager;
+// Forward declaration — the unified safety+power owner.
+class ResourceManager;
 
 // ============================================================================
 // PlayMode — Real-Time Scheduler (Core 1)
@@ -40,9 +39,9 @@ public:
     // scheduler task (Core 1). Used by the kill switch sequence.
     void clearQueue();
 
-    // AUDIT FIX (P1.3): register the PowerManager so activation is billed AFTER
-    // an event really executes (not merely when it is queued).
-    void setPowerManager(PowerManager* power);
+    // Register the unified ResourceManager (admission, observation,
+    // reconciliation, kill switch) — the single Core-1 owner of the budget.
+    void setResourceManager(ResourceManager* resources);
 
     // Register an actuator with the scheduler
     void registerActuator(ActuatorConfig* actuator);
@@ -67,13 +66,9 @@ public:
     // Check if the scheduler is running
     bool isRunning() const;
 
-    // Register the safety manager for pre-event checks
-    void setSafetyManager(SafetyManager* safety);
-
 private:
     ActuatorEngine& _engine;
-    SafetyManager* _safety_manager;  // Safety pointer (can be null)
-    PowerManager*  _power_manager;   // Power pointer (can be null)
+    ResourceManager* _resources;     // Unified safety+power owner (can be null)
     TaskHandle_t _task_handle;
     QueueHandle_t _input_queue;     // FreeRTOS queue for incoming events
     bool _running;

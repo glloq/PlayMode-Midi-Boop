@@ -3,8 +3,7 @@
 #include "config_manager.h"
 #include <WiFi.h>
 #include "scheduler.h"
-#include "safety_manager.h"
-#include "power_manager.h"
+#include "resource_manager.h"
 #include "midi_dispatcher.h"
 #include "midi_transport.h"
 #include "pca_driver.h"
@@ -116,8 +115,7 @@ WebServer::WebServer(uint16_t port)
     , _running(false)
     , _config(nullptr)
     , _scheduler(nullptr)
-    , _safety(nullptr)
-    , _power(nullptr)
+    , _resources(nullptr)
     , _dispatcher(nullptr)
     , _transport(nullptr)
     , _pca(nullptr)
@@ -130,14 +128,13 @@ WebServer::WebServer(uint16_t port)
 }
 
 void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
-                           SafetyManager* safety, PowerManager* power,
+                           ResourceManager* resources,
                            MidiDispatcher* dispatcher, MidiTransport* transport,
                            PCADriver* pca, ActuatorEngine* engine)
 {
     _config     = config;
     _scheduler  = scheduler;
-    _safety     = safety;
-    _power      = power;
+    _resources  = resources;
     _dispatcher = dispatcher;
     _transport  = transport;
     _pca        = pca;
@@ -460,7 +457,7 @@ void WebServer::setupAPIRoutes() {
     auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
             if (!requireAuth(req)) return;
-            if (!_safety || !_config) { req->send(500); return; }
+            if (!_resources || !_config) { req->send(500); return; }
             uint8_t bus_id = json["bus_id"] | 0xFF;
             uint16_t freq  = json["freq_pwm"] | 0;
             if (bus_id > 1 || freq < 24) {
@@ -470,7 +467,7 @@ void WebServer::setupAPIRoutes() {
             }
             // AUDIT FIX (P0.3): defer the prescaler write to Core 1 (the sole
             // I²C/PCA owner) instead of writing from the web task.
-            _safety->requestBusFrequency(bus_id, freq);
+            _resources->requestBusFrequency(bus_id, freq);
             // Persist the requested value.
             _config->getBuses()[bus_id].pwm_frequency = freq;
             req->send(200, "application/json", "{\"ok\":true}");
@@ -754,11 +751,11 @@ void WebServer::handleGetRouting(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handleGetPower(AsyncWebServerRequest* request) {
-    if (!_power) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
-    const PowerStats& stats = _power->getStats();
-    const PowerBudget& budget = _power->getBudget();
+    const PowerStats& stats = _resources->getStats();
+    const PowerBudget& budget = _resources->getBudget();
 
     JsonObject s = doc["stats"].to<JsonObject>();
     s["total_ma"]      = stats.total_estimated_ma;
@@ -788,10 +785,10 @@ void WebServer::handleGetPower(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
-    const SafetyState& state = _safety->getGlobalState();
+    const SafetyState& state = _resources->getGlobalState();
 
     doc["total_current_ma"]  = state.total_estimated_current_ma;
     doc["active_count"]      = state.active_actuator_count;
@@ -802,11 +799,11 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     // AUDIT FIX (UI-P1): report the RUNTIME limits actually in effect (not the
     // compile-time constants), so the form reflects what the user set.
     JsonObject cfg = doc["config"].to<JsonObject>();
-    cfg["max_duty_pct"]    = _safety->getMaxDutyCycle();
-    cfg["max_freq_hz"]     = _safety->getMaxFrequency();
-    cfg["watchdog_ms"]     = _safety->getWatchdogTimeout();
-    cfg["max_polyphony"]   = _safety->getMaxPolyphony();
-    cfg["max_current_ma"]  = _safety->getMaxTotalCurrent();
+    cfg["max_duty_pct"]    = _resources->getMaxDutyCycle();
+    cfg["max_freq_hz"]     = _resources->getMaxFrequency();
+    cfg["watchdog_ms"]     = _resources->getWatchdogTimeout();
+    cfg["max_polyphony"]   = _resources->getMaxPolyphony();
+    cfg["max_current_ma"]  = _resources->getMaxTotalCurrent();
 
     String output;
     serializeJson(doc, output);
@@ -1380,7 +1377,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
 void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
                                       uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
-    if (!_power) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -1391,17 +1388,17 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
     }
 
     if (!doc["global_max_ma"].isNull())
-        _power->setGlobalMaxMA(doc["global_max_ma"]);
+        _resources->setGlobalMaxMA(doc["global_max_ma"]);
     if (!doc["servo_max_ma"].isNull())
-        _power->setServoBusMaxMA(doc["servo_max_ma"]);
+        _resources->setBusMaxMA(0, doc["servo_max_ma"]);
     if (!doc["sol_max_ma"].isNull())
-        _power->setSolenoidBusMaxMA(doc["sol_max_ma"]);
+        _resources->setBusMaxMA(1, doc["sol_max_ma"]);
     if (!doc["max_polyphony"].isNull())
-        _power->setGlobalMaxPolyphony(doc["max_polyphony"]);
+        _resources->setGlobalMaxPolyphony(doc["max_polyphony"]);
 
     // AUDIT FIX (UI-P1): mirror the change into the persisted config so a
     // subsequent "Save to flash" keeps it across reboots.
-    if (_config) _config->setPowerBudget(_power->getBudget());
+    if (_config) _config->setPowerBudget(_resources->getBudget());
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1409,7 +1406,7 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
 void WebServer::handlePostSafety(AsyncWebServerRequest* request,
                                  uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -1429,25 +1426,25 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
     };
 
     if (!doc["max_duty_pct"].isNull())
-        _safety->setMaxDutyCycle((uint8_t)clampU(doc["max_duty_pct"] | 0, 1, 100));
+        _resources->setMaxDutyCycle((uint8_t)clampU(doc["max_duty_pct"] | 0, 1, 100));
     if (!doc["max_freq_hz"].isNull())
-        _safety->setMaxFrequency((uint16_t)clampU(doc["max_freq_hz"] | 0, 1, 1000));
+        _resources->setMaxFrequency((uint16_t)clampU(doc["max_freq_hz"] | 0, 1, 1000));
     if (!doc["watchdog_ms"].isNull())
-        _safety->setWatchdogTimeout((uint16_t)clampU(doc["watchdog_ms"] | 0, 100, 60000));
+        _resources->setWatchdogTimeout((uint16_t)clampU(doc["watchdog_ms"] | 0, 100, 60000));
     if (!doc["max_polyphony"].isNull())
-        _safety->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
+        _resources->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
     if (!doc["max_current_ma"].isNull())
-        _safety->setMaxTotalCurrent((uint16_t)clampU(doc["max_current_ma"] | 0, 100, 60000));
+        _resources->setMaxTotalCurrent((uint16_t)clampU(doc["max_current_ma"] | 0, 100, 60000));
 
     // AUDIT FIX (UI-P1): mirror the runtime limits into the persisted config so
     // a subsequent "Save to flash" keeps them across reboots.
     if (_config) {
         SafetyLimits sl;
-        sl.max_duty_pct   = _safety->getMaxDutyCycle();
-        sl.max_freq_hz    = _safety->getMaxFrequency();
-        sl.watchdog_ms    = _safety->getWatchdogTimeout();
-        sl.max_polyphony  = _safety->getMaxPolyphony();
-        sl.max_current_ma = _safety->getMaxTotalCurrent();
+        sl.max_duty_pct   = _resources->getMaxDutyCycle();
+        sl.max_freq_hz    = _resources->getMaxFrequency();
+        sl.watchdog_ms    = _resources->getWatchdogTimeout();
+        sl.max_polyphony  = _resources->getMaxPolyphony();
+        sl.max_current_ma = _resources->getMaxTotalCurrent();
         _config->setSafetyLimits(sl);
     }
 
@@ -1499,7 +1496,7 @@ void WebServer::handlePostConfigImport(AsyncWebServerRequest* request,
 
     // Cut outputs before swapping the whole configuration, then reboot so the
     // new WiFi/MIDI/actuator setup is applied cleanly from a known state.
-    if (_safety) _safety->requestKillSwitch();
+    if (_resources) _resources->requestKillSwitch();
 
     bool ok;
     {
@@ -1536,7 +1533,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     //   4. persist the defaults;
     //   5. reboot — at boot OE starts HIGH (outputs disabled) until the fresh
     //      config is applied, satisfying "OE off until next start completes".
-    if (_safety) _safety->requestKillSwitch();
+    if (_resources) _resources->requestKillSwitch();
 
     {
         ActuatorLockGuard guard(*_config);
@@ -1596,7 +1593,7 @@ void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
 void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
                                      uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, data, len);
@@ -1613,10 +1610,10 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
     // atomic kill-request flag.
     bool activate = doc["active"] | false;
     if (activate) {
-        _safety->requestKillSwitch();
+        _resources->requestKillSwitch();
         logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch requested from web UI");
     } else {
-        _safety->requestRearm();
+        _resources->requestRearm();
         logger.log(LOG_INFO, CAT_SAFETY, "Kill switch re-arm requested from web UI");
     }
 
@@ -1625,14 +1622,14 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
 
 void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
-    if (!_safety) { request->send(500); return; }
+    if (!_resources) { request->send(500); return; }
 
     // AUDIT FIX (P0.2): the web task must not delete/recreate driver objects
     // while the scheduler (Core 1) may be dereferencing a getDriver() pointer.
     // Request the rescan; the scheduler runs it after activating the kill
     // switch and leaves the outputs disabled until a manual re-arm. Results are
     // read afterwards via GET /api/buses.
-    _safety->requestRescan();
+    _resources->requestRescan();
     logger.log(LOG_WARN, CAT_SYSTEM, "I2C rescan requested (outputs will be disabled)");
     request->send(202, "application/json",
                   "{\"ok\":true,\"note\":\"rescan scheduled; outputs disabled, "
@@ -1824,8 +1821,8 @@ void WebServer::buildStatusJSON(String& output) {
 
     // AUDIT FIX (UI/UX): a single, explicit machine state for the permanent
     // dashboard: FAULT (latched over-current) / DISARMED (kill active) / ARMED.
-    if (_safety) {
-        const SafetyState& ss0 = _safety->getGlobalState();
+    if (_resources) {
+        const SafetyState& ss0 = _resources->getGlobalState();
         const char* mstate = ss0.over_current ? "fault"
                            : ss0.kill_switch_active ? "disarmed" : "armed";
         doc["machine_state"] = mstate;
@@ -1852,15 +1849,15 @@ void WebServer::buildStatusJSON(String& output) {
         JsonObject disp = doc["dispatcher"].to<JsonObject>();
         disp["dispatched"]    = _dispatcher->getDispatchedCount();
         disp["dropped"]       = _dispatcher->getDroppedCount();
-        // AUDIT FIX (core): power rejections are now counted by the PowerManager
+        // AUDIT FIX (core): power rejections are now counted by the ResourceManager
         // (the scheduler makes the admission decision on Core 1).
-        disp["pwr_rejected"]  = _power ? _power->getStats().total_rejected : 0;
+        disp["pwr_rejected"]  = _resources ? _resources->getStats().total_rejected : 0;
     }
 
     // Safety
-    if (_safety) {
+    if (_resources) {
         JsonObject safe = doc["safety"].to<JsonObject>();
-        const SafetyState& ss = _safety->getGlobalState();
+        const SafetyState& ss = _resources->getGlobalState();
         safe["current_ma"]  = ss.total_estimated_current_ma;
         safe["active"]      = ss.active_actuator_count;
         safe["kill_switch"] = ss.kill_switch_active;
@@ -1869,10 +1866,10 @@ void WebServer::buildStatusJSON(String& output) {
     }
 
     // Power
-    if (_power) {
+    if (_resources) {
         JsonObject pwr = doc["power"].to<JsonObject>();
-        const PowerStats& ps = _power->getStats();
-        const PowerBudget& pb = _power->getBudget();
+        const PowerStats& ps = _resources->getStats();
+        const PowerBudget& pb = _resources->getBudget();
         pwr["total_ma"]      = ps.total_estimated_ma;
         pwr["servo_ma"]      = ps.servo_bus_ma;
         pwr["sol_ma"]        = ps.solenoid_bus_ma;

@@ -8,18 +8,15 @@
 #include "scheduler.h"
 #include "config_manager.h"
 
-// Forward declaration
-class PowerManager;
-
 // ============================================================================
-// PlayMode — MIDI Dispatcher (Phase 3+4+5)
+// PlayMode — MIDI Dispatcher (Phase 3+4)
 // ============================================================================
 //
 // Routes MIDI messages to actuators via the scheduler.
 // Lookup: MIDI channel -> instrument -> note -> actuator.
 // Applies latency compensation to synchronize actuators.
 // Phase 4: CC dispatch, velocity curves.
-// Phase 5: PowerManager check before NOTE_ON.
+// Admission (power/safety) is decided by the ResourceManager on Core 1.
 //
 
 class MidiDispatcher {
@@ -44,12 +41,6 @@ public:
     // Number of ignored messages (unmapped note, unknown channel)
     uint32_t getDroppedCount() const;
 
-    // Number of messages rejected by PowerManager (budget/polyphony)
-    uint32_t getPowerRejectedCount() const;
-
-    // Registers the PowerManager (optional -- can be null)
-    void setPowerManager(PowerManager* pm);
-
     // --- AUDIT FIX: ring buffer to relay MIDI messages via WebSocket ---
     // Max buffer size (recent messages). Suited for WS broadcast at 200 ms.
     static const uint8_t MIDI_WS_LOG_SIZE = 16;
@@ -70,10 +61,8 @@ public:
 private:
     Scheduler& _scheduler;
     ConfigManager& _config;
-    PowerManager* _powerManager;
     uint32_t _dispatched_count;
     uint32_t _dropped_count;
-    uint32_t _power_rejected_count;
 
     // Ring buffer WS log
     WsLogEntry _ws_log[MIDI_WS_LOG_SIZE];

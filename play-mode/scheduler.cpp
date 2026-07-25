@@ -1,6 +1,5 @@
 #include "scheduler.h"
-#include "safety_manager.h"
-#include "power_manager.h"
+#include "resource_manager.h"
 #include <freertos/semphr.h>
 
 // ============================================================================
@@ -18,8 +17,7 @@ extern SemaphoreHandle_t g_actuator_mutex;
 
 Scheduler::Scheduler(ActuatorEngine& engine)
     : _engine(engine),
-      _safety_manager(nullptr),
-      _power_manager(nullptr),
+      _resources(nullptr),
       _task_handle(NULL),
       _input_queue(NULL),
       _running(false),
@@ -97,8 +95,8 @@ bool Scheduler::pushPulse(const SchedulerEvent& on, const SchedulerEvent& off) {
     return xQueueSend(_input_queue, &cmd, 0) == pdTRUE;
 }
 
-void Scheduler::setPowerManager(PowerManager* power) {
-    _power_manager = power;
+void Scheduler::setResourceManager(ResourceManager* resources) {
+    _resources = resources;
 }
 
 void Scheduler::clearQueue() {
@@ -165,11 +163,6 @@ bool Scheduler::isRunning() const {
     return _running;
 }
 
-void Scheduler::setSafetyManager(SafetyManager* safety) {
-    _safety_manager = safety;
-    Serial.printf("[SCHED] Safety Manager %s\n", safety ? "registered" : "disabled");
-}
-
 // ============================================================================
 // FreeRTOS Task — Static entry point
 // ============================================================================
@@ -204,23 +197,16 @@ void Scheduler::run() {
             // priority heap and the PCA9685 drivers. Web-initiated emergency
             // stop / re-arm / I²C rescan are only *requested* (atomic flags) and
             // are executed HERE, on Core 1, so there is never concurrent I²C
-            // access or unsynchronised heap mutation.
-            if (_safety_manager != nullptr) {
-                _safety_manager->processPendingRequests(_actuators, _actuator_count);
+            // access or unsynchronised heap mutation. The unified ResourceManager
+            // also owns admission, observation and reconciliation on this core.
+            if (_resources != nullptr) {
+                _resources->processPendingRequests(_actuators, _actuator_count);
             }
 
             processReadyEvents();
 
-            if (_safety_manager != nullptr) {
-                _safety_manager->update(_actuators, _actuator_count);
-            }
-
-            // AUDIT FIX (P1.3): the PowerManager is now mutated exclusively on
-            // this (Core 1) task — billed per executed event above and
-            // reconciled here — so its update() must run here too, not from the
-            // Core 0 loop(), otherwise both cores would write its counters.
-            if (_power_manager != nullptr) {
-                _power_manager->update(_actuators, _actuator_count);
+            if (_resources != nullptr) {
+                _resources->update(_actuators, _actuator_count);
             }
 
             if (g_actuator_mutex != nullptr) xSemaphoreGive(g_actuator_mutex);
@@ -324,45 +310,29 @@ void Scheduler::processReadyEvents() {
         // Find the target actuator
         ActuatorConfig* actuator = findActuator(event.actuator_id);
         if (actuator != nullptr) {
-            // AUDIT FIX (core): the PowerManager admission decision now runs
-            // HERE, on Core 1, so its state is only ever read/written from one
-            // core (the dispatcher no longer calls canActivate from Core 0).
-            bool power_ok = true;
-            if (_power_manager != nullptr && event.action == ACTION_NOTE_ON) {
-                power_ok = _power_manager->canActivate(*actuator,
-                                                       event.instrument_index,
-                                                       event.velocity);
+            // AUDIT FIX (architecture): one unified admission gate on Core 1
+            // (frequency, duty, polyphony, current budget). The dispatcher no
+            // longer makes any budget decision on Core 0.
+            bool admitted = true;
+            if (_resources != nullptr) {
+                admitted = _resources->admit(*actuator, event, event.instrument_index);
             }
 
-            // Safety check before execution
-            bool safe = power_ok;
-            if (safe && _safety_manager != nullptr) {
-                safe = _safety_manager->checkEvent(*actuator, event);
-            }
-
-            if (safe) {
-                // AUDIT FIX (core): bill the PowerManager on the REAL activation
-                // state transition (before/after), not on the event type. This
-                // is correct even when a NOTE_OFF is a no-op for the behaviour,
-                // when an auto-return deactivates, or when a retrigger keeps the
-                // actuator active (no double allocation).
+            if (admitted) {
+                // Bill on the REAL activation state transition (before/after),
+                // not on the event type — correct for no-op NOTE_OFFs,
+                // auto-returns and retriggers.
                 bool was_active = actuator->state.active;
                 _engine.processEvent(*actuator, event);
                 bool is_active = actuator->state.active;
                 _processed_count++;
 
-                if (_power_manager != nullptr) {
-                    if (!was_active && is_active) {
-                        _power_manager->notifyActivation(*actuator,
-                                                         event.instrument_index,
-                                                         event.velocity);
-                    } else if (was_active && !is_active) {
-                        _power_manager->notifyDeactivation(*actuator,
-                                                           event.instrument_index);
-                    }
+                if (_resources != nullptr) {
+                    _resources->observe(*actuator, was_active, is_active,
+                                        event.instrument_index, event.velocity);
                 }
             }
-            // Event blocked by safety/power: silently ignored
+            // Event blocked by the resource gate: silently ignored
         } else {
             Serial.printf("[SCHED] Actuator %d not found\n", event.actuator_id);
         }

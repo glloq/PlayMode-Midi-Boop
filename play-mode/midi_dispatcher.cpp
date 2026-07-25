@@ -1,5 +1,4 @@
 #include "midi_dispatcher.h"
-#include "power_manager.h"
 
 // ============================================================================
 // PlayMode — MIDI Dispatcher (implementation)
@@ -8,10 +7,8 @@
 MidiDispatcher::MidiDispatcher(Scheduler& scheduler, ConfigManager& config)
     : _scheduler(scheduler),
       _config(config),
-      _powerManager(nullptr),
       _dispatched_count(0),
       _dropped_count(0),
-      _power_rejected_count(0),
       _ws_log_head(0),
       _ws_log_count(0) {
     memset(_max_latency_ms, 0, sizeof(_max_latency_ms));
@@ -107,14 +104,6 @@ uint32_t MidiDispatcher::getDroppedCount() const {
     return _dropped_count;
 }
 
-uint32_t MidiDispatcher::getPowerRejectedCount() const {
-    return _power_rejected_count;
-}
-
-void MidiDispatcher::setPowerManager(PowerManager* pm) {
-    _powerManager = pm;
-}
-
 // ============================================================================
 // Note On handling — AUDIT FIX (P0.3): bounds-check the channel and dispatch to
 // every instrument that listens on it (exact channel or Omni).
@@ -155,7 +144,7 @@ bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMess
     uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);
 
     // AUDIT FIX (core): the energy-budget admission decision is now made by the
-    // scheduler on Core 1 (PowerManager is single-core owned). The dispatcher
+    // scheduler on Core 1 (ResourceManager is single-core owned). The dispatcher
     // only produces the activation request.
 
     SchedulerEvent evt = {};
@@ -165,7 +154,7 @@ bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMess
     evt.velocity = velocity;
     evt.priority = 0;
     // AUDIT FIX (P1.3): carry the instrument so the scheduler can bill the
-    // PowerManager after real execution. (P1.5) carry the per-note behaviour
+    // ResourceManager after real execution. (P1.5) carry the per-note behaviour
     // override so the engine can apply it.
     evt.instrument_index = inst_idx;
     evt.behavior_override = mapping->behavior_override;
@@ -211,7 +200,7 @@ bool MidiDispatcher::dispatchNoteOffToInstrument(uint8_t inst_idx, const MidiMes
     evt.instrument_index = inst_idx;
     evt.behavior_override = mapping->behavior_override;
 
-    // AUDIT FIX (P1.3): the PowerManager is billed by the scheduler after the
+    // AUDIT FIX (P1.3): the ResourceManager is billed by the scheduler after the
     // NOTE_OFF really executes, not here at enqueue time.
     if (_scheduler.pushEvent(evt)) {
         _dispatched_count++;

@@ -10,8 +10,7 @@
 // Forward declarations
 class ConfigManager;
 class Scheduler;
-class SafetyManager;
-class PowerManager;
+class ResourceManager;
 class MidiDispatcher;
 class MidiTransport;
 class PCADriver;
@@ -38,7 +37,7 @@ public:
 
     // Registers references to system modules
     void setModules(ConfigManager* config, Scheduler* scheduler,
-                    SafetyManager* safety, PowerManager* power,
+                    ResourceManager* resources,
                     MidiDispatcher* dispatcher, MidiTransport* transport,
                     PCADriver* pca, ActuatorEngine* engine);
 
@@ -73,8 +72,7 @@ private:
     // Module references (not owned)
     ConfigManager*   _config;
     Scheduler*       _scheduler;
-    SafetyManager*   _safety;
-    PowerManager*    _power;
+    ResourceManager* _resources;   // unified safety + power
     MidiDispatcher*  _dispatcher;
     MidiTransport*   _transport;
     PCADriver*       _pca;
