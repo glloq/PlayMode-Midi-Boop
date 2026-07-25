@@ -200,36 +200,35 @@ void setup() {
     }
 #endif
 
-    // 4. Enable PCA buses (OE = LOW) — only when the configuration is trusted.
-    if (configOk) {
-        Serial.println("\n[INIT] Enabling PCA outputs...");
-        pcaDriver.enableBus(0, true);
-        pcaDriver.enableBus(1, true);
-    } else {
-        Serial.println("\n[INIT] SAFE MODE — PCA outputs left disabled");
-    }
+    // AUDIT FIX (P0.5): outputs are NOT armed here. OE stays HIGH (disabled)
+    // through the whole init chain and is only lowered at the very end, once
+    // every subsystem has been verified. `bootHealthy` accumulates that state.
+    bool bootHealthy = configOk;
 
     // 5. Initialize the Safety Manager
     Serial.println("\n[INIT] Safety Manager...");
     safetyManager.begin();
-    if (!configOk) {
-        // Latch the kill switch so no event can drive an output until the fault
-        // is cleared. Called once at setup (scheduler loop not yet running).
-        safetyManager.activateKillSwitch();
-        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch latched (config failure)");
-    }
 
     // 6. Start the scheduler on Core 1 (with integrated safety)
     Serial.println("\n[INIT] Scheduler...");
     scheduler.setSafetyManager(&safetyManager);
     // AUDIT FIX (P0.6): let the kill switch flush the scheduler queues as part
-    // of the emergency-stop sequence.
+    // of the emergency-stop sequence. (PowerManager is registered at step 9,
+    // after powerManager.begin().)
     safetyManager.setScheduler(&scheduler);
     if (!scheduler.begin()) {
-        Serial.println("[INIT] ERROR: Scheduler");
+        Serial.println("[INIT] ERROR: Scheduler — outputs will stay disabled");
         logger.log(LOG_ERROR, CAT_SCHED, "Scheduler: Core 1 start failed");
+        bootHealthy = false;
     } else {
         logger.log(LOG_INFO, CAT_SCHED, "Scheduler started on Core 1");
+    }
+
+    // If any critical subsystem failed, latch the kill switch so the outputs
+    // stay disabled until the fault is cleared and the operator re-arms.
+    if (!bootHealthy) {
+        safetyManager.activateKillSwitch();
+        logger.log(LOG_CRITICAL, CAT_SAFETY, "Boot fault — outputs latched OFF");
     }
 
     // 7. Initialize WiFi
@@ -307,10 +306,11 @@ void setup() {
     // execution (see Scheduler::processReadyEvents).
     scheduler.setPowerManager(&powerManager);
 
-    // 10. Initialize the MIDI Dispatcher with PowerManager (note/CC mapping)
+    // 10. Initialize the MIDI Dispatcher (note/CC mapping)
     Serial.println("\n[INIT] MIDI Dispatcher...");
-    midiDispatcher.setPowerManager(&powerManager);
     midiDispatcher.refreshConfig();
+    // AUDIT FIX: release held notes when an RTP-MIDI session drops.
+    midiTransport.setDisconnectHandler([]() { midiDispatcher.allNotesOff(); });
 
     // 11. Start the Web Server (Phase 6) — only if WiFi is active
     Serial.println("\n[INIT] Web Server...");
@@ -341,10 +341,25 @@ void setup() {
         logger.log(LOG_INFO, CAT_CAL, "Acoustic calibrator ready");
     }
 
+    // 13. AUDIT FIX (P0.5): arm the outputs ONLY now, after every subsystem has
+    // been verified. If anything failed, leave OE HIGH (kill latched) — the
+    // operator re-arms from the web UI once the fault is resolved.
+    if (bootHealthy && !safetyManager.isKillSwitchActive()) {
+        Serial.println("\n[INIT] All checks passed — arming PCA outputs...");
+        pcaDriver.enableBus(0, pcaDriver.getBusConfig(0).enabled);
+        pcaDriver.enableBus(1, pcaDriver.getBusConfig(1).enabled);
+        logger.log(LOG_INFO, CAT_SAFETY, "Outputs armed after successful boot");
+    } else {
+        Serial.println("\n[INIT] Boot not healthy — outputs remain DISABLED (re-arm required)");
+        logger.log(LOG_WARN, CAT_SAFETY, "Outputs disabled after boot (re-arm required)");
+    }
+
     Serial.println("\n========================================");
     Serial.println("  Initialization complete — Phase 9");
     Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
     Serial.printf("  Mode: %s\n", wifiManager.isAP() ? "AP (hotspot)" : "STA (WiFi)");
+    Serial.printf("  Outputs: %s\n",
+                  (bootHealthy && !safetyManager.isKillSwitchActive()) ? "ARMED" : "DISABLED");
     Serial.println("========================================\n");
 
     logger.log(LOG_INFO, CAT_SYSTEM, "Init complete — free heap: %d bytes",
@@ -409,6 +424,9 @@ void loop() {
             } else {
                 logger.log(LOG_WARN, CAT_SYSTEM, "WiFi disconnected");
                 if (wifiManager.isAP()) ledSet(LED_AP);
+                // AUDIT FIX: releasing network MIDI means no NOTE_OFF will
+                // arrive for held notes — release everything now.
+                midiDispatcher.allNotesOff();
             }
             last_wifi = cur_wifi;
         }
@@ -444,7 +462,7 @@ void loop() {
                       midiTransport.getRtpPacketCount(),
                       midiDispatcher.getDispatchedCount(),
                       midiDispatcher.getDroppedCount(),
-                      midiDispatcher.getPowerRejectedCount(),
+                      powerManager.getStats().total_rejected,
                       safetyManager.getEstimatedCurrentMA(),
                       safetyManager.getActiveActuatorCount(),
                       safetyManager.isKillSwitchActive() ? " [KILL]" :

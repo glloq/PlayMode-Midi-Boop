@@ -562,12 +562,12 @@ tr:hover td{background:var(--bg2)}
       <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">Port <span id="midi-rtp-port">5004</span> &mdash; Requires WiFi</div>
     </div>
     <div class="card">
-      <h3>Jitter Buffer</h3>
+      <h3>Network Delay</h3>
       <div class="val"><span id="midi-jitter-val">30</span><span class="unit">ms</span></div>
       <input type="range" id="midi-jitter" min="10" max="80" value="30" style="width:100%;margin-top:8px"
         oninput="document.getElementById('midi-jitter-val').textContent=this.value"
         onchange="updateMidiConfig()">
-      <div class="help">Anti-jitter buffer for network MIDI (UDP / RTP). Increase if notes arrive out of order.</div>
+      <div class="help">Fixed hold delay for network MIDI (UDP / RTP) that absorbs arrival-time jitter. It does not reorder messages, so it cannot fix genuinely out-of-order delivery.</div>
     </div>
   </div>
 

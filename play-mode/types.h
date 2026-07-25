@@ -139,6 +139,16 @@ struct BusConfig {
     uint8_t pca_count;           // Number of detected PCAs
 };
 
+// --- Scheduler command (atomic unit crossing the FreeRTOS queue) ---
+// AUDIT FIX (P0.1): a NOTE_ON/NOTE_OFF pair must reach the internal priority
+// heap all-or-nothing. Carrying them as ONE queue element (not two) makes the
+// FreeRTOS enqueue atomic, and Core 1 only inserts the whole command when the
+// heap has room for every event it contains.
+struct SchedulerCommand {
+    uint8_t event_count;          // 1 or 2
+    SchedulerEvent events[2];
+};
+
 // --- Comparator for priority queue (sorted by timestamp) ---
 struct EventComparator {
     bool operator()(const SchedulerEvent& a, const SchedulerEvent& b) {

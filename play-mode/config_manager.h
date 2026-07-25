@@ -98,6 +98,11 @@ public:
     // Finds the routing for a given instrument (by index)
     MidiRoutingConfig* getRoutingForInstrument(uint8_t instrument_index);
 
+    // AUDIT FIX: rebuild an instrument's cached actuator_ids[]/midi_notes[]/
+    // actuator_count from its routing note_map (the single source of truth), so
+    // the legacy arrays can never diverge. Call after any routing edit.
+    void rebuildInstrumentFromRouting(uint8_t instrument_index);
+
     // Config version
     uint8_t getVersion() const;
 

@@ -7,12 +7,9 @@
 // PlayMode — Actuator Engine (implementation)
 // ============================================================================
 
-// External reference to the scheduler for scheduling return events
+// External reference to the scheduler for scheduling return events. The queue
+// carries SchedulerCommand elements (see scheduler.cpp).
 extern QueueHandle_t g_scheduler_queue;
-// AUDIT FIX (P0.6): the same push-serialisation mutex the Scheduler uses, so a
-// return event enqueued from the engine can never split an atomic pushPulse()
-// pair.
-extern SemaphoreHandle_t g_scheduler_push_mutex;
 
 ActuatorEngine::ActuatorEngine(PCADriver& pca)
     : _pca(pca), _current_behavior_override(0xFF) {}
@@ -311,14 +308,13 @@ void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint
     // AUDIT FIX (P0.7): a lost return event leaves a solenoid energised or a
     // servo deflected until the watchdog eventually fires. Verify the enqueue
     // and, if the queue is full, apply the return target immediately (fail
-    // safe) so the actuator can never stay stuck on. The push is serialised
-    // through g_scheduler_push_mutex so it cannot split a pushPulse() pair.
+    // safe) so the actuator can never stay stuck on.
     bool sent = false;
     if (g_scheduler_queue != NULL) {
-        bool taken = (g_scheduler_push_mutex != NULL) &&
-                     (xSemaphoreTake(g_scheduler_push_mutex, portMAX_DELAY) == pdTRUE);
-        sent = xQueueSend(g_scheduler_queue, &return_event, 0) == pdTRUE;
-        if (taken) xSemaphoreGive(g_scheduler_push_mutex);
+        SchedulerCommand cmd;
+        cmd.event_count = 1;
+        cmd.events[0] = return_event;
+        sent = xQueueSend(g_scheduler_queue, &cmd, 0) == pdTRUE;
     }
     if (!sent) {
         Serial.printf("[ENGINE] Return queue full for actuator %d — applying "

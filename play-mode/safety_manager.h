@@ -48,15 +48,18 @@ public:
     // Check if the kill switch is active
     bool isKillSwitchActive() const;
 
-    // --- AUDIT FIX (P0.1/P0.2): cross-task requests ---
-    // Called from the web task (Core 0). They only raise atomic flags; the
+    // --- AUDIT FIX (P0.1/P0.2/P0.3): cross-task requests ---
+    // Called from the web task (Core 0). They only raise atomic state; the
     // actual hardware/queue work happens on Core 1 in processPendingRequests().
     void requestKillSwitch();
     void requestRearm();
     void requestRescan();
+    // Request a bus PWM frequency change (applied on Core 1: OE off, set freq,
+    // OE restored only if armed). hz is clamped by PCADriver::setFrequency.
+    void requestBusFrequency(uint8_t bus_id, uint16_t hz);
 
     // Executed by the scheduler task (Core 1) every tick, inside the actuator
-    // lock. Processes any pending kill / re-arm / rescan request.
+    // lock. Processes any pending state transition / frequency change.
     void processPendingRequests(ActuatorConfig* actuators[], uint8_t count);
 
     // --- State accessors ---
@@ -88,15 +91,26 @@ private:
     PCADriver& _pca;
     Scheduler* _scheduler;  // Optional — used to flush queues on kill switch
 
-    // AUDIT FIX (P0.1/P0.2): cross-task request flags set by the web task,
-    // consumed on Core 1 in processPendingRequests().
-    std::atomic<bool> _kill_requested;
-    std::atomic<bool> _rearm_requested;
-    std::atomic<bool> _rescan_requested;
+    // AUDIT FIX: a SINGLE requested state (not independent booleans) removes the
+    // ambiguous ordering where a re-arm and a rescan could both apply in one
+    // pass. Last request wins; processed on Core 1.
+    enum RequestedSafetyState : uint8_t {
+        REQ_NONE = 0,
+        REQ_KILL,
+        REQ_RESCAN,
+        REQ_REARM
+    };
+    std::atomic<uint8_t>  _requested_state;   // RequestedSafetyState
+    // AUDIT FIX (P0.3): pending per-bus PWM frequency (0 = none). Applied on
+    // Core 1 so I²C prescaler writes never race actuator PWM writes.
+    std::atomic<uint16_t> _req_freq_bus0;
+    std::atomic<uint16_t> _req_freq_bus1;
 
     // Perform the I²C rescan safely on Core 1 (kill first, rebuild drivers,
     // leave outputs disabled until a manual re-arm).
     void doRescan();
+    // Apply a pending bus frequency change on Core 1.
+    void applyBusFrequency(uint8_t bus_id, uint16_t hz);
 
     // Per-actuator safety state
     ActuatorSafetyState _actuator_safety[MAX_ACTUATORS];

@@ -11,9 +11,9 @@ const ActuatorSafetyState SafetyManager::_default_safety_state = {};
 SafetyManager::SafetyManager(PCADriver& pca)
     : _pca(pca),
       _scheduler(nullptr),
-      _kill_requested(false),
-      _rearm_requested(false),
-      _rescan_requested(false),
+      _requested_state(REQ_NONE),
+      _req_freq_bus0(0),
+      _req_freq_bus1(0),
       _max_duty_cycle(SAFETY_MAX_DUTY_CYCLE),
       _max_freq_hz(SAFETY_MAX_FREQ_HZ),
       _watchdog_ms(SAFETY_WATCHDOG_MS),
@@ -55,15 +55,20 @@ void SafetyManager::setScheduler(Scheduler* scheduler) {
 void SafetyManager::requestKillSwitch() {
     // Latch the intent immediately so checkEvent() starts blocking new
     // executions on the very next event, before the hardware is even cut.
-    _kill_requested = true;
+    _requested_state = REQ_KILL;
 }
 
 void SafetyManager::requestRearm() {
-    _rearm_requested = true;
+    _requested_state = REQ_REARM;
 }
 
 void SafetyManager::requestRescan() {
-    _rescan_requested = true;
+    _requested_state = REQ_RESCAN;
+}
+
+void SafetyManager::requestBusFrequency(uint8_t bus_id, uint16_t hz) {
+    if (bus_id == 0) _req_freq_bus0 = hz;
+    else if (bus_id == 1) _req_freq_bus1 = hz;
 }
 
 void SafetyManager::processPendingRequests(ActuatorConfig* actuators[], uint8_t count) {
@@ -71,16 +76,33 @@ void SafetyManager::processPendingRequests(ActuatorConfig* actuators[], uint8_t 
     _cached_actuators      = actuators;
     _cached_actuator_count = count;
 
-    // Rescan implies a kill (outputs disabled, registers cleared) first.
-    if (_rescan_requested.exchange(false)) {
-        doRescan();
+    // AUDIT FIX: one state transition per pass — no ambiguous ordering.
+    uint8_t req = _requested_state.exchange(REQ_NONE);
+    switch (req) {
+        case REQ_KILL:
+            activateKillSwitch();
+            break;
+        case REQ_RESCAN:
+            doRescan();
+            break;
+        case REQ_REARM:
+            // AUDIT FIX: refuse a re-arm while a fault/overcurrent is latched —
+            // the operator must clear the cause first (re-request rearm).
+            if (_global_state.over_current) {
+                Serial.println("[SAFETY] Re-arm refused — over-current still latched");
+            } else {
+                deactivateKillSwitch();
+            }
+            break;
+        default:
+            break;
     }
-    if (_kill_requested.exchange(false)) {
-        activateKillSwitch();
-    }
-    if (_rearm_requested.exchange(false)) {
-        deactivateKillSwitch();
-    }
+
+    // Pending bus frequency changes (independent of the state machine).
+    uint16_t f0 = _req_freq_bus0.exchange(0);
+    if (f0 != 0) applyBusFrequency(0, f0);
+    uint16_t f1 = _req_freq_bus1.exchange(0);
+    if (f1 != 0) applyBusFrequency(1, f1);
 }
 
 void SafetyManager::doRescan() {
@@ -93,6 +115,20 @@ void SafetyManager::doRescan() {
     Serial.println("[SAFETY] I2C rescan complete (Core 1) — outputs remain disabled");
 }
 
+void SafetyManager::applyBusFrequency(uint8_t bus_id, uint16_t hz) {
+    if (bus_id > 1) return;
+    // AUDIT FIX (P0.3): change the prescaler on Core 1 with the bus disabled, so
+    // it never races an in-flight actuator PWM write.
+    bool was_killed = _global_state.kill_switch_active;
+    _pca.enableBus(bus_id, false);         // OE high on this bus
+    _pca.setFrequency(bus_id, hz);         // rewrite prescaler on every PCA
+    // Restore OE only if the system is armed AND the bus is enabled in config.
+    if (!was_killed && _pca.getBusConfig(bus_id).enabled) {
+        _pca.enableBus(bus_id, true);
+    }
+    Serial.printf("[SAFETY] Bus %d PWM frequency set to %d Hz (Core 1)\n", bus_id, hz);
+}
+
 // ============================================================================
 // Pre-event check
 // ============================================================================
@@ -100,7 +136,8 @@ void SafetyManager::doRescan() {
 bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEvent& event) {
     // Kill switch active OR a kill has just been requested (from the web) =
     // block everything immediately, even before the hardware is physically cut.
-    if (_global_state.kill_switch_active || _kill_requested.load()) return false;
+    if (_global_state.kill_switch_active ||
+        _requested_state.load() == REQ_KILL) return false;
 
     uint8_t id = actuator.id;
     if (id >= MAX_ACTUATORS) return false;
@@ -135,14 +172,14 @@ bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEv
                          ? SAFETY_SOLENOID_CURRENT_MA : SAFETY_SERVO_CURRENT_MA;
         }
 
-        // Check global polyphony (projected)
+        // AUDIT FIX (P0.4): polyphony is a HARD safety limit. Previously only
+        // priority>0 notes were rejected, but normal notes are priority 0, so
+        // the cap could be exceeded without bound. There is no voice-stealing,
+        // so the only safe action is to reject once the limit is reached.
         if (_global_state.active_actuator_count + 1 > _max_polyphony) {
-            // Graceful degradation: reject low-priority notes
-            if (event.priority > 0) {
-                Serial.printf("[SAFETY] Max polyphony reached (%d), event rejected\n",
-                              _max_polyphony);
-                return false;
-            }
+            Serial.printf("[SAFETY] Max polyphony reached (%d), event rejected\n",
+                          _max_polyphony);
+            return false;
         }
 
         // Check total estimated current (projected)
@@ -263,9 +300,12 @@ void SafetyManager::activateKillSwitch() {
 void SafetyManager::deactivateKillSwitch() {
     _global_state.kill_switch_active = false;
     _global_state.over_current       = false;
-    _pca.enableBus(0, true);
-    _pca.enableBus(1, true);
-    Serial.println("[SAFETY] Kill switch deactivated — outputs re-enabled");
+    // AUDIT FIX: only re-enable buses that are actually enabled in their
+    // configuration — a disabled bus must stay off after a re-arm.
+    for (uint8_t b = 0; b < 2; b++) {
+        _pca.enableBus(b, _pca.getBusConfig(b).enabled);
+    }
+    Serial.println("[SAFETY] Kill switch deactivated — enabled outputs re-armed");
 }
 
 bool SafetyManager::isKillSwitchActive() const {
@@ -416,19 +456,21 @@ void SafetyManager::updateCurrentEstimate(ActuatorConfig* actuators[], uint8_t c
 
     for (uint8_t i = 0; i < count; i++) {
         if (actuators[i] != nullptr && actuators[i]->enabled) {
+            // AUDIT FIX (P0.2): bounds-check the ID before indexing
+            // _actuator_safety[] — a config with a bogus ID (128..255) would
+            // otherwise write out of bounds.
+            uint8_t id = actuators[i]->id;
+            if (id >= MAX_ACTUATORS) continue;
+
             uint16_t current = estimateActuatorCurrent(*actuators[i]);
-            _actuator_safety[actuators[i]->id].estimated_current_ma = current;
+            _actuator_safety[id].estimated_current_ma = current;
 
             total_ma += current;
             if (actuators[i]->state.active) {
                 active_count++;
-
                 // Update the active time in the window
-                uint8_t id = actuators[i]->id;
-                if (id < MAX_ACTUATORS) {
-                    _actuator_safety[id].active_time_us +=
-                        SAFETY_CHECK_INTERVAL_MS * 1000;
-                }
+                _actuator_safety[id].active_time_us +=
+                    SAFETY_CHECK_INTERVAL_MS * 1000;
             }
         }
     }

@@ -32,6 +32,12 @@ public:
     // Rebuilds lookup tables from config
     void refreshConfig();
 
+    // AUDIT FIX: release every currently-active actuator by scheduling a
+    // NOTE_OFF for it. Called when a MIDI source disappears (RTP client gone,
+    // WiFi/WebSocket dropped) so Key / Hit-and-Hold outputs are not left
+    // energised with no one to release them.
+    void allNotesOff();
+
     // Number of successfully dispatched messages
     uint32_t getDispatchedCount() const;
 

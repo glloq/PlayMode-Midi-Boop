@@ -39,6 +39,8 @@ static void onAppleMidiConnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc, const 
 
 static void onAppleMidiDisconnected(const APPLEMIDI_NAMESPACE::ssrc_t& ssrc) {
     Serial.println("[RTP-MIDI] Disconnected");
+    // AUDIT FIX: the remote controller vanished — release any held notes.
+    if (g_transportInstance != nullptr) g_transportInstance->notifyDisconnect();
 }
 
 static void onAppleMidiNoteOn(byte channel, byte note, byte velocity) {
@@ -101,10 +103,19 @@ MidiTransport::MidiTransport(JitterBuffer& jitterBuffer)
       _serialActive(false),
       _udpActive(false),
       _rtpActive(false),
+      _disconnectHandler(nullptr),
       _serialBytes(0),
       _udpPackets(0),
       _rtpPackets(0) {
     memset(&_config, 0, sizeof(_config));
+}
+
+void MidiTransport::setDisconnectHandler(void (*handler)()) {
+    _disconnectHandler = handler;
+}
+
+void MidiTransport::notifyDisconnect() {
+    if (_disconnectHandler != nullptr) _disconnectHandler();
 }
 
 bool MidiTransport::begin(const MidiInputConfig& config) {

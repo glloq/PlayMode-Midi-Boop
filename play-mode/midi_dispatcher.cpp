@@ -68,6 +68,27 @@ void MidiDispatcher::refreshConfig() {
     Serial.printf("[MIDI-DISP] Config reloaded: %d instruments mapped\n", count);
 }
 
+void MidiDispatcher::allNotesOff() {
+    ActuatorConfig* actuators = _config.getActuators();
+    uint8_t count = _config.getActuatorCount();
+    uint8_t released = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        if (!actuators[i].state.active) continue;
+        SchedulerEvent evt = {};
+        evt.trigger_time_us = (uint32_t)esp_timer_get_time();
+        evt.actuator_id = actuators[i].id;
+        evt.action = ACTION_NOTE_OFF;
+        evt.velocity = 0;
+        evt.priority = 0;
+        evt.behavior_override = 0xFF;
+        evt.instrument_index  = 0xFF;
+        if (_scheduler.pushEvent(evt)) released++;
+    }
+    if (released > 0) {
+        Serial.printf("[MIDI-DISP] All notes off — released %d active actuator(s)\n", released);
+    }
+}
+
 // ============================================================================
 // AUDIT FIX (P0.3): channel matching — exact channel OR Omni. Internal
 // channels are always 0..15; Omni is the distinct MIDI_CHANNEL_OMNI_INTERNAL
@@ -133,13 +154,9 @@ bool MidiDispatcher::dispatchNoteOnToInstrument(uint8_t inst_idx, const MidiMess
     // Apply the velocity curve
     uint8_t velocity = applyVelocityCurve(inst_idx, msg.data2);
 
-    // Phase 5: check energy budget before activation
-    if (_powerManager && act_config) {
-        if (!_powerManager->canActivate(*act_config, inst_idx, velocity)) {
-            _power_rejected_count++;
-            return false;
-        }
-    }
+    // AUDIT FIX (core): the energy-budget admission decision is now made by the
+    // scheduler on Core 1 (PowerManager is single-core owned). The dispatcher
+    // only produces the activation request.
 
     SchedulerEvent evt = {};
     evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;

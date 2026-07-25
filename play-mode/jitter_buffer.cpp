@@ -3,6 +3,13 @@
 // ============================================================================
 // PlayMode — MIDI Jitter Buffer (implementation)
 // ============================================================================
+//
+// AUDIT NOTE: this is a fixed *delay* FIFO, not a reordering buffer. It holds
+// each message for `depth_ms` after arrival (absorbing arrival-time jitter) but
+// does NOT sort by timestamp, so it cannot correct genuinely out-of-order
+// delivery. The UI presents it as "network delay" to reflect this. A true
+// reorderer would keep the messages sorted by timestamp and pop the earliest
+// once it is due.
 
 JitterBuffer::JitterBuffer()
     : _head(0),

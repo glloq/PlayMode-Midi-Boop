@@ -44,6 +44,12 @@ public:
     // Delivers a parsed message to the jitter buffer (public for AppleMIDI callbacks)
     void deliverMessage(MidiMessage& msg, MidiTransportSource source);
 
+    // AUDIT FIX: handler invoked when an RTP-MIDI session disconnects, so held
+    // notes from that source can be released (set to MidiDispatcher::allNotesOff
+    // via a thin wrapper in setup).
+    void setDisconnectHandler(void (*handler)());
+    void notifyDisconnect();
+
 private:
     JitterBuffer& _jitterBuffer;
     MidiInputConfig _config;
@@ -59,6 +65,7 @@ private:
 
     // RTP-MIDI (AppleMIDI)
     bool _rtpActive;
+    void (*_disconnectHandler)();
 
     // Stats
     uint32_t _serialBytes;

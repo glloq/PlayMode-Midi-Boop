@@ -167,6 +167,10 @@
 
 // --- Config file ---
 #define CONFIG_FILE_PATH        "/config.json"
+// AUDIT FIX: atomic save — write to the temp file, then rename over the main
+// file, keeping the previous good copy as a backup.
+#define CONFIG_TMP_PATH         "/config.tmp"
+#define CONFIG_BAK_PATH         "/config.bak"
 // AUDIT FIX (P1.1): v8 migrates the MIDI channel representation. Pre-v8 files
 // stored the UI convention (0=Omni, 1..16); v8 stores the internal form
 // (0..15, or MIDI_CHANNEL_OMNI_INTERNAL). Also adds WiFiConfig::ap_password.

@@ -58,21 +58,15 @@ bool PowerManager::canActivate(const ActuatorConfig& actuator,
     if (!actuator.enabled)   return false;
 
     // --- Global polyphony check ---
+    // AUDIT FIX (P0.4): the maximum polyphony is a HARD cap. The previous
+    // "smart rejection" let a velocity >= 100 note through even at the limit,
+    // which exceeded it (there is no voice-stealing to free a slot first).
+    // Reject unconditionally once the cap is reached.
     if (_stats.global_active_count >= _budget.global_max_polyphony) {
-        if (!_budget.smart_rejection) {
-            // Strict rejection: refuse any additional note
-            _stats.total_rejected++;
-            Serial.printf("[POWER] Max global polyphony (%d) — note rejected\n",
-                          _budget.global_max_polyphony);
-            return false;
-        }
-        // Smart rejection: accept only if velocity >= 100 (high priority)
-        if (velocity < 100) {
-            _stats.total_rejected++;
-            Serial.printf("[POWER] Max polyphony + smart rejection — velocity %d rejected\n",
-                          velocity);
-            return false;
-        }
+        _stats.total_rejected++;
+        Serial.printf("[POWER] Max global polyphony (%d) — note rejected\n",
+                      _budget.global_max_polyphony);
+        return false;
     }
 
     // --- Per-instrument polyphony check ---

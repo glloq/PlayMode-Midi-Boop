@@ -435,16 +435,18 @@ void WebServer::setupAPIRoutes() {
     auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
             if (!requireAuth(req)) return;
-            if (!_pca || !_config) { req->send(500); return; }
+            if (!_safety || !_config) { req->send(500); return; }
             uint8_t bus_id = json["bus_id"] | 0xFF;
             uint16_t freq  = json["freq_pwm"] | 0;
-            if (bus_id > 1 || freq == 0) {
+            if (bus_id > 1 || freq < 24) {
                 req->send(400, "application/json",
-                          "{\"error\":\"invalid bus_id or freq_pwm\"}");
+                          "{\"error\":\"invalid bus_id or freq_pwm (>= 24 Hz)\"}");
                 return;
             }
-            _pca->setFrequency(bus_id, freq);
-            // Update config for persistence
+            // AUDIT FIX (P0.3): defer the prescaler write to Core 1 (the sole
+            // I²C/PCA owner) instead of writing from the web task.
+            _safety->requestBusFrequency(bus_id, freq);
+            // Persist the requested value.
             _config->getBuses()[bus_id].pwm_frequency = freq;
             req->send(200, "application/json", "{\"ok\":true}");
         });
@@ -869,9 +871,25 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
         return;
     }
 
+    // AUDIT FIX (P0.2): reject an out-of-range ID or an unknown type BEFORE it
+    // can reach the runtime tables (a bogus ID would index _actuator_safety[]
+    // out of bounds; a bad type would hit no behaviour handler).
+    int raw_id   = doc["id"]   | -1;
+    int raw_type = doc["type"] | -1;
+    if (raw_id < 0 || raw_id >= MAX_ACTUATORS) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid actuator id (0.." "127" ")\"}");
+        return;
+    }
+    if (raw_type != ACT_SERVO && raw_type != ACT_SOLENOID) {
+        request->send(400, "application/json",
+                      "{\"error\":\"invalid actuator type (0=servo,1=solenoid)\"}");
+        return;
+    }
+
     ActuatorConfig act = {};
-    act.id           = doc["id"] | 0;
-    act.type         = (ActuatorType)(uint8_t)(doc["type"] | 0);
+    act.id           = (uint8_t)raw_id;
+    act.type         = (ActuatorType)(uint8_t)raw_type;
     act.bus_id       = doc["bus_id"] | 0;
     act.pca_address  = doc["pca_addr"] | PCA_BASE_ADDRESS;
     act.pca_channel  = doc["pca_ch"] | 0;
@@ -924,6 +942,24 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     // underneath it. The RAII guard guarantees the unlock and its locked()
     // result IS checked — if the lock times out the edit is refused rather than
     // performed unguarded.
+    // AUDIT FIX (P0.2): reject a duplicate output target (same bus + PCA
+    // address + channel as a DIFFERENT actuator) — two actuators driving one
+    // physical channel is a wiring/config error.
+    {
+        ActuatorConfig* existing = _config->getActuators();
+        uint8_t ecount = _config->getActuatorCount();
+        for (uint8_t i = 0; i < ecount; i++) {
+            if (existing[i].id != act.id &&
+                existing[i].bus_id == act.bus_id &&
+                existing[i].pca_address == act.pca_address &&
+                existing[i].pca_channel == act.pca_channel) {
+                request->send(400, "application/json",
+                              "{\"error\":\"another actuator already uses this bus/address/channel\"}");
+                return;
+            }
+        }
+    }
+
     bool added = false;
     {
         ActuatorLockGuard guard(*_config);
@@ -1105,7 +1141,10 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
         }
     }
 
-    // Reload the dispatcher lookup tables
+    // AUDIT FIX: keep the instrument's legacy actuator_ids/midi_notes cache in
+    // sync with the routing note_map (single source of truth), then reload the
+    // dispatcher lookup tables.
+    _config->rebuildInstrumentFromRouting(inst_idx);
     _dispatcher->refreshConfig();
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1413,6 +1452,12 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
             break;
         case WS_EVT_DISCONNECT:
             Serial.printf("[WEB] WS client #%u disconnected\n", client->id());
+            // AUDIT FIX: a virtual-piano client that drops mid-note would leave
+            // Key / Hit-and-Hold actuators held. When the last client leaves,
+            // release everything.
+            if (_ws.count() == 0 && _dispatcher) {
+                _dispatcher->allNotesOff();
+            }
             break;
         case WS_EVT_DATA: {
             // Incoming WebSocket commands (future: virtual piano test)
@@ -1498,7 +1543,9 @@ void WebServer::buildStatusJSON(String& output) {
         JsonObject disp = doc["dispatcher"].to<JsonObject>();
         disp["dispatched"]    = _dispatcher->getDispatchedCount();
         disp["dropped"]       = _dispatcher->getDroppedCount();
-        disp["pwr_rejected"]  = _dispatcher->getPowerRejectedCount();
+        // AUDIT FIX (core): power rejections are now counted by the PowerManager
+        // (the scheduler makes the admission decision on Core 1).
+        disp["pwr_rejected"]  = _power ? _power->getStats().total_rejected : 0;
     }
 
     // Safety
