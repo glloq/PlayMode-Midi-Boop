@@ -51,6 +51,9 @@ a{color:var(--accent);text-decoration:none}
 .mstate-disarmed{background:rgba(210,153,34,.18);color:var(--yellow);border:1px solid var(--yellow)}
 .mstate-fault{background:rgba(248,81,73,.18);color:var(--red);border:1px solid var(--red)}
 .mstate-unknown{background:var(--bg2);color:var(--fg2);border:1px solid var(--border)}
+#toast-container{position:fixed;top:12px;right:12px;z-index:9999;display:flex;
+  flex-direction:column;gap:8px;max-width:min(360px,90vw);pointer-events:none}
+#toast-container .alert{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.35)}
 
 nav{background:var(--bg2);border-bottom:1px solid var(--border);
   display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -307,12 +310,17 @@ tr:hover td{background:var(--bg2)}
   </div>
   <div class="status">
     <span class="dot" id="ws-dot"></span>
+    <span id="ws-status" style="font-size:11px;color:var(--fg2)">Connecting…</span>
   </div>
   <!-- AUDIT FIX (UX): permanent machine state + arm/kill control in the header -->
   <span id="machine-state" class="mstate mstate-unknown" title="Output state">—</span>
   <button id="arm-btn" class="btn sm" onclick="toggleArm()" title="Arm or disable the outputs" style="display:none">Arm</button>
   <button class="gear-btn" onclick="showPage('settings')" title="System settings">&#9881;</button>
 </div>
+
+<!-- AUDIT FIX (UI-P1): global toast container, outside the pages, so messages
+     are visible on every page (not only the Instrument page). -->
+<div id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
 <!-- Navigation -->
 <nav id="main-nav">
@@ -1125,14 +1133,18 @@ function connectWS() {
     // AUDIT FIX: reset log counter to -1 to force a refresh
     // on the first message (handles case of server restart + already connected client)
     logLastCount = -1;
-    document.getElementById('ws-dot').className = 'dot';
-    document.getElementById('ws-status').textContent = 'Connected';
+    const dot = document.getElementById('ws-dot');
+    if (dot) dot.className = 'dot';
+    el('ws-status', 'Connected');   // AUDIT FIX (UI-P0): null-safe, was crashing
   };
 
   ws.onclose = () => {
     wsConnected = false;
-    document.getElementById('ws-dot').className = 'dot off';
-    document.getElementById('ws-status').textContent = 'Disconnected';
+    const dot = document.getElementById('ws-dot');
+    if (dot) dot.className = 'dot off';
+    // AUDIT FIX (UI-P0): use the null-safe helper — a missing #ws-status used to
+    // throw here BEFORE the reconnect was scheduled, so it never reconnected.
+    el('ws-status', 'Disconnected');
     setTimeout(connectWS, 2000);
   };
 
@@ -1182,8 +1194,16 @@ async function toggleArm() {
     if (!await appConfirm('Disable outputs', 'Cut all outputs now (kill switch)?',
         {danger:true, confirmText:'Kill', icon:'🛑'})) return;
     await api('/api/killswitch', 'POST', {active: true});
+  } else if (currentMachineState === 'fault') {
+    // AUDIT FIX (P0.1): a latched fault must be ACKNOWLEDGED first (this does
+    // NOT re-arm). The state then becomes "disarmed" and a separate Arm press
+    // re-enables the outputs.
+    if (!await appConfirm('Acknowledge fault',
+        'Acknowledge the latched fault? Fix the cause first. Outputs stay OFF until you arm them.',
+        {danger:true, confirmText:'Acknowledge', icon:'⚠️'})) return;
+    await api('/api/fault/ack', 'POST');
   } else {
-    // disarmed OR fault: re-arm (backend refuses re-arm while over-current is latched)
+    // disarmed → arm
     if (!await appConfirm('Arm outputs', 'Re-enable the outputs? Make sure the machine is clear.',
         {confirmText:'Arm', icon:'⚡'})) return;
     await api('/api/killswitch', 'POST', {active: false});
@@ -2421,9 +2441,10 @@ async function loadPower() {
 }
 
 async function savePowerBudget() {
-  await api('/api/power/budget', 'POST', {
+  const r = await api('/api/power/budget', 'POST', {
     max_polyphony: parseInt(document.getElementById('pw-poly').value)
   });
+  if (!r || !r.ok) return;   // AUDIT FIX (UI-P1): don't claim success on error
   toast('Polyphony updated', 'ok');
   loadPower();
 }
@@ -2442,13 +2463,14 @@ async function loadSafety() {
 }
 
 async function saveSafetyConfig() {
-  await api('/api/safety', 'POST', {
+  const r = await api('/api/safety', 'POST', {
     max_duty_pct: parseInt(document.getElementById('sf-duty').value),
     max_freq_hz: parseInt(document.getElementById('sf-freq').value),
     watchdog_ms: parseInt(document.getElementById('sf-watchdog').value),
     max_polyphony: parseInt(document.getElementById('pw-poly').value)
   });
-  toast('Limits applied', 'ok');
+  if (!r || !r.ok) return;   // AUDIT FIX (UI-P1)
+  toast('Limits applied (use Save to flash to keep them)', 'ok');
 }
 
 async function toggleKillSwitch(on) {
@@ -2480,8 +2502,10 @@ async function saveWiFiConfig() {
     ap_fallback: document.getElementById('set-ap-fallback').value === '1',
     enabled: true
   });
-  if (resp && resp.error) {
-    appAlert('Error', resp.error, {icon:'\u274c'});
+  // AUDIT FIX (UI-P1): api() returns null on any error (already toasted) \u2014 do
+  // not claim success in that case.
+  if (!resp || !resp.ok) {
+    if (resp && resp.error) appAlert('Error', resp.error, {icon:'\u274c'});
     return;
   }
   appAlert('WiFi saved', 'Restart the device to apply the new settings.', {icon:'\ud83d\udce1'});
@@ -2518,8 +2542,23 @@ async function loadBuses() {
 }
 
 async function setBusPwmFreq(busId, freq) {
-  await api('/api/bus/pwm', 'POST', {bus_id: busId, freq_pwm: parseInt(freq)});
-  toast('PWM frequency bus ' + busId + ' set to ' + freq + ' Hz', 'ok');
+  const hz = parseInt(freq);
+  // AUDIT FIX (P0.6): a servo needs ~50 Hz — refuse a high frequency on a bus
+  // that drives one (it would destroy the pulse-width mapping).
+  const hasServo = (actuators || []).some(a => a.bus_id === busId && a.type === 0);
+  if (hasServo && hz > 130) {
+    appAlert('Frequency refused',
+      'Bus ' + busId + ' drives a servo. Servos require ~50 Hz; ' + hz + ' Hz would damage the motion. Move solenoids to a separate bus for higher frequencies.',
+      {icon:'⚠️'});
+    loadBuses();  // revert the select
+    return;
+  }
+  if (!await appConfirm('Change PWM frequency',
+      'Changing the bus frequency disables its outputs and recomputes rest positions. Continue?',
+      {confirmText:'Change', icon:'⚡'})) { loadBuses(); return; }
+  const r = await api('/api/bus/pwm', 'POST', {bus_id: busId, freq_pwm: hz});
+  if (!r || !r.ok) return;   // AUDIT FIX (UI-P1)
+  toast('PWM frequency bus ' + busId + ' set to ' + hz + ' Hz', 'ok');
 }
 
 async function scanI2C() {
@@ -2744,10 +2783,13 @@ function startCalPoll() {
 }
 
 function toast(msg, type) {
-  const z = document.getElementById('alert-zone');
+  // AUDIT FIX (UI-P1): render into the always-visible global container (falls
+  // back to the old in-page zone if needed).
+  const z = document.getElementById('toast-container') || document.getElementById('alert-zone');
   if (!z) return;
   const div = document.createElement('div');
   div.className = 'alert ' + (type === 'ok' ? 'ok' : type === 'error' ? 'danger' : 'warn');
+  div.setAttribute('role', type === 'error' ? 'alert' : 'status');
   div.textContent = msg;
   z.appendChild(div);
   setTimeout(() => div.remove(), 4000);

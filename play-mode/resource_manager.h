@@ -55,9 +55,10 @@ public:
 
     // Called right after the engine executed the event, with the actuator's
     // active state before/after. Allocates on a false→true transition, releases
-    // on true→false.
+    // on true→false. The event carries the instrument, velocity and behaviour
+    // override needed for an accurate estimate.
     void observe(const ActuatorConfig& actuator, bool was_active, bool is_active,
-                 uint8_t instrument_index, uint8_t velocity);
+                 const SchedulerEvent& event);
 
     // Periodic reconciliation from the real actuator states (rate-limited
     // internally). Also runs watchdogs, degradation hysteresis and the
@@ -74,8 +75,14 @@ public:
     void requestKillSwitch();     // from web (Core 0) — raises an atomic flag
     void requestRearm();
     void requestRescan();
+    void requestAcknowledge();    // clear a latched fault (does NOT re-arm)
     void requestBusFrequency(uint8_t bus_id, uint16_t hz);
     void processPendingRequests(ActuatorConfig* actuators[], uint8_t count);
+
+    // AUDIT FIX (P0.2): a safety-critical hardware write failed (PCA missing /
+    // I²C error). Latch a fault and cut everything. Callable from Core 1.
+    void latchHardwareFault(const char* reason);
+    bool isFaultLatched() const { return _global_state.fault_latched; }
 
     // ------------------------------------------------------------------------
     // Accessors (web / status)
@@ -135,9 +142,13 @@ private:
 
     uint32_t _last_check_us;
 
-    // Cross-task requests.
-    enum RequestedSafetyState : uint8_t { REQ_NONE = 0, REQ_KILL, REQ_RESCAN, REQ_REARM };
-    std::atomic<uint8_t>  _requested_state;
+    // AUDIT FIX (P0.3): INDEPENDENT request flags (not a single "last order
+    // wins" variable). A re-arm can no longer overwrite a pending kill; Core 1
+    // processes them in strict priority order (kill > rescan > ack > rearm).
+    std::atomic<bool>     _kill_requested;
+    std::atomic<bool>     _rearm_requested;
+    std::atomic<bool>     _rescan_requested;
+    std::atomic<bool>     _ack_requested;
     std::atomic<uint16_t> _req_freq_bus0;
     std::atomic<uint16_t> _req_freq_bus1;
 
@@ -157,11 +168,12 @@ private:
     void resetActuatorStates();
     void syncDerivedStats();
 
-    // ONE current model: estimate an actuator's draw. When `assume_active` is
-    // true (admission), estimate from type + velocity; otherwise from the live
-    // state (hold vs full for solenoids).
-    uint16_t estimateCurrent(const ActuatorConfig& actuator, uint8_t velocity,
-                             bool assume_active) const;
+    // ONE current model: estimate an actuator's draw for the EFFECTIVE
+    // behaviour (per-note override or the actuator default). When
+    // `assume_active` is true (admission), estimate from type + velocity;
+    // otherwise from the live state (hold vs full for solenoids).
+    uint16_t estimateCurrent(const ActuatorConfig& actuator, uint8_t behavior,
+                             uint8_t velocity, bool assume_active) const;
 };
 
 #endif // RESOURCE_MANAGER_H

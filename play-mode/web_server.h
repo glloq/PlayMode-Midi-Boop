@@ -135,6 +135,13 @@ private:
     void handlePostConfigImport(AsyncWebServerRequest* request,
                                 uint8_t* data, size_t len);
 
+    // AUDIT FIX (P0.5): before any full-config swap (import / factory reset) the
+    // physical outputs MUST be cut first. This raises the kill request and waits
+    // (bounded, WITHOUT holding the actuator lock so Core 1 can execute it) for
+    // the kill switch to be confirmed active (OE HIGH). Returns true once the
+    // outputs are confirmed cut, false on timeout.
+    bool waitForOutputsCut(uint32_t timeout_ms);
+
     // POST — actions
     void handlePostSave(AsyncWebServerRequest* request);
     void handlePostDefaults(AsyncWebServerRequest* request);

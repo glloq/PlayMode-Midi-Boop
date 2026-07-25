@@ -34,6 +34,19 @@ void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent
         actuator.state.generation++;
     }
 
+    // AUDIT FIX (P0.8): behaviour-INDEPENDENT safe release. Used by the general
+    // "all notes off" so a held output is released whatever behaviour (default
+    // or per-note override) drove it. Only clears the active flag if the
+    // hardware write actually succeeded (P0.2).
+    if (event.action == ACTION_FORCE_SAFE_OFF) {
+        bool ok = (actuator.type == ACT_SOLENOID)
+                ? setSolenoidPWM(actuator, 0)
+                : setServoAngle(actuator, actuator.angle_initial);
+        if (ok) actuator.state.active = false;
+        actuator.state.last_trigger_us = (uint32_t)esp_timer_get_time();
+        return;
+    }
+
     // AUDIT FIX (P1.5): behaviour override in effect for this activation.
     _current_behavior_override = event.behavior_override;
     uint8_t effective_behavior = (event.behavior_override != 0xFF)
@@ -313,12 +326,13 @@ void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint
     if (!sent) {
         Serial.printf("[ENGINE] Return queue full for actuator %d — applying "
                       "safe return immediately\n", act.id);
-        if (act.type == ACT_SERVO) {
-            setServoAngle(act, target_value);
-            act.state.active = false;
-        } else {
-            setSolenoidPWM(act, target_value);
-            if (target_value == 0) act.state.active = false;
+        // AUDIT FIX (P0.2): only clear the active flag if the hardware write
+        // actually succeeded; otherwise leave it active so the ResourceManager
+        // watchdog follows up (and can latch a hardware fault).
+        bool ok = (act.type == ACT_SERVO) ? setServoAngle(act, target_value)
+                                          : setSolenoidPWM(act, target_value);
+        if (ok) {
+            if (act.type == ACT_SERVO || target_value == 0) act.state.active = false;
         }
         // Bump generation so any later duplicate of this return is ignored.
         act.state.generation++;

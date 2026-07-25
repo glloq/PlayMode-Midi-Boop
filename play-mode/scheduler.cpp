@@ -328,8 +328,7 @@ void Scheduler::processReadyEvents() {
                 _processed_count++;
 
                 if (_resources != nullptr) {
-                    _resources->observe(*actuator, was_active, is_active,
-                                        event.instrument_index, event.velocity);
+                    _resources->observe(*actuator, was_active, is_active, event);
                 }
             }
             // Event blocked by the resource gate: silently ignored
