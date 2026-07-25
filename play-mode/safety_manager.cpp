@@ -11,6 +11,9 @@ const ActuatorSafetyState SafetyManager::_default_safety_state = {};
 SafetyManager::SafetyManager(PCADriver& pca)
     : _pca(pca),
       _scheduler(nullptr),
+      _kill_requested(false),
+      _rearm_requested(false),
+      _rescan_requested(false),
       _max_duty_cycle(SAFETY_MAX_DUTY_CYCLE),
       _max_freq_hz(SAFETY_MAX_FREQ_HZ),
       _watchdog_ms(SAFETY_WATCHDOG_MS),
@@ -45,12 +48,59 @@ void SafetyManager::setScheduler(Scheduler* scheduler) {
 }
 
 // ============================================================================
+// AUDIT FIX (P0.1/P0.2): cross-task requests. The web task only raises a flag;
+// the scheduler task (Core 1) does the real work in processPendingRequests().
+// ============================================================================
+
+void SafetyManager::requestKillSwitch() {
+    // Latch the intent immediately so checkEvent() starts blocking new
+    // executions on the very next event, before the hardware is even cut.
+    _kill_requested = true;
+}
+
+void SafetyManager::requestRearm() {
+    _rearm_requested = true;
+}
+
+void SafetyManager::requestRescan() {
+    _rescan_requested = true;
+}
+
+void SafetyManager::processPendingRequests(ActuatorConfig* actuators[], uint8_t count) {
+    // Cache the array so activateKillSwitch()/resetActuatorStates() can reach it.
+    _cached_actuators      = actuators;
+    _cached_actuator_count = count;
+
+    // Rescan implies a kill (outputs disabled, registers cleared) first.
+    if (_rescan_requested.exchange(false)) {
+        doRescan();
+    }
+    if (_kill_requested.exchange(false)) {
+        activateKillSwitch();
+    }
+    if (_rearm_requested.exchange(false)) {
+        deactivateKillSwitch();
+    }
+}
+
+void SafetyManager::doRescan() {
+    // 1. Kill: OE high, registers cleared, queues flushed, states reset.
+    activateKillSwitch();
+    // 2/3/4/5. Rebuild the drivers and restore per-bus PWM frequencies (the
+    // driver applies its stored pwm_frequency to each recreated PCA).
+    _pca.rescanAll();
+    // 6. Outputs stay disabled (kill latched) until a manual re-arm.
+    Serial.println("[SAFETY] I2C rescan complete (Core 1) — outputs remain disabled");
+}
+
+// ============================================================================
 // Pre-event check
 // ============================================================================
 
 bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEvent& event) {
-    // Kill switch active = block everything
-    if (_global_state.kill_switch_active) return false;
+    // Kill switch active OR a kill has just been requested (from the web) =
+    // block everything immediately, even before the hardware is physically cut.
+    if (_global_state.kill_switch_active || _kill_requested.load()) return false;
 
     uint8_t id = actuator.id;
     if (id >= MAX_ACTUATORS) return false;
@@ -71,8 +121,22 @@ bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEv
             return false;
         }
 
-        // Check global polyphony
-        if (_global_state.active_actuator_count >= _max_polyphony) {
+        // AUDIT FIX (P0.3): reserve resources PER EVENT. The scheduler executes
+        // every due event before update() recomputes the aggregates, so a burst
+        // of same-timestamp NOTE_ONs would otherwise all read the same stale
+        // counters and all be admitted. We therefore project this activation's
+        // cost onto the live counters right here; update() reconciles them
+        // authoritatively from the real actuator states each cycle.
+        uint16_t projected_ma = estimateActuatorCurrent(actuator);
+        if (projected_ma == 0) {
+            // estimateActuatorCurrent() returns 0 for an inactive actuator;
+            // estimate from the type so the reservation is meaningful.
+            projected_ma = (actuator.type == ACT_SOLENOID)
+                         ? SAFETY_SOLENOID_CURRENT_MA : SAFETY_SERVO_CURRENT_MA;
+        }
+
+        // Check global polyphony (projected)
+        if (_global_state.active_actuator_count + 1 > _max_polyphony) {
             // Graceful degradation: reject low-priority notes
             if (event.priority > 0) {
                 Serial.printf("[SAFETY] Max polyphony reached (%d), event rejected\n",
@@ -81,12 +145,17 @@ bool SafetyManager::checkEvent(const ActuatorConfig& actuator, const SchedulerEv
             }
         }
 
-        // Check total estimated current
-        if (_global_state.total_estimated_current_ma >= _max_total_current_ma) {
-            Serial.printf("[SAFETY] Max current reached (%dmA), event rejected\n",
-                          _global_state.total_estimated_current_ma);
+        // Check total estimated current (projected)
+        if (_global_state.total_estimated_current_ma + projected_ma > _max_total_current_ma) {
+            Serial.printf("[SAFETY] Max current reached (%u+%umA > %umA), event rejected\n",
+                          _global_state.total_estimated_current_ma, projected_ma,
+                          _max_total_current_ma);
             return false;
         }
+
+        // Reserve the projected cost so the next event this tick sees it.
+        _global_state.total_estimated_current_ma += projected_ma;
+        _global_state.active_actuator_count++;
     }
 
     // Update counters

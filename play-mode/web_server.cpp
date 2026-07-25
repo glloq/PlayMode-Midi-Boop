@@ -125,6 +125,7 @@ WebServer::WebServer(uint16_t port)
     , _calibrator(nullptr)
     , _testManager(nullptr)
     , _last_ws_broadcast_ms(0)
+    , _restart_at_ms(0)
 {
 }
 
@@ -178,6 +179,13 @@ void WebServer::stop() {
 
 void WebServer::update() {
     if (!_running) return;
+
+    // AUDIT FIX (P0.4): perform a pending factory-reset restart once the
+    // response has had time to flush.
+    if (_restart_at_ms != 0 && (int32_t)(millis() - _restart_at_ms) >= 0) {
+        Serial.println("[WEB] Restarting after factory reset...");
+        ESP.restart();
+    }
 
     _ws.cleanupClients();
 
@@ -910,29 +918,34 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
         if (act.behavior > SOL_HIT_AND_HOLD)    act.behavior     = SOL_FRAPPE;
     }
 
-    // AUDIT FIX (point B): hold the actuator lock across the add/update, the
-    // rest-position init (I²C) and the scheduler resync, so the real-time
-    // Scheduler on Core 1 never dereferences a slot that is being written or
-    // reshuffled underneath it.
-    _config->lockActuators();
-    bool added = _config->addActuator(act);
-    if (added) {
-        ActuatorConfig* actuators = _config->getActuators();
-        uint8_t count = _config->getActuatorCount();
-        for (uint8_t i = 0; i < count; i++) {
-            if (actuators[i].id == act.id) {
-                _engine->initActuator(actuators[i]);
-                break;
-            }
+    // AUDIT FIX (point B / P0.5): hold the actuator lock across the add/update,
+    // the rest-position init (I²C) and the scheduler resync, so the real-time
+    // Scheduler on Core 1 never dereferences a slot being written or reshuffled
+    // underneath it. The RAII guard guarantees the unlock and its locked()
+    // result IS checked — if the lock times out the edit is refused rather than
+    // performed unguarded.
+    bool added = false;
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json",
+                          "{\"error\":\"actuator configuration busy\"}");
+            return;
         }
-        // Rebuild the scheduler's actuator table from the config array. The
-        // previous per-actuator registerActuator() left stale and duplicate
-        // pointers after a delete-then-add (the config array shifts on
-        // removal), which double-counted current in the SafetyManager and
-        // could trip a false overcurrent kill switch.
-        if (_scheduler) _scheduler->syncActuators(actuators, count);
-    }
-    _config->unlockActuators();
+        added = _config->addActuator(act);
+        if (added) {
+            ActuatorConfig* actuators = _config->getActuators();
+            uint8_t count = _config->getActuatorCount();
+            for (uint8_t i = 0; i < count; i++) {
+                if (actuators[i].id == act.id) {
+                    _engine->initActuator(actuators[i]);
+                    break;
+                }
+            }
+            // Rebuild the scheduler's actuator table from the config array.
+            if (_scheduler) _scheduler->syncActuators(actuators, count);
+        }
+    }  // lock released here
 
     if (added) {
         request->send(200, "application/json", "{\"ok\":true}");
@@ -958,6 +971,15 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
     WiFiConfig wifi = {};
     strlcpy(wifi.ssid, doc["ssid"] | "", sizeof(wifi.ssid));
     strlcpy(wifi.password, doc["password"] | "", sizeof(wifi.password));
+    // AUDIT FIX (P1.9): configurable per-device AP password. Empty keeps the
+    // MAC-derived default; a non-empty value must be a valid WPA2 key (>= 8).
+    const char* ap_pw = doc["ap_password"] | "";
+    if (ap_pw[0] != '\0' && strlen(ap_pw) < 8) {
+        request->send(400, "application/json",
+                      "{\"error\":\"AP password must be >= 8 characters\"}");
+        return;
+    }
+    strlcpy(wifi.ap_password, ap_pw, sizeof(wifi.ap_password));
     strlcpy(wifi.hostname, doc["hostname"] | WIFI_DEFAULT_HOSTNAME,
             sizeof(wifi.hostname));
     wifi.enabled     = doc["enabled"] | true;
@@ -986,9 +1008,18 @@ void WebServer::handlePostMidi(AsyncWebServerRequest* request,
     midi.udp_enabled      = doc["udp_enabled"] | true;
     midi.rtp_enabled      = doc["rtp_enabled"] | true;
     midi.udp_port         = doc["udp_port"] | MIDI_UDP_PORT;
-    midi.rtp_port         = doc["rtp_port"] | MIDI_RTP_PORT;
+    // AUDIT FIX (P1.2): the AppleMIDI session port is fixed at compile time
+    // (APPLEMIDI_CREATE_INSTANCE) and cannot be rebound at runtime. Ignore any
+    // client-supplied rtp_port and pin it to the real value so the UI never
+    // presents a setting that silently has no effect.
+    midi.rtp_port         = MIDI_RTP_PORT;
     midi.jitter_buffer_ms = doc["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
     midi.serial_rx_pin    = doc["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+
+    // Keep raw UDP clear of the AppleMIDI control/data port pair.
+    if (midi.udp_port == midi.rtp_port || midi.udp_port == (uint16_t)(midi.rtp_port + 1)) {
+        midi.udp_port = MIDI_UDP_PORT;
+    }
 
     _config->setMidiInputConfig(midi);
 
@@ -1118,16 +1149,25 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
         return;
     }
 
+    // AUDIT FIX (P1.6): clamp every safety limit to a sane range so the API can
+    // never neuter the protections (duty 255%), instantly trip them
+    // (watchdog 0 ms, current 0 mA) or set a nonsensical value.
+    auto clampU = [](long v, long lo, long hi) -> long {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    };
+
     if (!doc["max_duty_pct"].isNull())
-        _safety->setMaxDutyCycle(doc["max_duty_pct"]);
+        _safety->setMaxDutyCycle((uint8_t)clampU(doc["max_duty_pct"] | 0, 1, 100));
     if (!doc["max_freq_hz"].isNull())
-        _safety->setMaxFrequency(doc["max_freq_hz"]);
+        _safety->setMaxFrequency((uint16_t)clampU(doc["max_freq_hz"] | 0, 1, 1000));
     if (!doc["watchdog_ms"].isNull())
-        _safety->setWatchdogTimeout(doc["watchdog_ms"]);
+        _safety->setWatchdogTimeout((uint16_t)clampU(doc["watchdog_ms"] | 0, 100, 60000));
     if (!doc["max_polyphony"].isNull())
-        _safety->setMaxPolyphony(doc["max_polyphony"]);
+        _safety->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
     if (!doc["max_current_ma"].isNull())
-        _safety->setMaxTotalCurrent(doc["max_current_ma"]);
+        _safety->setMaxTotalCurrent((uint16_t)clampU(doc["max_current_ma"] | 0, 100, 60000));
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1154,10 +1194,34 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
-    _config->loadDefaults();
+    // AUDIT FIX (P0.4): a factory reset must also stop the hardware and clear
+    // the scheduler, not just wipe the config. Sequence:
+    //   1. request the kill switch (blocks outputs immediately);
+    //   2. lock the actuator array (checked!) and swap in the defaults;
+    //   3. resync the scheduler's actuator table to empty;
+    //   4. persist the defaults;
+    //   5. reboot — at boot OE starts HIGH (outputs disabled) until the fresh
+    //      config is applied, satisfying "OE off until next start completes".
+    if (_safety) _safety->requestKillSwitch();
+
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json",
+                          "{\"error\":\"actuator configuration busy\"}");
+            return;
+        }
+        _config->loadDefaults();
+        if (_scheduler) _scheduler->syncActuators(nullptr, 0);
+        _config->save();
+    }  // lock released here
+
     if (_dispatcher) _dispatcher->refreshConfig();
-    logger.log(LOG_WARN, CAT_SYSTEM, "Factory reset applied");
-    request->send(200, "application/json", "{\"ok\":true}");
+    logger.log(LOG_WARN, CAT_SYSTEM, "Factory reset applied — restarting");
+
+    _restart_at_ms = millis() + 400;  // let the response flush, then reboot
+    request->send(200, "application/json",
+                  "{\"ok\":true,\"note\":\"factory reset — device is restarting\"}");
 }
 
 void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
@@ -1184,6 +1248,8 @@ void WebServer::handlePostTestActuator(AsyncWebServerRequest* request,
     evt.action      = note_on ? ACTION_NOTE_ON : ACTION_NOTE_OFF;
     evt.velocity    = velocity;
     evt.priority    = 0;
+    evt.behavior_override = 0xFF;   // manual test: actuator's own behaviour
+    evt.instrument_index  = 0xFF;
 
     if (_scheduler->pushEvent(evt)) {
         request->send(200, "application/json", "{\"ok\":true}");
@@ -1206,13 +1272,18 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
         return;
     }
 
+    // AUDIT FIX (P0.1): the web task must not touch the PCA9685 or the
+    // scheduler heap directly. Raise a request; the scheduler task (Core 1),
+    // sole owner of those resources, performs the actual stop / re-arm. New
+    // executions are blocked immediately because checkEvent() also consults the
+    // atomic kill-request flag.
     bool activate = doc["active"] | false;
     if (activate) {
-        _safety->activateKillSwitch();
-        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch ACTIVATED from web UI");
+        _safety->requestKillSwitch();
+        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch requested from web UI");
     } else {
-        _safety->deactivateKillSwitch();
-        logger.log(LOG_INFO, CAT_SAFETY, "Kill switch deactivated from web UI");
+        _safety->requestRearm();
+        logger.log(LOG_INFO, CAT_SAFETY, "Kill switch re-arm requested from web UI");
     }
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1220,32 +1291,18 @@ void WebServer::handlePostKillSwitch(AsyncWebServerRequest* request,
 
 void WebServer::handlePostScanI2C(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
-    if (!_pca) { request->send(500); return; }
+    if (!_safety) { request->send(500); return; }
 
-    JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
-
-    // AUDIT FIX: full re-entrant rescan (frees old driver objects, keeps driver
-    // indices stable) instead of two independent scanBus() calls.
-    _pca->rescanAll();
-    for (uint8_t b = 0; b < 2; b++) {
-        uint8_t found = _pca->getPCACount(b);
-        JsonObject obj = arr.add<JsonObject>();
-        obj["bus"] = b;
-        obj["pca_count"] = found;
-
-        BusConfig& bus = _pca->getBusConfig(b);
-        JsonArray addrs = obj["addresses"].to<JsonArray>();
-        for (uint8_t p = 0; p < bus.pca_count; p++) {
-            char hex[5];
-            snprintf(hex, sizeof(hex), "0x%02X", bus.pca_addresses[p]);
-            addrs.add(hex);
-        }
-    }
-
-    String output;
-    serializeJson(doc, output);
-    request->send(200, "application/json", output);
+    // AUDIT FIX (P0.2): the web task must not delete/recreate driver objects
+    // while the scheduler (Core 1) may be dereferencing a getDriver() pointer.
+    // Request the rescan; the scheduler runs it after activating the kill
+    // switch and leaves the outputs disabled until a manual re-arm. Results are
+    // read afterwards via GET /api/buses.
+    _safety->requestRescan();
+    logger.log(LOG_WARN, CAT_SYSTEM, "I2C rescan requested (outputs will be disabled)");
+    request->send(202, "application/json",
+                  "{\"ok\":true,\"note\":\"rescan scheduled; outputs disabled, "
+                  "re-arm required. Poll /api/buses for results\"}");
 }
 
 // ============================================================================
@@ -1293,31 +1350,37 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
 
     uint8_t id = request->getParam("id")->value().toInt();
 
-    // AUDIT FIX (point B): hold the actuator lock across the rest-position
-    // reset (I²C), the array-shifting removeActuator() and the scheduler
-    // resync — this is the removal path whose element shift most needs to be
-    // mutually exclusive with the Scheduler's Core 1 dereferences.
-    _config->lockActuators();
-
-    // Return the actuator to rest before deletion
-    ActuatorConfig* actuators = _config->getActuators();
-    uint8_t count = _config->getActuatorCount();
-    for (uint8_t i = 0; i < count; i++) {
-        if (actuators[i].id == id) {
-            if (_engine) _engine->resetActuator(actuators[i]);
-            break;
+    // AUDIT FIX (point B / P0.5): hold the actuator lock across the rest reset
+    // (I²C), the array-shifting removeActuator() and the scheduler resync. The
+    // RAII guard's locked() result IS checked — refuse rather than mutate
+    // unguarded if the lock times out.
+    bool removed = false;
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json",
+                          "{\"error\":\"actuator configuration busy\"}");
+            return;
         }
-    }
 
-    bool removed = _config->removeActuator(id);
-    if (removed && _scheduler) {
-        // removeActuator() shifts the config array, so the scheduler's
-        // pointers (and count) must be rebuilt to avoid pointing at stale or
-        // duplicated slots.
-        _scheduler->syncActuators(_config->getActuators(),
-                                  _config->getActuatorCount());
-    }
-    _config->unlockActuators();
+        // Return the actuator to rest before deletion
+        ActuatorConfig* actuators = _config->getActuators();
+        uint8_t count = _config->getActuatorCount();
+        for (uint8_t i = 0; i < count; i++) {
+            if (actuators[i].id == id) {
+                if (_engine) _engine->resetActuator(actuators[i]);
+                break;
+            }
+        }
+
+        removed = _config->removeActuator(id);
+        if (removed && _scheduler) {
+            // removeActuator() shifts the config array, so rebuild the
+            // scheduler's pointer table to avoid stale/duplicate slots.
+            _scheduler->syncActuators(_config->getActuators(),
+                                      _config->getActuatorCount());
+        }
+    }  // lock released here
 
     if (removed) {
         request->send(200, "application/json", "{\"ok\":true}");
@@ -1376,6 +1439,8 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
                             evt.action = ACTION_NOTE_ON;
                             evt.velocity = velocity;
                             evt.priority = 0;
+                            evt.behavior_override = 0xFF;
+                            evt.instrument_index  = 0xFF;
                             _scheduler->pushEvent(evt);
                         }
                     }
@@ -1691,6 +1756,7 @@ void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handlePostCalibrateStop(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_calibrator) {
         request->send(503, "application/json",
                       "{\"error\":\"calibrator not available\"}");
@@ -1880,6 +1946,7 @@ void WebServer::handlePostTestStress(AsyncWebServerRequest* request,
 }
 
 void WebServer::handlePostTestStop(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_testManager) {
         request->send(503, "application/json",
                       "{\"error\":\"test manager not available\"}");
@@ -1890,6 +1957,7 @@ void WebServer::handlePostTestStop(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handlePostTestClearLog(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     if (!_testManager) {
         request->send(503, "application/json",
                       "{\"error\":\"test manager not available\"}");
@@ -1951,6 +2019,7 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
 }
 
 void WebServer::handlePostLogsClear(AsyncWebServerRequest* request) {
+    if (!requireAuth(request)) return;
     logger.clear();
     logger.log(LOG_INFO, CAT_SYSTEM, "System log cleared");
     request->send(200, "application/json", "{\"ok\":true}");

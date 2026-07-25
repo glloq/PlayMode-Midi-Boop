@@ -153,30 +153,34 @@ void setup() {
 
     // 1. Initialize the Config Manager (LittleFS)
     Serial.println("\n[INIT] Config Manager...");
-    if (!configManager.begin()) {
-        Serial.println("[INIT] ERROR: Config Manager");
-        logger.log(LOG_ERROR, CAT_SYSTEM, "Config Manager: LittleFS init failed");
+    bool configOk = configManager.begin();
+    if (!configOk) {
+        // AUDIT FIX (P1.8): a ConfigManager failure leaves the bus config
+        // potentially zeroed. Do NOT continue into normal operation — keep the
+        // outputs disabled (OE high) and latch the kill switch below, but still
+        // bring up the web UI for diagnosis.
+        Serial.println("[INIT] ERROR: Config Manager — entering SAFE MODE (outputs disabled)");
+        logger.log(LOG_ERROR, CAT_SYSTEM, "Config Manager failed — SAFE MODE");
     } else {
         logger.log(LOG_INFO, CAT_SYSTEM, "Config: %d act, %d inst",
                    configManager.getActuatorCount(), configManager.getInstrumentCount());
     }
 
     // 2. Initialize the PCA9685 driver (dual-bus I²C)
+    // AUDIT FIX (P1.7): transfer the FULL persisted bus config (pins, I²C + PWM
+    // frequency, enabled) into the driver BEFORE begin(), so the saved setup is
+    // actually used instead of the compile-time defaults. Skipped in safe mode
+    // (the loaded config is untrusted).
+    if (configOk) {
+        BusConfig* cfgBuses = configManager.getBuses();
+        for (uint8_t b = 0; b < 2; b++) {
+            pcaDriver.setBusConfig(b, cfgBuses[b]);
+        }
+    }
+
     Serial.println("\n[INIT] PCA Driver (I²C dual-bus)...");
     if (!pcaDriver.begin()) {
         Serial.println("[INIT] WARNING: PCA init problem (some buses missing?)");
-    }
-
-    // AUDIT FIX: apply the persisted PWM frequency to the detected PCA chips.
-    // The ConfigManager owns the saved BusConfig while the PCADriver keeps its
-    // own copy initialised from compile-time defaults; without this transfer a
-    // saved frequency (e.g. a re-tuned solenoid bus) silently reverted to
-    // 50/200 Hz on every reboot.
-    {
-        BusConfig* cfgBuses = configManager.getBuses();
-        for (uint8_t b = 0; b < 2; b++) {
-            pcaDriver.setFrequency(b, cfgBuses[b].pwm_frequency);
-        }
     }
 
     // 3. Configure actuators (from config or test)
@@ -196,14 +200,24 @@ void setup() {
     }
 #endif
 
-    // 4. Enable PCA buses (OE = LOW)
-    Serial.println("\n[INIT] Enabling PCA outputs...");
-    pcaDriver.enableBus(0, true);
-    pcaDriver.enableBus(1, true);
+    // 4. Enable PCA buses (OE = LOW) — only when the configuration is trusted.
+    if (configOk) {
+        Serial.println("\n[INIT] Enabling PCA outputs...");
+        pcaDriver.enableBus(0, true);
+        pcaDriver.enableBus(1, true);
+    } else {
+        Serial.println("\n[INIT] SAFE MODE — PCA outputs left disabled");
+    }
 
     // 5. Initialize the Safety Manager
     Serial.println("\n[INIT] Safety Manager...");
     safetyManager.begin();
+    if (!configOk) {
+        // Latch the kill switch so no event can drive an output until the fault
+        // is cleared. Called once at setup (scheduler loop not yet running).
+        safetyManager.activateKillSwitch();
+        logger.log(LOG_CRITICAL, CAT_SAFETY, "Kill switch latched (config failure)");
+    }
 
     // 6. Start the scheduler on Core 1 (with integrated safety)
     Serial.println("\n[INIT] Scheduler...");
@@ -289,6 +303,9 @@ void setup() {
         logger.log(LOG_INFO, CAT_POWER, "Power Manager: max %dmA poly=%d",
                    POWER_GLOBAL_MAX_MA, POWER_MAX_POLYPHONY);
     }
+    // AUDIT FIX (P1.3): the scheduler bills the PowerManager after real
+    // execution (see Scheduler::processReadyEvents).
+    scheduler.setPowerManager(&powerManager);
 
     // 10. Initialize the MIDI Dispatcher with PowerManager (note/CC mapping)
     Serial.println("\n[INIT] MIDI Dispatcher...");
@@ -358,23 +375,9 @@ void loop() {
         midiDispatcher.dispatch(msg);
     }
 
-    // 4. Periodic Power Manager update
-    // AUDIT FIX: rebuild the pointer array only when actuator count
-    // changes — PowerManager.update() rate-limits internally, so the
-    // table doesn't need to be reshuffled on every loop tick.
-    {
-        ActuatorConfig* actuators = configManager.getActuators();
-        uint8_t count = configManager.getActuatorCount();
-        static ActuatorConfig* act_ptrs[MAX_ACTUATORS];
-        static uint8_t last_count = 0xFF;
-        static ActuatorConfig* last_base = nullptr;
-        if (count != last_count || actuators != last_base) {
-            for (uint8_t i = 0; i < count; i++) act_ptrs[i] = &actuators[i];
-            last_count = count;
-            last_base = actuators;
-        }
-        powerManager.update(act_ptrs, count);
-    }
+    // 4. Power Manager accounting now runs on Core 1 (inside the scheduler
+    // task), so its counters are only ever mutated from a single core.
+    // AUDIT FIX (P1.3): moved out of loop() to avoid a cross-core data race.
 
     // 5. Acoustic calibrator update (Phase 7)
     calibrator.update();
@@ -548,6 +551,8 @@ void runTestSequence() {
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 100;
         evt.priority = 0;
+        evt.behavior_override = 0xFF;
+        evt.instrument_index  = 0xFF;
         if (scheduler.pushEvent(evt)) {
             Serial.println("[TEST] Servo Strike scheduled at +100ms");
         }
@@ -560,6 +565,8 @@ void runTestSequence() {
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 80;
         evt.priority = 0;
+        evt.behavior_override = 0xFF;
+        evt.instrument_index  = 0xFF;
         if (scheduler.pushEvent(evt)) {
             Serial.printf("[TEST] Servo Alternate #%d scheduled at +%dms\n", i + 1, 500 + (i * 300));
         }
@@ -572,6 +579,8 @@ void runTestSequence() {
         evt.action = ACTION_NOTE_ON;
         evt.velocity = 127;
         evt.priority = 0;
+        evt.behavior_override = 0xFF;
+        evt.instrument_index  = 0xFF;
         if (scheduler.pushEvent(evt)) {
             Serial.println("[TEST] Solenoid Strike scheduled at +2000ms");
         }
@@ -584,6 +593,8 @@ void runTestSequence() {
         evt_on.action = ACTION_NOTE_ON;
         evt_on.velocity = 100;
         evt_on.priority = 0;
+        evt_on.behavior_override = 0xFF;
+        evt_on.instrument_index  = 0xFF;
 
         SchedulerEvent evt_off = {};
         evt_off.trigger_time_us = now_us + 4000000;
@@ -591,8 +602,10 @@ void runTestSequence() {
         evt_off.action = ACTION_NOTE_OFF;
         evt_off.velocity = 0;
         evt_off.priority = 0;
+        evt_off.behavior_override = 0xFF;
+        evt_off.instrument_index  = 0xFF;
 
-        if (scheduler.pushEvent(evt_on) && scheduler.pushEvent(evt_off)) {
+        if (scheduler.pushPulse(evt_on, evt_off)) {
             Serial.println("[TEST] Solenoid Hit-and-Hold scheduled: ON +3000ms, OFF +4000ms");
         }
     }

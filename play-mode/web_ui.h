@@ -504,6 +504,13 @@ tr:hover td{background:var(--bg2)}
       </select>
     </div>
   </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>Access Point password (WPA2)</label>
+      <input type="password" id="set-ap-pass" maxlength="64" placeholder="leave empty for per-device default">
+      <div class="help">Protects the device's own hotspot. Min 8 characters. Empty = unique password derived from this board (shown on the serial console).</div>
+    </div>
+  </div>
   <button class="btn primary" onclick="saveWiFiConfig()">Save WiFi</button>
 
   <!-- I&sup2;C Bus -->
@@ -1388,6 +1395,41 @@ function appAlert(title, message, {btnText='OK', icon='\u2139\ufe0f'}={}) {
   });
 }
 
+// AUDIT FIX (P2): explicit instrument picker (replaces the silent "assign to
+// instrument 0" behaviour). Resolves to the chosen index, or null if cancelled.
+function appSelectInstrument(title, message, options) {
+  return new Promise(resolve => {
+    document.getElementById('confirm-icon').textContent = '🎹';
+    document.getElementById('confirm-title').textContent = title;
+    const msg = document.getElementById('confirm-message');
+    msg.textContent = message + ' ';
+    const sel = document.createElement('select');
+    sel.className = 'input';
+    sel.style.marginTop = '8px';
+    for (const o of options) {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label;
+      sel.appendChild(opt);
+    }
+    msg.appendChild(document.createElement('br'));
+    msg.appendChild(sel);
+    const btns = document.getElementById('confirm-buttons');
+    btns.innerHTML = '';
+    const btnCancel = document.createElement('button');
+    btnCancel.className = 'btn';
+    btnCancel.textContent = 'Cancel';
+    btnCancel.onclick = () => { closeModal('modal-confirm'); resolve(null); };
+    const btnOk = document.createElement('button');
+    btnOk.className = 'btn primary';
+    btnOk.textContent = 'Assign';
+    btnOk.onclick = () => { closeModal('modal-confirm'); resolve(parseInt(sel.value)); };
+    btns.appendChild(btnCancel);
+    btns.appendChild(btnOk);
+    document.getElementById('modal-confirm').classList.add('show');
+  });
+}
+
 async function saveInstrument() {
   const data = {
     name: document.getElementById('mi-name').value || 'Instrument',
@@ -1506,14 +1548,32 @@ async function loadActuatorsWithNotes() {
 async function setActuatorNote(actId, noteVal) {
   const note = parseInt(noteVal);
   if (isNaN(note) || note < 0 || note > 127) return;
-  // Find which instrument this actuator belongs to (use first, or 0)
-  let instIdx = 0;
+  // Find which instrument this actuator is already assigned to.
+  let instIdx = -1;
   if (routing) {
     for (const r of routing) {
       if (r.notes && r.notes.find(n => n.actuator === actId)) {
         instIdx = r.instrument;
         break;
       }
+    }
+  }
+  // AUDIT FIX (P2): if the actuator is not assigned to any instrument, ask
+  // explicitly which one to use instead of silently defaulting to index 0.
+  if (instIdx < 0) {
+    const insts = instruments || [];
+    if (insts.length === 0) {
+      await appAlert('No instrument', 'Create an instrument first, then assign notes to its actuators.');
+      loadActuatorsWithNotes();  // revert the edited input
+      return;
+    } else if (insts.length === 1) {
+      instIdx = insts[0].index;
+    } else {
+      const chosen = await appSelectInstrument(
+        'Assign actuator', 'Which instrument should this note belong to?',
+        insts.map(i => ({ value: i.index, label: i.name + ' (' + (i.channel === 0 ? 'Omni' : 'ch.' + i.channel) + ')' })));
+      if (chosen === null || isNaN(chosen)) { loadActuatorsWithNotes(); return; }
+      instIdx = chosen;
     }
   }
   // Get current routing for this instrument
@@ -2319,13 +2379,23 @@ async function loadWiFiConfig() {
 }
 
 async function saveWiFiConfig() {
-  await api('/api/wifi', 'POST', {
+  const apPass = document.getElementById('set-ap-pass').value;
+  if (apPass.length > 0 && apPass.length < 8) {
+    appAlert('Invalid AP password', 'The Access Point password must be at least 8 characters (or left empty).', {icon:'\u26a0\ufe0f'});
+    return;
+  }
+  const resp = await api('/api/wifi', 'POST', {
     ssid: document.getElementById('set-ssid').value,
     password: document.getElementById('set-pass').value,
+    ap_password: apPass,
     hostname: document.getElementById('set-hostname').value,
     ap_fallback: document.getElementById('set-ap-fallback').value === '1',
     enabled: true
   });
+  if (resp && resp.error) {
+    appAlert('Error', resp.error, {icon:'\u274c'});
+    return;
+  }
   appAlert('WiFi saved', 'Restart the device to apply the new settings.', {icon:'\ud83d\udce1'});
 }
 
@@ -2365,19 +2435,28 @@ async function setBusPwmFreq(busId, freq) {
 }
 
 async function scanI2C() {
-  const result = await api('/api/scan/i2c', 'POST');
-  if (result) {
-    let msg = 'I\u00b2C scan result:\n';
-    for (const bus of result) {
-      msg += 'Bus ' + bus.bus + ': ' + bus.pca_count + ' PCA found';
-      if (bus.addresses && bus.addresses.length > 0) {
-        msg += ' (' + bus.addresses.join(', ') + ')';
+  // AUDIT FIX (P0.2): the rescan now runs on the real-time core after cutting
+  // the outputs (it must not race the scheduler). It is asynchronous: request
+  // it, wait for the scheduler to rebuild the drivers, then read the buses.
+  if (!await appConfirm('Scan I\u00b2C',
+        'This disables all outputs and re-scans the I\u00b2C buses. You will need to re-arm the kill switch afterwards. Continue?',
+        {confirmText:'Scan', danger:true, icon:'\ud83d\udd0d'})) return;
+  await api('/api/scan/i2c', 'POST');
+  // Give the scheduler a moment to perform the rescan on Core 1.
+  await new Promise(r => setTimeout(r, 800));
+  const buses = await api('/api/buses');
+  let msg = 'I\u00b2C scan complete (outputs disabled \u2014 re-arm to resume):\n';
+  if (buses) {
+    for (const b of buses) {
+      msg += 'Bus ' + b.id + ': ' + (b.pca_count || 0) + ' PCA';
+      if (b.pca_addrs && b.pca_addrs.length > 0) {
+        msg += ' (' + b.pca_addrs.map(a => '0x' + a.toString(16).toUpperCase()).join(', ') + ')';
       }
       msg += '\n';
     }
-    appAlert('Scan I\u00b2C', msg, {icon:'\ud83d\udd0d'});
-    loadBuses();
   }
+  appAlert('Scan I\u00b2C', msg, {icon:'\ud83d\udd0d'});
+  loadBuses();
 }
 
 async function saveConfig() {
@@ -2390,10 +2469,12 @@ async function saveConfig() {
 }
 
 async function confirmResetDefaults() {
-  if (!await appConfirm('Reset', 'Reset all configuration to default values?\nThis action is irreversible.', {danger:true, confirmText:'Reset', icon:'\u26a0\ufe0f'})) return;
+  if (!await appConfirm('Reset', 'Reset all configuration to default values?\nThe device will restart. This action is irreversible.', {danger:true, confirmText:'Reset', icon:'\u26a0\ufe0f'})) return;
   await api('/api/config/defaults', 'POST');
-  await appAlert('Reset complete', 'Configuration reset. The page will reload.', {icon:'\u2705'});
-  location.reload();
+  // AUDIT FIX (P0.4): the device reboots after a factory reset. Wait for it to
+  // come back before reloading the page.
+  await appAlert('Reset complete', 'Configuration reset. The device is restarting \u2014 the page will reload shortly.', {icon:'\u2705'});
+  setTimeout(() => location.reload(), 6000);
 }
 
 // ============================================================================
@@ -2828,9 +2909,29 @@ async function wizNext() {
   let pcaCh = parseInt(document.getElementById('wiz-start-ch').value);
   const busId = type === 0 ? 0 : 1;
 
+  // AUDIT FIX (P2): validate every step. On any failure, stop and roll back the
+  // instrument just created so a half-built config (mappings pointing at
+  // missing actuators) is never left behind.
+  const okResp = (r) => r && r.ok === true;
+
   // 1. Create instrument
   const instData = {name, channel, bus_id: busId, latency_ms: 10, auto_cal: false, enabled: true};
-  await api('/api/instrument', 'POST', instData);
+  const instResp = await api('/api/instrument', 'POST', instData);
+  if (!okResp(instResp)) {
+    await appAlert('Wizard failed', 'Could not create the instrument: ' + ((instResp && instResp.error) || 'unknown error'));
+    return;
+  }
+  // Resolve the new instrument's index now so rollback can target it.
+  instruments = await api('/api/instruments') || [];
+  const instIdx = instruments.length > 0 ? instruments[instruments.length - 1].index : 0;
+
+  const rollback = async (msg) => {
+    await api('/api/instrument?index=' + instIdx, 'DELETE');
+    await appAlert('Wizard failed', msg + ' — the partial instrument was removed.');
+    instruments = await api('/api/instruments') || [];
+    routing = await api('/api/routing') || [];
+    loadHomeInstruments(); loadInstrumentSelects(); buildAllPianos();
+  };
 
   // 2. Create actuators — baseId = max(existing IDs) + 1 to ensure uniqueness
   const baseId = (actuators && actuators.length > 0)
@@ -2846,14 +2947,16 @@ async function wizNext() {
     } else {
       actData.pulse_min_ms = 5; actData.pulse_max_ms = 30; actData.pulse_ms = 30; actData.pwm_initial = 4095; actData.pwm_hold = 2048; actData.ramp_ms = 50;
     }
-    await api('/api/actuator', 'POST', actData);
+    const actResp = await api('/api/actuator', 'POST', actData);
+    if (!okResp(actResp)) {
+      await rollback('Could not create actuator ' + (baseId + i));
+      return;
+    }
     pcaCh++;
     if (pcaCh > 15) { pcaCh = 0; pcaAddr = Math.min(pcaAddr + 1, 67); }
   }
 
   // 3. Create note mappings (read from editable table)
-  instruments = await api('/api/instruments');
-  const instIdx = instruments.length > 0 ? instruments[instruments.length - 1].index : 0;
   const notes = [];
   for (let i = 0; i < count; i++) {
     const noteInput = document.getElementById('wiz-note-' + i);
@@ -2861,7 +2964,11 @@ async function wizNext() {
     if (isNaN(note) || note < 0 || note > 127) continue;
     notes.push({note, actuator: baseId + i, enabled: true});
   }
-  await api('/api/routing', 'POST', {instrument: instIdx, notes});
+  const routeResp = await api('/api/routing', 'POST', {instrument: instIdx, notes});
+  if (!okResp(routeResp)) {
+    await rollback('Could not create the note mappings');
+    return;
+  }
 
   closeModal('modal-wizard');
   toast(name + ' created with ' + count + ' actuators', 'ok');

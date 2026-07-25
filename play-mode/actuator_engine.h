@@ -29,6 +29,13 @@ public:
 private:
     PCADriver& _pca;
 
+    // AUDIT FIX (P1.5): behaviour in effect for the event currently being
+    // processed (per-note override or the actuator default). Set at the top of
+    // processEvent(); read by the behaviour handlers and stamped onto any
+    // deferred return/hold event so the whole activation stays consistent.
+    // Core 1 only — the engine runs single-threaded on the scheduler task.
+    uint8_t _current_behavior_override;
+
     // --- Handlers by type/behavior ---
 
     // Servo — Strike: A -> A+X -> return

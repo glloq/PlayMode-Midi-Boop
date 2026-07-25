@@ -1,4 +1,7 @@
 #include "actuator_engine.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/semphr.h>
 
 // ============================================================================
 // PlayMode — Actuator Engine (implementation)
@@ -6,8 +9,13 @@
 
 // External reference to the scheduler for scheduling return events
 extern QueueHandle_t g_scheduler_queue;
+// AUDIT FIX (P0.6): the same push-serialisation mutex the Scheduler uses, so a
+// return event enqueued from the engine can never split an atomic pushPulse()
+// pair.
+extern SemaphoreHandle_t g_scheduler_push_mutex;
 
-ActuatorEngine::ActuatorEngine(PCADriver& pca) : _pca(pca) {}
+ActuatorEngine::ActuatorEngine(PCADriver& pca)
+    : _pca(pca), _current_behavior_override(0xFF) {}
 
 void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent& event) {
     if (!actuator.enabled) return;
@@ -20,14 +28,22 @@ void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent
         return;
     }
 
-    // A fresh note event opens a new generation, invalidating any return/hold
-    // events still queued from the previous one.
-    if (event.action == ACTION_NOTE_ON || event.action == ACTION_NOTE_OFF) {
+    // AUDIT FIX (P1.4): every DIRECT (non-deferred) event opens a new
+    // generation. This covers NOTE_ON, NOTE_OFF and a direct CC position/PWM
+    // command — so a fresh CC position invalidates a pending auto-return, and a
+    // retrigger invalidates the previous activation's return/hold. Deferred
+    // returns/holds never bump it (they complete the current activation).
+    if (!event.deferred) {
         actuator.state.generation++;
     }
 
+    // AUDIT FIX (P1.5): behaviour override in effect for this activation.
+    _current_behavior_override = event.behavior_override;
+    uint8_t effective_behavior = (event.behavior_override != 0xFF)
+                               ? event.behavior_override : actuator.behavior;
+
     if (actuator.type == ACT_SERVO) {
-        switch ((ServoBehavior)actuator.behavior) {
+        switch ((ServoBehavior)effective_behavior) {
             case SERVO_FRAPPE:
                 servoFrappe(actuator, event);
                 break;
@@ -42,7 +58,7 @@ void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent
                 break;
         }
     } else if (actuator.type == ACT_SOLENOID) {
-        switch ((SolenoidBehavior)actuator.behavior) {
+        switch ((SolenoidBehavior)effective_behavior) {
             case SOL_FRAPPE:
                 solenoidFrappe(actuator, event);
                 break;
@@ -129,6 +145,18 @@ void ActuatorEngine::servoAlterne(ActuatorConfig& act, const SchedulerEvent& eve
 
         setServoAngle(act, target);
         act.state.active = true;
+
+        // AUDIT FIX (P2): ALTERNE holds its new A/B position — there is no
+        // NOTE_OFF, so leaving state.active=true forever would trip the safety
+        // watchdog. Mark the discrete move complete after speed_ms (the servo
+        // stays at position); the deferred POSITION_SET below just clears the
+        // active flag without moving anywhere new.
+        scheduleReturn(act, act.speed_ms, target);
+
+    } else if (event.action == ACTION_POSITION_SET) {
+        // Movement-complete marker: reaffirm the position and clear active.
+        setServoAngle(act, event.value);
+        act.state.active = false;
     }
 }
 
@@ -267,9 +295,11 @@ void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint
     return_event.priority = 1;
     // AUDIT FIX (P0.5): tag as a deferred event and stamp the current
     // generation so it is dropped if the actuator is retriggered / released
-    // before it fires.
+    // before it fires. (P1.5) carry the same behaviour override so the return
+    // routes to the same behaviour handler as its NOTE_ON.
     return_event.deferred = true;
     return_event.generation = act.state.generation;
+    return_event.behavior_override = _current_behavior_override;
 
     // Determine the return action type
     if (act.type == ACT_SERVO) {
@@ -281,9 +311,16 @@ void ActuatorEngine::scheduleReturn(ActuatorConfig& act, uint32_t delay_ms, uint
     // AUDIT FIX (P0.7): a lost return event leaves a solenoid energised or a
     // servo deflected until the watchdog eventually fires. Verify the enqueue
     // and, if the queue is full, apply the return target immediately (fail
-    // safe) so the actuator can never stay stuck on.
-    if (g_scheduler_queue == NULL ||
-        xQueueSend(g_scheduler_queue, &return_event, 0) != pdTRUE) {
+    // safe) so the actuator can never stay stuck on. The push is serialised
+    // through g_scheduler_push_mutex so it cannot split a pushPulse() pair.
+    bool sent = false;
+    if (g_scheduler_queue != NULL) {
+        bool taken = (g_scheduler_push_mutex != NULL) &&
+                     (xSemaphoreTake(g_scheduler_push_mutex, portMAX_DELAY) == pdTRUE);
+        sent = xQueueSend(g_scheduler_queue, &return_event, 0) == pdTRUE;
+        if (taken) xSemaphoreGive(g_scheduler_push_mutex);
+    }
+    if (!sent) {
         Serial.printf("[ENGINE] Return queue full for actuator %d — applying "
                       "safe return immediately\n", act.id);
         if (act.type == ACT_SERVO) {

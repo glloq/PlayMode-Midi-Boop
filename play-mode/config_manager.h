@@ -11,6 +11,24 @@
 // PlayMode — Config Manager (JSON / LittleFS)
 // ============================================================================
 
+class ConfigManager;  // forward for the guard below
+
+// AUDIT FIX (P0.5): RAII guard for the actuator lock. Acquires in the
+// constructor; callers MUST check locked() and bail out if false. Guarantees
+// unlockActuators() runs exactly once (only if the lock was taken), even on
+// early returns.
+class ActuatorLockGuard {
+public:
+    explicit ActuatorLockGuard(ConfigManager& cfg, uint32_t timeout_ms = 100);
+    ~ActuatorLockGuard();
+    bool locked() const { return _locked; }
+    ActuatorLockGuard(const ActuatorLockGuard&) = delete;
+    ActuatorLockGuard& operator=(const ActuatorLockGuard&) = delete;
+private:
+    ConfigManager& _cfg;
+    bool _locked;
+};
+
 class ConfigManager {
 public:
     ConfigManager();

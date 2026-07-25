@@ -40,8 +40,12 @@ struct MidiMessage {
 // --- WiFi configuration ---
 struct WiFiConfig {
     char ssid[33];              // Network SSID (max 32 chars + null)
-    char password[65];          // Password (max 64 chars + null)
+    char password[65];          // STA password (max 64 chars + null)
     char hostname[32];          // mDNS hostname
+    // AUDIT FIX (P1.9): per-device WPA2 password for the SoftAP. Empty means
+    // "derive a unique one from the chip MAC" at AP start, so boards do not all
+    // share the same key. Configurable from the web UI.
+    char ap_password[65];       // SoftAP WPA2 password (>= 8 chars, or empty)
     bool enabled;               // WiFi enabled
     bool ap_fallback;           // Start in AP mode if STA fails
 };

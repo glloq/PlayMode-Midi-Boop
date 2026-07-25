@@ -138,8 +138,28 @@ uint8_t PCADriver::rescanAll() {
     return total;
 }
 
+void PCADriver::setBusConfig(uint8_t bus_id, const BusConfig& cfg) {
+    if (bus_id > 1) return;
+    BusConfig& b = _buses[bus_id];
+    // AUDIT FIX (P1.7): restore the full persisted bus setup. Guard against a
+    // zeroed/garbage config (e.g. a failed ConfigManager) that would otherwise
+    // leave the servo bus at an unusable frequency.
+    if (cfg.sda_pin != 0)  b.sda_pin = cfg.sda_pin;
+    if (cfg.scl_pin != 0)  b.scl_pin = cfg.scl_pin;
+    b.oe_pin = cfg.oe_pin;
+    if (cfg.i2c_frequency != 0) b.i2c_frequency = cfg.i2c_frequency;
+    if (cfg.pwm_frequency >= 24) b.pwm_frequency = cfg.pwm_frequency;  // PCA9685 min ~24 Hz
+    b.enabled = cfg.enabled;
+}
+
 void PCADriver::setFrequency(uint8_t bus_id, uint16_t freq_hz) {
     if (bus_id > 1) return;
+    // AUDIT FIX (P1.8): reject a 0 Hz request. Adafruit clamps 0 -> 1 Hz, which
+    // is unusable (and dangerous) for servos. Keep the current frequency.
+    if (freq_hz < 24) {
+        Serial.printf("[PCA] Bus %d: ignoring invalid PWM frequency %d Hz\n", bus_id, freq_hz);
+        return;
+    }
 
     _buses[bus_id].pwm_frequency = freq_hz;
 

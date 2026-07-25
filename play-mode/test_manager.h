@@ -116,7 +116,6 @@ private:
 
     // --- Internal methods ---
     bool    triggerActuator(uint8_t act_id);   // Returns false if scheduler is full
-    void    scheduleNoteOff(uint8_t act_id, uint16_t delay_ms);
     void    logEvent(uint8_t act_id, uint8_t velocity, bool scheduled);
     uint8_t getEnabledActuatorCount() const;
     bool    getActuatorIdByIndex(uint8_t idx, uint8_t& id_out) const;
