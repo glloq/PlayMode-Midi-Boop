@@ -453,6 +453,15 @@ void WebServer::setupAPIRoutes() {
     killHandler->setMethod(HTTP_POST);
     _server.addHandler(killHandler);
 
+    // AUDIT FIX (P0.1): acknowledge a latched fault (separate from re-arm).
+    _server.on("/api/fault/ack", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        if (!requireAuth(req)) return;
+        if (!_resources) { req->send(500); return; }
+        _resources->requestAcknowledge();
+        logger.log(LOG_WARN, CAT_SAFETY, "Fault acknowledge requested from web UI");
+        req->send(200, "application/json", "{\"ok\":true}");
+    });
+
     // AUDIT FIX: Bus PWM frequency (missing endpoint — called by the frontend)
     auto* busPwmHandler = new AsyncCallbackJsonWebHandler("/api/bus/pwm",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
@@ -967,7 +976,11 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
         targets[k++] = { bus, addr, ch };
     }
 
-    // ---- Phase 2: apply atomically under the actuator lock ----
+    // ---- Phase 2: apply the array mutations under the actuator lock, but
+    // release it BEFORE the flash write (AUDIT FIX P1.7: never hold the
+    // real-time mutex across a LittleFS write). Web callbacks are serialised on
+    // the async task, so no other web edit can interleave here.
+    {
     ActuatorLockGuard guard(*_config);
     if (!guard.locked()) {
         request->send(503, "application/json", "{\"error\":\"configuration busy\"}");
@@ -1037,10 +1050,11 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
     if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
                                               _config->getActuatorCount());
     if (_dispatcher) _dispatcher->refreshConfig();
+    }  // actuator lock released here — flash write happens unlocked
 
-    // Atomic save. On failure, roll back the whole thing.
+    // Atomic save (outside the RT mutex). On failure, roll back under the lock.
     if (!_config->save()) {
-        // Remove the created actuators and instrument.
+        ActuatorLockGuard rb(*_config);
         for (uint8_t i = 0; i < n; i++) _config->removeActuator(free_ids[i]);
         _config->removeInstrument(inst_idx);
         if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
@@ -1823,7 +1837,7 @@ void WebServer::buildStatusJSON(String& output) {
     // dashboard: FAULT (latched over-current) / DISARMED (kill active) / ARMED.
     if (_resources) {
         const SafetyState& ss0 = _resources->getGlobalState();
-        const char* mstate = ss0.over_current ? "fault"
+        const char* mstate = ss0.fault_latched ? "fault"
                            : ss0.kill_switch_active ? "disarmed" : "armed";
         doc["machine_state"] = mstate;
     }

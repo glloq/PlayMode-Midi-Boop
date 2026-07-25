@@ -34,7 +34,12 @@ enum EventAction : uint8_t {
     ACTION_NOTE_ON        = 0,
     ACTION_NOTE_OFF       = 1,
     ACTION_POSITION_SET   = 2,  // Direct positioning (servo return, etc.)
-    ACTION_PWM_SET        = 3   // Direct PWM command (solenoid hold)
+    ACTION_PWM_SET        = 3,  // Direct PWM command (solenoid hold)
+    // AUDIT FIX (P0.8): behaviour-independent safe release. Drives a solenoid
+    // to PWM 0 / a servo to its rest angle regardless of the actuator or
+    // per-note behaviour, so a general "all notes off" always releases a held
+    // output even when a mapping overrode the behaviour.
+    ACTION_FORCE_SAFE_OFF = 4
 };
 
 // --- Actuator internal state ---
@@ -225,7 +230,11 @@ struct SafetyState {
     uint8_t active_actuator_count;        // Number of active actuators
     bool kill_switch_active;              // Kill switch triggered
     bool degradation_active;              // Graceful degradation active
-    bool over_current;                    // Total current exceeded
+    bool over_current;                    // Instantaneous over-current (now)
+    // AUDIT FIX (P0.1): a LATCHED fault (over-current or a failed safety-off
+    // write). Cleared ONLY by an explicit acknowledge — never automatically
+    // when the current drops. Re-arming is refused while it is set.
+    bool fault_latched;
 };
 
 // ============================================================================

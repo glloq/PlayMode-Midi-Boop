@@ -74,7 +74,10 @@ void MidiDispatcher::allNotesOff() {
         SchedulerEvent evt = {};
         evt.trigger_time_us = (uint32_t)esp_timer_get_time();
         evt.actuator_id = actuators[i].id;
-        evt.action = ACTION_NOTE_OFF;
+        // AUDIT FIX (P0.8): behaviour-independent safe release, so a note that
+        // overrode its behaviour (e.g. hit-and-hold on a frappe actuator) is
+        // still released instead of relying on the watchdog.
+        evt.action = ACTION_FORCE_SAFE_OFF;
         evt.velocity = 0;
         evt.priority = 0;
         evt.behavior_override = 0xFF;

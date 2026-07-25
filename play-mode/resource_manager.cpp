@@ -14,7 +14,10 @@ ResourceManager::ResourceManager(PCADriver& pca)
       _max_freq_hz(SAFETY_MAX_FREQ_HZ),
       _watchdog_ms(SAFETY_WATCHDOG_MS),
       _last_check_us(0),
-      _requested_state(REQ_NONE),
+      _kill_requested(false),
+      _rearm_requested(false),
+      _rescan_requested(false),
+      _ack_requested(false),
       _req_freq_bus0(0),
       _req_freq_bus1(0),
       _cached_actuators(nullptr),
@@ -72,6 +75,10 @@ void ResourceManager::begin(const PowerBudget& budget, const SafetyLimits& limit
     memset(_tracked, false, sizeof(_tracked));
     _bus_ma[0] = _bus_ma[1] = 0;
     _last_check_us = now_us;
+    _kill_requested = false;
+    _rearm_requested = false;
+    _rescan_requested = false;
+    _ack_requested = false;
 
     Serial.println("[RESOURCE] Resource Manager initialized (unified safety+power)");
     Serial.printf("[RESOURCE] Cap: %umA, buses %u/%umA, polyphony %d | duty=%d%% freq=%dHz wd=%dms\n",
@@ -86,7 +93,8 @@ void ResourceManager::setScheduler(Scheduler* scheduler) { _scheduler = schedule
 // Current model (single source of truth)
 // ============================================================================
 uint16_t ResourceManager::estimateCurrent(const ActuatorConfig& actuator,
-                                          uint8_t velocity, bool assume_active) const {
+                                          uint8_t behavior, uint8_t velocity,
+                                          bool assume_active) const {
     if (!assume_active && !actuator.state.active) return 0;
 
     if (actuator.type == ACT_SERVO) {
@@ -94,9 +102,10 @@ uint16_t ResourceManager::estimateCurrent(const ActuatorConfig& actuator,
     }
     if (actuator.type == ACT_SOLENOID) {
         if (assume_active) {
-            // At admission: hit-and-hold starts at full power; a strike scales
-            // with velocity between hold and full.
-            if (actuator.behavior == SOL_HIT_AND_HOLD) return POWER_SOLENOID_FULL_MA;
+            // AUDIT FIX (P1.1): use the EFFECTIVE behaviour (per-note override),
+            // not the actuator default — a note overriding to hit-and-hold must
+            // be estimated at full power, not as a light strike.
+            if (behavior == SOL_HIT_AND_HOLD) return POWER_SOLENOID_FULL_MA;
             uint16_t base  = POWER_SOLENOID_HOLD_MA;
             uint32_t delta = (uint32_t)POWER_SOLENOID_FULL_MA - (uint32_t)POWER_SOLENOID_HOLD_MA;
             uint8_t v = (velocity > 127) ? 127 : velocity;
@@ -115,15 +124,16 @@ uint16_t ResourceManager::estimateCurrent(const ActuatorConfig& actuator,
 // ============================================================================
 bool ResourceManager::admit(const ActuatorConfig& actuator,
                             const SchedulerEvent& event, uint8_t instrument_index) {
-    // Kill (active or just requested) blocks everything immediately.
-    if (_global_state.kill_switch_active ||
-        _requested_state.load() == REQ_KILL) return false;
+    // Kill (active or just requested) or a latched fault blocks everything
+    // immediately.
+    if (_global_state.kill_switch_active || _global_state.fault_latched ||
+        _kill_requested.load()) return false;
 
     uint8_t id = actuator.id;
     if (id >= MAX_ACTUATORS) return false;
 
-    // Only NOTE_ON is subject to the budget checks; NOTE_OFF / returns are
-    // always allowed (they release resources).
+    // Only NOTE_ON is subject to the budget checks; NOTE_OFF / returns / safe-off
+    // are always allowed (they release resources).
     if (event.action != ACTION_NOTE_ON) return true;
 
     if (!checkFrequency(id)) {
@@ -135,32 +145,44 @@ bool ResourceManager::admit(const ActuatorConfig& actuator,
         return false;
     }
 
-    // Global polyphony — HARD limit (no voice stealing).
-    if (_global_state.active_actuator_count + 1 > _budget.global_max_polyphony) {
-        _stats.total_rejected++;
-        return false;
-    }
-    // Per-instrument polyphony.
-    if (instrument_index < MAX_INSTRUMENTS) {
-        if (_stats.instrument_active_count[instrument_index] >=
-            _budget.instrument_max_polyphony[instrument_index]) {
+    // AUDIT FIX (P1.2): a retrigger of an already-active actuator is NOT a new
+    // voice — do not count it against polyphony or the current budget.
+    bool new_voice = !actuator.state.active;
+    uint8_t effective_behavior = (event.behavior_override != 0xFF)
+                               ? event.behavior_override : actuator.behavior;
+
+    if (new_voice) {
+        // Global polyphony — HARD limit (no voice stealing).
+        if (_global_state.active_actuator_count + 1 > _budget.global_max_polyphony) {
             _stats.total_rejected++;
             return false;
         }
-    }
+        // Per-instrument polyphony.
+        if (instrument_index < MAX_INSTRUMENTS) {
+            if (_stats.instrument_active_count[instrument_index] >=
+                _budget.instrument_max_polyphony[instrument_index]) {
+                _stats.total_rejected++;
+                return false;
+            }
+        }
 
-    // Current budget (global + physical bus). Because observe() runs before the
-    // next admit(), the running totals already include prior events this tick.
-    uint16_t projected = estimateCurrent(actuator, event.velocity, true);
-    if (_global_state.total_estimated_current_ma + projected > _budget.global_max_ma) {
-        _stats.total_rejected++;
-        return false;
-    }
-    uint32_t bus_cap = (actuator.bus_id == 0) ? _budget.servo_bus_max_ma
-                                              : _budget.solenoid_bus_max_ma;
-    if (actuator.bus_id < 2 && _bus_ma[actuator.bus_id] + projected > bus_cap) {
-        _stats.total_rejected++;
-        return false;
+        // Current budget (global + physical bus). observe() runs before the next
+        // admit(), so the running totals already include prior events this tick.
+        // AUDIT FIX (P1.3): admission allows total == cap (reject only strictly
+        // above); update() likewise treats over-current as strictly above the
+        // cap, so the boundary is consistent.
+        uint16_t projected = estimateCurrent(actuator, effective_behavior,
+                                             event.velocity, true);
+        if (_global_state.total_estimated_current_ma + projected > _budget.global_max_ma) {
+            _stats.total_rejected++;
+            return false;
+        }
+        uint32_t bus_cap = (actuator.bus_id == 0) ? _budget.servo_bus_max_ma
+                                                  : _budget.solenoid_bus_max_ma;
+        if (actuator.bus_id < 2 && _bus_ma[actuator.bus_id] + projected > bus_cap) {
+            _stats.total_rejected++;
+            return false;
+        }
     }
 
     // Rate-limiter bookkeeping.
@@ -177,12 +199,16 @@ bool ResourceManager::admit(const ActuatorConfig& actuator,
 // ============================================================================
 void ResourceManager::observe(const ActuatorConfig& actuator,
                               bool was_active, bool is_active,
-                              uint8_t instrument_index, uint8_t velocity) {
+                              const SchedulerEvent& event) {
     uint8_t id = actuator.id;
     if (id >= MAX_ACTUATORS) return;
 
+    uint8_t instrument_index = event.instrument_index;
+    uint8_t effective_behavior = (event.behavior_override != 0xFF)
+                               ? event.behavior_override : actuator.behavior;
+
     if (!was_active && is_active) {
-        uint16_t ma = estimateCurrent(actuator, velocity, true);
+        uint16_t ma = estimateCurrent(actuator, effective_behavior, event.velocity, true);
         _alloc_ma[id]   = ma;
         _alloc_bus[id]  = actuator.bus_id;
         _alloc_inst[id] = (instrument_index < MAX_INSTRUMENTS) ? instrument_index : 0xFF;
@@ -233,7 +259,7 @@ void ResourceManager::update(ActuatorConfig* actuators[], uint8_t count) {
         uint8_t id = act->id;
         if (id >= MAX_ACTUATORS) continue;   // AUDIT FIX (P0.2): bounds-check
 
-        uint16_t ma = estimateCurrent(*act, 0, false);
+        uint16_t ma = estimateCurrent(*act, act->behavior, 0, false);
         _actuator_safety[id].estimated_current_ma = ma;
         total_ma += ma;
 
@@ -275,16 +301,18 @@ void ResourceManager::update(ActuatorConfig* actuators[], uint8_t count) {
         Serial.printf("[RESOURCE] Graceful degradation active (%u%%, %umA)\n", pct, total_ma);
     }
 
-    // Over-current latch.
-    if (total_ma >= _budget.global_max_ma) {
-        if (!_global_state.over_current) {
-            _global_state.over_current = true;
-            Serial.printf("[RESOURCE] CURRENT OVERLOAD: %umA >= %umA — KILL SWITCH\n",
-                          total_ma, _budget.global_max_ma);
-            activateKillSwitch();
-        }
-    } else {
-        _global_state.over_current = false;
+    // AUDIT FIX (P0.1/P1.3): the instantaneous flag tracks the live value
+    // (strictly above the cap = overload, consistent with admission), but the
+    // LATCHED fault is set on a rising edge and is NEVER cleared here — only an
+    // explicit acknowledge clears it. So a fault cannot be silently forgotten
+    // once the kill switch brings the current back down.
+    bool over_now = (total_ma > _budget.global_max_ma);
+    _global_state.over_current = over_now;
+    if (over_now && !_global_state.fault_latched) {
+        _global_state.fault_latched = true;
+        Serial.printf("[RESOURCE] CURRENT OVERLOAD: %umA > %umA — FAULT LATCHED\n",
+                      total_ma, _budget.global_max_ma);
+        activateKillSwitch();
     }
 
     // Reset expired 1-second windows.
@@ -323,38 +351,71 @@ void ResourceManager::activateKillSwitch() {
 }
 
 void ResourceManager::deactivateKillSwitch() {
+    // AUDIT FIX (P0.1): refuse to re-arm while a fault is latched — it must be
+    // acknowledged first. (processPendingRequests already guards this, but keep
+    // the invariant here too for any direct caller.)
+    if (_global_state.fault_latched) {
+        Serial.println("[RESOURCE] Re-arm blocked — fault still latched");
+        return;
+    }
     _global_state.kill_switch_active = false;
-    _global_state.over_current       = false;
     for (uint8_t b = 0; b < 2; b++) _pca.enableBus(b, _pca.getBusConfig(b).enabled);
     Serial.println("[RESOURCE] Kill switch cleared — enabled outputs re-armed");
 }
 
 bool ResourceManager::isKillSwitchActive() const { return _global_state.kill_switch_active; }
 
-void ResourceManager::requestKillSwitch() { _requested_state = REQ_KILL; }
-void ResourceManager::requestRearm()      { _requested_state = REQ_REARM; }
-void ResourceManager::requestRescan()     { _requested_state = REQ_RESCAN; }
+// AUDIT FIX (P0.3): independent flags — a request never overwrites another.
+void ResourceManager::requestKillSwitch()  { _kill_requested = true; }
+void ResourceManager::requestRearm()       { _rearm_requested = true; }
+void ResourceManager::requestRescan()      { _rescan_requested = true; }
+void ResourceManager::requestAcknowledge() { _ack_requested = true; }
 
 void ResourceManager::requestBusFrequency(uint8_t bus_id, uint16_t hz) {
     if (bus_id == 0) _req_freq_bus0 = hz;
     else if (bus_id == 1) _req_freq_bus1 = hz;
 }
 
+void ResourceManager::latchHardwareFault(const char* reason) {
+    _global_state.fault_latched = true;
+    Serial.printf("[RESOURCE] HARDWARE FAULT LATCHED: %s — KILL SWITCH\n",
+                  reason ? reason : "(unknown)");
+    activateKillSwitch();
+}
+
 void ResourceManager::processPendingRequests(ActuatorConfig* actuators[], uint8_t count) {
     _cached_actuators      = actuators;
     _cached_actuator_count = count;
 
-    uint8_t req = _requested_state.exchange(REQ_NONE);
-    switch (req) {
-        case REQ_KILL:   activateKillSwitch(); break;
-        case REQ_RESCAN: doRescan();           break;
-        case REQ_REARM:
-            if (_global_state.over_current)
-                Serial.println("[RESOURCE] Re-arm refused — over-current still latched");
+    // AUDIT FIX (P0.3): strict priority — kill first, then rescan, then
+    // acknowledge, then re-arm ONLY if nothing else is pending and no fault is
+    // latched. A re-arm can no longer swallow a kill.
+    bool kill   = _kill_requested.exchange(false);
+    bool rescan = _rescan_requested.exchange(false);
+    bool ack    = _ack_requested.exchange(false);
+    bool rearm  = _rearm_requested.exchange(false);
+
+    if (kill) {
+        activateKillSwitch();
+    } else if (rescan) {
+        doRescan();
+    } else {
+        if (ack) {
+            // Acknowledge clears a latched fault only when the cause is gone.
+            // It does NOT re-arm — a separate arm action is required.
+            if (_global_state.over_current) {
+                Serial.println("[RESOURCE] Acknowledge refused — over-current still present");
+            } else {
+                _global_state.fault_latched = false;
+                Serial.println("[RESOURCE] Fault acknowledged (still disarmed — arm to resume)");
+            }
+        }
+        if (rearm) {
+            if (_global_state.fault_latched)
+                Serial.println("[RESOURCE] Re-arm refused — fault not acknowledged");
             else
                 deactivateKillSwitch();
-            break;
-        default: break;
+        }
     }
 
     uint16_t f0 = _req_freq_bus0.exchange(0);
@@ -371,11 +432,35 @@ void ResourceManager::doRescan() {
 
 void ResourceManager::applyBusFrequency(uint8_t bus_id, uint16_t hz) {
     if (bus_id > 1) return;
-    bool was_killed = _global_state.kill_switch_active;
+    bool was_armed = !_global_state.kill_switch_active;
+
+    // AUDIT FIX (P0.6): change the prescaler with the bus disabled, then RECOMPUTE
+    // every affected actuator's rest position at the NEW frequency before
+    // re-enabling. A stale PWM register that meant a valid 50 Hz servo pulse
+    // does not mean the same pulse width at 200/1000 Hz, so re-enabling without
+    // recomputing could slam a servo into its end stop.
     _pca.enableBus(bus_id, false);
     _pca.setFrequency(bus_id, hz);
-    if (!was_killed && _pca.getBusConfig(bus_id).enabled) _pca.enableBus(bus_id, true);
-    Serial.printf("[RESOURCE] Bus %d PWM frequency set to %d Hz (Core 1)\n", bus_id, hz);
+
+    if (_cached_actuators != nullptr) {
+        for (uint8_t i = 0; i < _cached_actuator_count; i++) {
+            ActuatorConfig* act = _cached_actuators[i];
+            if (!act || act->bus_id != bus_id) continue;
+            if (act->type == ACT_SERVO) {
+                _pca.setActuatorPWM(*act, _pca.angleToPWM(act->angle_initial, bus_id));
+                act->state.current_position = _pca.angleToPWM(act->angle_initial, bus_id);
+            } else {
+                _pca.setActuatorPWM(*act, 0);
+                act->state.current_position = 0;
+            }
+            act->state.active = false;
+        }
+    }
+
+    // Re-enable only if the system is armed AND the bus is enabled in config.
+    if (was_armed && _pca.getBusConfig(bus_id).enabled) _pca.enableBus(bus_id, true);
+    Serial.printf("[RESOURCE] Bus %d PWM frequency set to %d Hz, rest positions recomputed (Core 1)\n",
+                  bus_id, hz);
 }
 
 // ============================================================================
@@ -447,14 +532,25 @@ void ResourceManager::checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuato
     uint32_t elapsed_ms = (now_us - state.last_activity_us) / 1000;
     if (elapsed_ms >= _watchdog_ms) {
         state.watchdog_triggered = true;
-        actuator.state.active = false;
+        // AUDIT FIX (P0.2): only declare the actuator inactive if the hardware
+        // stop actually reached the PCA. If it failed (driver missing / I²C
+        // error), the output may still be driven — keep it "active" and latch a
+        // hardware fault (which cuts OE globally) instead of silently lying.
+        bool stopped;
         if (actuator.type == ACT_SOLENOID) {
-            _pca.setActuatorPWM(actuator, 0);
-        } else if (actuator.type == ACT_SERVO) {
-            _pca.setActuatorPWM(actuator, _pca.angleToPWM(actuator.angle_initial, actuator.bus_id));
+            stopped = _pca.setActuatorPWM(actuator, 0);
+        } else {
+            stopped = _pca.setActuatorPWM(actuator,
+                        _pca.angleToPWM(actuator.angle_initial, actuator.bus_id));
         }
-        Serial.printf("[RESOURCE] Watchdog actuator %d: forced OFF after %dms\n",
-                      actuator_id, elapsed_ms);
+        if (stopped) {
+            actuator.state.active = false;
+            Serial.printf("[RESOURCE] Watchdog actuator %d: forced OFF after %dms\n",
+                          actuator_id, elapsed_ms);
+        } else {
+            Serial.printf("[RESOURCE] Watchdog actuator %d: HW stop FAILED\n", actuator_id);
+            latchHardwareFault("watchdog safe-off write failed");
+        }
     }
 }
 

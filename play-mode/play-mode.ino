@@ -175,20 +175,35 @@ void setup() {
     }
 
     Serial.println("\n[INIT] PCA Driver (I²C dual-bus)...");
-    if (!pcaDriver.begin()) {
-        Serial.println("[INIT] WARNING: PCA init problem (some buses missing?)");
+    // AUDIT FIX (P0.4): the PCA init result IS part of boot health now.
+    bool pcaOk = pcaDriver.begin();
+    if (!pcaOk) {
+        Serial.println("[INIT] ERROR: PCA init failed (buses missing?)");
     }
 
     // 3. Configure actuators (from config or test)
     Serial.println("\n[INIT] Actuators...");
+    // AUDIT FIX (P0.4): validate that every PCA referenced by a configured
+    // actuator was actually detected on its bus. A missing board means that
+    // actuator's output is unavailable — the machine must not arm.
+    bool hwOk = true;
     if (configManager.getActuatorCount() > 0) {
         ActuatorConfig* actuators = configManager.getActuators();
         uint8_t count = configManager.getActuatorCount();
         for (uint8_t i = 0; i < count; i++) {
+            if (actuators[i].enabled &&
+                !pcaDriver.isPCAPresent(actuators[i].bus_id, actuators[i].pca_address)) {
+                Serial.printf("[INIT] MISSING: actuator %d -> bus %d PCA 0x%02X not detected\n",
+                              actuators[i].id, actuators[i].bus_id, actuators[i].pca_address);
+                logger.log(LOG_ERROR, CAT_SYSTEM, "Actuator %d: PCA 0x%02X absent",
+                           actuators[i].id, actuators[i].pca_address);
+                hwOk = false;
+            }
             actuatorEngine.initActuator(actuators[i]);
             scheduler.registerActuator(&actuators[i]);
         }
-        Serial.printf("[INIT] %d actuators loaded from config\n", count);
+        Serial.printf("[INIT] %d actuators loaded (hardware %s)\n",
+                      count, hwOk ? "OK" : "INCOMPLETE");
     }
 #ifdef ENABLE_TEST_HARNESS
     else {
@@ -196,10 +211,10 @@ void setup() {
     }
 #endif
 
-    // AUDIT FIX (P0.5): outputs are NOT armed here. OE stays HIGH (disabled)
+    // AUDIT FIX (P0.4/P0.5): outputs are NOT armed here. OE stays HIGH (disabled)
     // through the whole init chain and is only lowered at the very end, once
-    // every subsystem has been verified. `bootHealthy` accumulates that state.
-    bool bootHealthy = configOk;
+    // every subsystem — including all required PCA boards — is verified.
+    bool bootHealthy = configOk && pcaOk && hwOk;
 
     // 5. Initialize the unified Resource Manager (safety + power) with the
     // PERSISTED budget + limits so saved settings survive a reboot.
