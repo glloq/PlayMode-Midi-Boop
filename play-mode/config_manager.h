@@ -48,7 +48,19 @@ public:
 
     // Import a configuration from a JSON buffer: parse, apply, validate and
     // atomically save. Returns false (config unchanged) on invalid input.
-    bool importJson(const uint8_t* data, size_t len);
+    //
+    // AUDIT FIX (P1.5): import validation is STRICT — unlike load() (which
+    // tolerantly skips bad/duplicate actuators for boot recovery), any invalid
+    // or duplicate actuator rejects the ENTIRE file so a 40-actuator import can
+    // never silently become a 34-actuator config. When `errors` is provided it
+    // is filled with a human-readable, newline-separated list of every problem
+    // found; on success it is left empty.
+    bool importJson(const uint8_t* data, size_t len, String* errors = nullptr);
+
+    // AUDIT FIX (P1.5): strict, side-effect-free validation of a parsed config
+    // document. Appends one line per problem to `errors` and returns false if
+    // any were found. Does NOT modify the live configuration.
+    bool validateConfigDoc(JsonDocument& doc, String& errors);
 
     // Resets configuration to defaults
     void loadDefaults();

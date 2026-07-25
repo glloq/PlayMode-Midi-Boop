@@ -334,25 +334,146 @@ bool ConfigManager::save() {
     return true;
 }
 
-bool ConfigManager::importJson(const uint8_t* data, size_t len) {
+bool ConfigManager::validateConfigDoc(JsonDocument& doc, String& errors) {
+    // AUDIT FIX (P1.5): STRICT validation used only for user-initiated import.
+    // Every problem is reported; the caller rejects the whole file if any exist.
+    // This is deliberately distinct from load(), whose tolerant skipping exists
+    // to recover a bootable state from a partially-corrupt on-disk file.
+    bool ok = true;
+
+    if (doc["version"].isNull() && doc["actuators"].isNull() && doc["buses"].isNull()) {
+        errors += "Fichier non reconnu comme configuration PlayMode.\n";
+        return false;  // nothing else is meaningful
+    }
+
+    JsonArray actArray = doc["actuators"].as<JsonArray>();
+    if (actArray.isNull()) {
+        // No actuators is a valid (empty) config; nothing to validate here.
+        return true;
+    }
+
+    uint16_t index = 0;
+    uint16_t kept = 0;
+    // Track seen ids and bus/address/channel targets to detect duplicates.
+    // Compact 4-byte record (NOT full ActuatorConfig) to keep this off-stack
+    // footprint small on the web/async task.
+    struct SeenActuator { uint8_t id; uint8_t bus_id; uint8_t pca_address; uint8_t pca_channel; };
+    static SeenActuator seen[MAX_ACTUATORS];
+    for (JsonObject actObj : actArray) {
+        index++;
+        if (kept >= MAX_ACTUATORS) {
+            errors += "Trop d'actionneurs (maximum " + String(MAX_ACTUATORS) + ").\n";
+            ok = false;
+            break;
+        }
+
+        // id (raw, unclamped)
+        long id = actObj["id"] | -1;
+        if (id < 0 || id >= MAX_ACTUATORS) {
+            errors += "Actionneur #" + String(index) + " : id " + String(id) +
+                      " hors plage [0," + String(MAX_ACTUATORS - 1) + "].\n";
+            ok = false;
+        }
+
+        // bus_id
+        long bus = actObj["bus_id"] | 0;
+        if (bus < 0 || bus > 1) {
+            errors += "Actionneur #" + String(index) + " (id " + String(id) +
+                      ") : bus_id " + String(bus) + " invalide (0 ou 1).\n";
+            ok = false;
+        }
+
+        // pca_address
+        long addr = actObj["pca_address"] | (long)PCA_BASE_ADDRESS;
+        if (addr < PCA_BASE_ADDRESS || addr >= PCA_BASE_ADDRESS + PCA_MAX_PER_BUS) {
+            errors += "Actionneur #" + String(index) + " (id " + String(id) +
+                      ") : pca_address 0x" + String((uint32_t)addr, HEX) +
+                      " hors plage.\n";
+            ok = false;
+        }
+
+        // pca_channel
+        long ch = actObj["pca_channel"] | 0;
+        if (ch < 0 || ch >= PCA_CHANNELS) {
+            errors += "Actionneur #" + String(index) + " (id " + String(id) +
+                      ") : pca_channel " + String(ch) + " hors plage [0," +
+                      String(PCA_CHANNELS - 1) + "].\n";
+            ok = false;
+        }
+
+        // type
+        const char* type_str = actObj["type"] | "servo";
+        if (strcmp(type_str, "servo") != 0 && strcmp(type_str, "solenoid") != 0) {
+            errors += "Actionneur #" + String(index) + " (id " + String(id) +
+                      ") : type '" + String(type_str) + "' inconnu (servo/solenoid).\n";
+            ok = false;
+        }
+
+        // Duplicate detection against previously accepted-shape entries.
+        bool dup_id = false, dup_target = false;
+        for (uint16_t j = 0; j < kept; j++) {
+            if ((long)seen[j].id == id) dup_id = true;
+            if ((long)seen[j].bus_id == bus &&
+                (long)seen[j].pca_address == addr &&
+                (long)seen[j].pca_channel == ch) dup_target = true;
+        }
+        if (dup_id) {
+            errors += "Actionneur #" + String(index) + " : id " + String(id) +
+                      " en double.\n";
+            ok = false;
+        }
+        if (dup_target) {
+            errors += "Actionneur #" + String(index) + " (id " + String(id) +
+                      ") : sortie bus " + String(bus) + "/0x" +
+                      String((uint32_t)addr, HEX) + "/canal " + String(ch) +
+                      " déjà utilisée.\n";
+            ok = false;
+        }
+
+        // Record its target for subsequent duplicate checks (even if invalid,
+        // so we still surface secondary duplicates against it).
+        if (kept < MAX_ACTUATORS) {
+            seen[kept].id = (uint8_t)(id < 0 ? 0xFF : id);
+            seen[kept].bus_id = (uint8_t)(bus & 0xFF);
+            seen[kept].pca_address = (uint8_t)(addr & 0xFF);
+            seen[kept].pca_channel = (uint8_t)(ch & 0xFF);
+            kept++;
+        }
+    }
+
+    return ok;
+}
+
+bool ConfigManager::importJson(const uint8_t* data, size_t len, String* errors) {
     // Validate that it parses and looks like a PlayMode config before touching
     // the live file.
     JsonDocument doc;
     if (deserializeJson(doc, data, len)) {
         Serial.println("[CONFIG] Import rejected — invalid JSON");
+        if (errors) *errors += "JSON invalide (échec du parsing).\n";
         return false;
     }
-    if (doc["version"].isNull() && doc["actuators"].isNull() && doc["buses"].isNull()) {
-        Serial.println("[CONFIG] Import rejected — not a PlayMode config");
+
+    // AUDIT FIX (P1.5): reject the WHOLE file if any actuator is invalid or a
+    // duplicate — never silently drop entries and report success.
+    String problems;
+    if (!validateConfigDoc(doc, problems)) {
+        Serial.println("[CONFIG] Import rejected — validation errors:");
+        Serial.print(problems);
+        if (errors) *errors += problems;
         return false;
     }
 
     // Stage the uploaded bytes, then rotate into place (keeping a backup).
     File f = LittleFS.open(CONFIG_TMP_PATH, "w");
-    if (!f) return false;
+    if (!f) { if (errors) *errors += "Écriture temporaire impossible.\n"; return false; }
     size_t w = f.write(data, len);
     f.close();
-    if (w != len) { LittleFS.remove(CONFIG_TMP_PATH); return false; }
+    if (w != len) {
+        LittleFS.remove(CONFIG_TMP_PATH);
+        if (errors) *errors += "Écriture temporaire incomplète.\n";
+        return false;
+    }
 
     if (LittleFS.exists(CONFIG_FILE_PATH)) {
         LittleFS.remove(CONFIG_BAK_PATH);
@@ -360,13 +481,17 @@ bool ConfigManager::importJson(const uint8_t* data, size_t len) {
     }
     if (!LittleFS.rename(CONFIG_TMP_PATH, CONFIG_FILE_PATH)) {
         LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);
+        if (errors) *errors += "Rotation du fichier de configuration impossible.\n";
         return false;
     }
 
     // Re-load through the normal path (defaults + overlay + validation +
-    // migration). On failure, restore the backup.
+    // migration). On failure, restore the backup. Because we validated strictly
+    // above, load() here should keep every actuator; a reload failure now means
+    // a filesystem-level problem, not silent dropping.
     if (!load()) {
         Serial.println("[CONFIG] Import failed on reload — restoring previous config");
+        if (errors) *errors += "Rechargement échoué — configuration précédente restaurée.\n";
         LittleFS.remove(CONFIG_FILE_PATH);
         if (LittleFS.exists(CONFIG_BAK_PATH)) {
             LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH);

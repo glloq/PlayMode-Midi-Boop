@@ -1324,65 +1324,227 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
         return;
     }
 
-    // If routing_count < inst_idx+1 (desynchronization), create the missing entries
-    while (_config->getRoutingCount() <= inst_idx) {
-        MidiRoutingConfig empty = {};
-        empty.instrument_index = _config->getRoutingCount();
-        _config->addRoutingConfig(empty);
-    }
+    // ------------------------------------------------------------------------
+    // AUDIT FIX (P1.6): validate the ENTIRE payload into local staging buffers
+    // BEFORE touching the live routing. Nothing is applied unless every note,
+    // CC and velocity point is valid, so the dispatcher can never observe a
+    // partially-updated or inconsistent routing. Rejections carry a precise
+    // reason.
+    // ------------------------------------------------------------------------
+    const ActuatorConfig* actuators = _config->getActuators();
+    const uint8_t actuator_count = _config->getActuatorCount();
 
-    MidiRoutingConfig* routings = _config->getRoutingConfigs();
+    // Local lambda: resolve an actuator by id (returns nullptr if absent).
+    auto findActuator = [&](uint8_t id) -> const ActuatorConfig* {
+        for (uint8_t i = 0; i < actuator_count; i++)
+            if (actuators[i].id == id) return &actuators[i];
+        return nullptr;
+    };
 
-    MidiRoutingConfig& routing = routings[inst_idx];
+    String errors;
 
-    // Notes
+    // --- Staging: notes ---
+    NoteMapping staged_notes[MAX_NOTE_MAPPINGS];
+    uint8_t staged_note_count = 0;
+    bool have_notes = false;
     JsonArray notes = doc["notes"];
     if (!notes.isNull()) {
-        routing.note_map_count = 0;
+        have_notes = true;
+        uint16_t idx = 0;
         for (JsonObject nm : notes) {
-            if (routing.note_map_count >= MAX_NOTE_MAPPINGS) break;
-            NoteMapping& m = routing.note_map[routing.note_map_count];
-            m.midi_note         = nm["note"] | 0;
-            m.actuator_id       = nm["actuator"] | 0;
-            m.behavior_override = nm["behavior"] | 0xFF;
-            m.enabled           = nm["enabled"] | true;
-            routing.note_map_count++;
+            idx++;
+            if (staged_note_count >= MAX_NOTE_MAPPINGS) {
+                errors += "Trop de notes (max " + String(MAX_NOTE_MAPPINGS) + ").\n";
+                break;
+            }
+            long note      = nm["note"] | -1;
+            long act_id    = nm["actuator"] | -1;
+            long behavior  = nm["behavior"] | 0xFF;
+            bool enabled   = nm["enabled"] | true;
+
+            if (note < 0 || note > 127) {
+                errors += "Note #" + String(idx) + " : valeur " + String(note) +
+                          " hors plage MIDI [0,127].\n";
+            }
+            const ActuatorConfig* act = (act_id >= 0) ? findActuator((uint8_t)act_id) : nullptr;
+            if (!act) {
+                errors += "Note #" + String(idx) + " : actionneur " + String(act_id) +
+                          " inexistant.\n";
+            } else if (behavior != 0xFF) {
+                bool compat = (act->type == ACT_SERVO) ? (behavior >= 0 && behavior <= 3)
+                                                       : (behavior >= 0 && behavior <= 1);
+                if (!compat) {
+                    errors += "Note #" + String(idx) + " : comportement " + String(behavior) +
+                              " incompatible avec l'actionneur " + String(act_id) +
+                              (act->type == ACT_SERVO ? " (servo)" : " (solénoïde)") + ".\n";
+                }
+            }
+            // Duplicate note detection within this instrument.
+            for (uint8_t j = 0; j < staged_note_count; j++) {
+                if (staged_notes[j].midi_note == (uint8_t)note) {
+                    errors += "Note #" + String(idx) + " : note MIDI " + String(note) +
+                              " déjà routée dans cet instrument.\n";
+                    break;
+                }
+            }
+
+            NoteMapping& m = staged_notes[staged_note_count++];
+            m.midi_note         = (uint8_t)(note < 0 ? 0 : note);
+            m.actuator_id       = (uint8_t)(act_id < 0 ? 0 : act_id);
+            m.behavior_override = (uint8_t)behavior;
+            m.enabled           = enabled;
         }
     }
 
-    // CCs
+    // --- Staging: CCs ---
+    CCMapping staged_ccs[MAX_CC_MAPPINGS];
+    uint8_t staged_cc_count = 0;
+    bool have_ccs = false;
     JsonArray ccs = doc["ccs"];
     if (!ccs.isNull()) {
-        routing.cc_map_count = 0;
+        have_ccs = true;
+        uint16_t idx = 0;
         for (JsonObject cm : ccs) {
-            if (routing.cc_map_count >= MAX_CC_MAPPINGS) break;
-            CCMapping& c = routing.cc_map[routing.cc_map_count];
-            c.cc_number   = cm["cc"] | 0;
-            c.actuator_id = cm["actuator"] | 0;
-            c.target      = (CCTarget)(uint8_t)(cm["target"] | 0);
-            c.range_min   = cm["min"] | 0;
-            c.range_max   = cm["max"] | 127;
-            c.enabled     = cm["enabled"] | true;
-            routing.cc_map_count++;
+            idx++;
+            if (staged_cc_count >= MAX_CC_MAPPINGS) {
+                errors += "Trop de CC (max " + String(MAX_CC_MAPPINGS) + ").\n";
+                break;
+            }
+            long cc      = cm["cc"] | -1;
+            long act_id  = cm["actuator"] | -1;
+            long target  = cm["target"] | 0;
+            long rmin    = cm["min"] | 0;
+            long rmax    = cm["max"] | 127;
+            bool enabled = cm["enabled"] | true;
+
+            if (cc < 0 || cc > 127) {
+                errors += "CC #" + String(idx) + " : numéro " + String(cc) +
+                          " hors plage [0,127].\n";
+            }
+            if (target < 0 || target > 3) {
+                errors += "CC #" + String(idx) + " : cible " + String(target) + " invalide.\n";
+            }
+            const ActuatorConfig* act = (act_id >= 0) ? findActuator((uint8_t)act_id) : nullptr;
+            if (!act) {
+                errors += "CC #" + String(idx) + " : actionneur " + String(act_id) +
+                          " inexistant.\n";
+            } else if (target >= 0 && target <= 3) {
+                // POSITION/AMPLITUDE/SPEED are servo parameters; PWM_HOLD is a
+                // solenoid parameter.
+                bool compat = (target == CC_TARGET_PWM_HOLD) ? (act->type == ACT_SOLENOID)
+                                                             : (act->type == ACT_SERVO);
+                if (!compat) {
+                    errors += "CC #" + String(idx) + " : cible " + String(target) +
+                              " incompatible avec l'actionneur " + String(act_id) +
+                              (act->type == ACT_SERVO ? " (servo)" : " (solénoïde)") + ".\n";
+                }
+            }
+            if (rmin < 0 || rmax < 0 || rmin > 65535 || rmax > 65535 || rmin > rmax) {
+                errors += "CC #" + String(idx) + " : plage [" + String(rmin) + "," +
+                          String(rmax) + "] invalide.\n";
+            }
+
+            CCMapping& c = staged_ccs[staged_cc_count++];
+            c.cc_number   = (uint8_t)(cc < 0 ? 0 : cc);
+            c.actuator_id = (uint8_t)(act_id < 0 ? 0 : act_id);
+            c.target      = (CCTarget)(uint8_t)target;
+            c.range_min   = (uint16_t)(rmin < 0 ? 0 : rmin);
+            c.range_max   = (uint16_t)(rmax < 0 ? 0 : rmax);
+            c.enabled     = enabled;
         }
     }
 
-    // Velocity curve
+    // --- Staging: velocity curve (must be strictly increasing by input) ---
+    VelocityCurvePoint staged_vel[VELOCITY_CURVE_POINTS];
+    uint8_t staged_vel_count = 0;
+    bool have_vel = false;
     JsonArray vel = doc["velocity_curve"];
     if (!vel.isNull()) {
-        routing.velocity_curve_count = 0;
+        have_vel = true;
+        uint16_t idx = 0;
+        int last_input = -1;
         for (JsonObject vp : vel) {
-            if (routing.velocity_curve_count >= VELOCITY_CURVE_POINTS) break;
-            routing.velocity_curve[routing.velocity_curve_count].input  = vp["in"] | 0;
-            routing.velocity_curve[routing.velocity_curve_count].output = vp["out"] | 0;
-            routing.velocity_curve_count++;
+            idx++;
+            if (staged_vel_count >= VELOCITY_CURVE_POINTS) {
+                errors += "Trop de points de courbe (max " +
+                          String(VELOCITY_CURVE_POINTS) + ").\n";
+                break;
+            }
+            long in  = vp["in"] | -1;
+            long out = vp["out"] | -1;
+            if (in < 0 || in > 127 || out < 0 || out > 127) {
+                errors += "Courbe point #" + String(idx) + " : (" + String(in) + "," +
+                          String(out) + ") hors plage [0,127].\n";
+            }
+            if ((int)in <= last_input) {
+                errors += "Courbe point #" + String(idx) +
+                          " : entrées non strictement croissantes.\n";
+            }
+            last_input = (int)in;
+
+            staged_vel[staged_vel_count].input  = (uint8_t)(in < 0 ? 0 : in);
+            staged_vel[staged_vel_count].output = (uint8_t)(out < 0 ? 0 : out);
+            staged_vel_count++;
         }
     }
 
-    // AUDIT FIX: keep the instrument's legacy actuator_ids/midi_notes cache in
-    // sync with the routing note_map (single source of truth), then reload the
-    // dispatcher lookup tables.
-    _config->rebuildInstrumentFromRouting(inst_idx);
+    if (errors.length() > 0) {
+        JsonDocument resp;
+        resp["error"] = "invalid routing";
+        resp["detail"] = errors;
+        String out;
+        serializeJson(resp, out);
+        request->send(400, "application/json", out);
+        return;
+    }
+
+    // ------------------------------------------------------------------------
+    // Everything validated — apply atomically. Take the actuator lock (also held
+    // by structural edits) and write COUNT LAST so a concurrent dispatcher read
+    // never sees a half-written map: count is lowered to 0 first, entries are
+    // filled, then the count is published.
+    // ------------------------------------------------------------------------
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json",
+                          "{\"error\":\"routing busy\"}");
+            return;
+        }
+
+        // If routing_count < inst_idx+1 (desynchronization), create the missing
+        // entries under the lock.
+        while (_config->getRoutingCount() <= inst_idx) {
+            MidiRoutingConfig empty = {};
+            empty.instrument_index = _config->getRoutingCount();
+            _config->addRoutingConfig(empty);
+        }
+        MidiRoutingConfig& routing = _config->getRoutingConfigs()[inst_idx];
+
+        if (have_notes) {
+            routing.note_map_count = 0;  // hide before rewriting entries
+            for (uint8_t i = 0; i < staged_note_count; i++)
+                routing.note_map[i] = staged_notes[i];
+            routing.note_map_count = staged_note_count;  // publish
+        }
+        if (have_ccs) {
+            routing.cc_map_count = 0;
+            for (uint8_t i = 0; i < staged_cc_count; i++)
+                routing.cc_map[i] = staged_ccs[i];
+            routing.cc_map_count = staged_cc_count;
+        }
+        if (have_vel) {
+            routing.velocity_curve_count = 0;
+            for (uint8_t i = 0; i < staged_vel_count; i++)
+                routing.velocity_curve[i] = staged_vel[i];
+            routing.velocity_curve_count = staged_vel_count;
+        }
+
+        // AUDIT FIX: keep the instrument's legacy actuator_ids/midi_notes cache
+        // in sync with the routing note_map (single source of truth).
+        _config->rebuildInstrumentFromRouting(inst_idx);
+    }  // lock released before the dispatcher reload
+
     _dispatcher->refreshConfig();
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -1503,35 +1665,70 @@ void WebServer::handleGetConfigExport(AsyncWebServerRequest* request) {
     request->send(resp);
 }
 
+bool WebServer::waitForOutputsCut(uint32_t timeout_ms) {
+    // If there is no resource manager, there is nothing to confirm — treat the
+    // outputs as already safe (the caller is responsible for the actuator lock).
+    if (!_resources) return true;
+
+    _resources->requestKillSwitch();
+
+    // Poll for Core 1 to physically execute the kill (OE HIGH). We deliberately
+    // do NOT hold the actuator lock here: Core 1 must be free to run its request
+    // processing and drive the OE pin. A short bounded wait keeps the async_tcp
+    // task responsive and well under the task watchdog.
+    uint32_t start = millis();
+    while (!_resources->isKillSwitchActive()) {
+        if ((uint32_t)(millis() - start) >= timeout_ms) return false;
+        delay(10);
+    }
+    return true;
+}
+
 void WebServer::handlePostConfigImport(AsyncWebServerRequest* request,
                                        uint8_t* data, size_t len) {
     if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
-    // Cut outputs before swapping the whole configuration, then reboot so the
-    // new WiFi/MIDI/actuator setup is applied cleanly from a known state.
-    if (_resources) _resources->requestKillSwitch();
+    // AUDIT FIX (P0.5): cut the physical outputs FIRST and confirm the kill was
+    // executed by Core 1 BEFORE the configuration is replaced. Previously the
+    // handler grabbed the actuator lock immediately after requesting the kill,
+    // starving Core 1 of the lock it needs to reset the outputs — so the config
+    // could be swapped while actuators were still powered. We now confirm the
+    // OE-HIGH state without holding the lock; only then do we swap.
+    if (!waitForOutputsCut(1000)) {
+        request->send(503, "application/json",
+                      "{\"error\":\"could not confirm outputs are cut — import aborted\"}");
+        return;
+    }
 
     bool ok;
+    String errors;
     {
         ActuatorLockGuard guard(*_config);
         if (!guard.locked()) {
             request->send(503, "application/json", "{\"error\":\"configuration busy\"}");
             return;
         }
-        ok = _config->importJson(data, len);
+        // AUDIT FIX (P1.5): strict import — the whole file is rejected (and the
+        // live config left untouched) if any actuator is invalid or duplicated.
+        ok = _config->importJson(data, len, &errors);
         if (ok && _scheduler)
             _scheduler->syncActuators(_config->getActuators(), _config->getActuatorCount());
     }
 
     if (!ok) {
-        request->send(400, "application/json",
-                      "{\"error\":\"invalid or rejected configuration\"}");
+        JsonDocument resp;
+        resp["error"] = "invalid or rejected configuration";
+        if (errors.length() > 0) resp["detail"] = errors;
+        String out;
+        serializeJson(resp, out);
+        request->send(400, "application/json", out);
         return;
     }
     logger.log(LOG_WARN, CAT_SYSTEM, "Configuration imported — restarting");
     _restart_at_ms = millis() + 400;
-    request->send(200, "application/json",
+    // 202 Accepted: the swap succeeded and the device will restart to apply it.
+    request->send(202, "application/json",
                   "{\"ok\":true,\"note\":\"configuration imported — device is restarting\"}");
 }
 
@@ -1539,16 +1736,23 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     if (!requireAuth(request)) return;
     if (!_config) { request->send(500); return; }
 
-    // AUDIT FIX (P0.4): a factory reset must also stop the hardware and clear
-    // the scheduler, not just wipe the config. Sequence:
-    //   1. request the kill switch (blocks outputs immediately);
-    //   2. lock the actuator array (checked!) and swap in the defaults;
+    // AUDIT FIX (P0.4 / P0.5): a factory reset must stop the hardware BEFORE it
+    // wipes the config, and must not claim success if the persist failed.
+    // Sequence:
+    //   1. request the kill switch and CONFIRM it was executed by Core 1 (OE
+    //      HIGH), without holding the actuator lock;
+    //   2. lock the actuator array and swap in the defaults;
     //   3. resync the scheduler's actuator table to empty;
-    //   4. persist the defaults;
+    //   4. persist the defaults — and check the result honestly;
     //   5. reboot — at boot OE starts HIGH (outputs disabled) until the fresh
     //      config is applied, satisfying "OE off until next start completes".
-    if (_resources) _resources->requestKillSwitch();
+    if (!waitForOutputsCut(1000)) {
+        request->send(503, "application/json",
+                      "{\"error\":\"could not confirm outputs are cut — reset aborted\"}");
+        return;
+    }
 
+    bool saved;
     {
         ActuatorLockGuard guard(*_config);
         if (!guard.locked()) {
@@ -1558,14 +1762,23 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
         }
         _config->loadDefaults();
         if (_scheduler) _scheduler->syncActuators(nullptr, 0);
-        _config->save();
+        saved = _config->save();
     }  // lock released here
+
+    if (!saved) {
+        // AUDIT FIX (P0.5): do NOT report success when the defaults could not be
+        // persisted — the next boot would reload the OLD config.
+        logger.log(LOG_ERROR, CAT_SYSTEM, "Factory reset: persist FAILED");
+        request->send(500, "application/json",
+                      "{\"error\":\"factory reset applied in memory but persist failed\"}");
+        return;
+    }
 
     if (_dispatcher) _dispatcher->refreshConfig();
     logger.log(LOG_WARN, CAT_SYSTEM, "Factory reset applied — restarting");
 
     _restart_at_ms = millis() + 400;  // let the response flush, then reboot
-    request->send(200, "application/json",
+    request->send(202, "application/json",
                   "{\"ok\":true,\"note\":\"factory reset — device is restarting\"}");
 }
 
