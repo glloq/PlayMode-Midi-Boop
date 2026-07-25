@@ -127,6 +127,11 @@ private:
     void handlePostSafety(AsyncWebServerRequest* request,
                           uint8_t* data, size_t len);
 
+    // AUDIT FIX (UI-P0): transactional creation of an instrument + its
+    // actuators + routing in one validated, atomic operation.
+    void handlePostSetupInstrument(AsyncWebServerRequest* request,
+                                   uint8_t* data, size_t len);
+
     // POST — actions
     void handlePostSave(AsyncWebServerRequest* request);
     void handlePostDefaults(AsyncWebServerRequest* request);

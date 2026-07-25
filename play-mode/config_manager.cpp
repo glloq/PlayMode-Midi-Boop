@@ -27,6 +27,8 @@ ConfigManager::ConfigManager()
       _version(CONFIG_VERSION) {
     memset(&_wifi_config, 0, sizeof(_wifi_config));
     memset(&_midi_input_config, 0, sizeof(_midi_input_config));
+    memset(&_power_budget, 0, sizeof(_power_budget));
+    memset(&_safety_limits, 0, sizeof(_safety_limits));
     memset(_actuators, 0, sizeof(_actuators));
     memset(_instruments, 0, sizeof(_instruments));
     memset(_routing_configs, 0, sizeof(_routing_configs));
@@ -126,6 +128,16 @@ bool ConfigManager::load() {
     if (!doc["midi_input"].isNull()) {
         JsonObject midiObj = doc["midi_input"].as<JsonObject>();
         deserializeMidiInput(_midi_input_config, midiObj);
+    }
+
+    // Power budget + Safety limits (persisted)
+    if (!doc["power"].isNull()) {
+        JsonObject p = doc["power"].as<JsonObject>();
+        deserializePower(_power_budget, p);
+    }
+    if (!doc["safety"].isNull()) {
+        JsonObject s = doc["safety"].as<JsonObject>();
+        deserializeSafety(_safety_limits, s);
     }
 
     // Bus
@@ -242,6 +254,12 @@ bool ConfigManager::save() {
     JsonObject midiObj = doc["midi_input"].to<JsonObject>();
     serializeMidiInput(_midi_input_config, midiObj);
 
+    // Power budget + Safety limits (persisted)
+    JsonObject powerObj = doc["power"].to<JsonObject>();
+    serializePower(_power_budget, powerObj);
+    JsonObject safetyObj = doc["safety"].to<JsonObject>();
+    serializeSafety(_safety_limits, safetyObj);
+
     // Bus
     JsonArray busArray = doc["buses"].to<JsonArray>();
     for (uint8_t i = 0; i < 2; i++) {
@@ -348,6 +366,24 @@ void ConfigManager::loadDefaults() {
     strlcpy(_wifi_config.hostname, WIFI_DEFAULT_HOSTNAME, sizeof(_wifi_config.hostname));
     _wifi_config.enabled = true;
     _wifi_config.ap_fallback = true;
+
+    // Power budget defaults
+    memset(&_power_budget, 0, sizeof(_power_budget));
+    _power_budget.global_max_ma        = POWER_GLOBAL_MAX_MA;
+    _power_budget.servo_bus_max_ma     = POWER_SERVO_BUS_MAX_MA;
+    _power_budget.solenoid_bus_max_ma  = POWER_SOLENOID_BUS_MAX_MA;
+    _power_budget.global_max_polyphony = POWER_MAX_POLYPHONY;
+    _power_budget.smart_rejection      = true;
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+        _power_budget.instrument_max_polyphony[i] = 4;
+    }
+
+    // Safety limit defaults
+    _safety_limits.max_duty_pct   = SAFETY_MAX_DUTY_CYCLE;
+    _safety_limits.max_freq_hz    = SAFETY_MAX_FREQ_HZ;
+    _safety_limits.watchdog_ms    = SAFETY_WATCHDOG_MS;
+    _safety_limits.max_polyphony  = SAFETY_MAX_POLYPHONY;
+    _safety_limits.max_current_ma = SAFETY_MAX_TOTAL_CURRENT_MA;
 
     // MIDI Input defaults
     _midi_input_config.serial_enabled = true;
@@ -526,6 +562,22 @@ MidiInputConfig* ConfigManager::getMidiInputConfig() {
 
 void ConfigManager::setMidiInputConfig(const MidiInputConfig& config) {
     _midi_input_config = config;
+}
+
+PowerBudget* ConfigManager::getPowerBudget() {
+    return &_power_budget;
+}
+
+void ConfigManager::setPowerBudget(const PowerBudget& budget) {
+    _power_budget = budget;
+}
+
+SafetyLimits* ConfigManager::getSafetyLimits() {
+    return &_safety_limits;
+}
+
+void ConfigManager::setSafetyLimits(const SafetyLimits& limits) {
+    _safety_limits = limits;
 }
 
 MidiRoutingConfig* ConfigManager::getRoutingConfigs() {
@@ -773,6 +825,51 @@ void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject
                       midi.udp_port, midi.rtp_port, MIDI_UDP_PORT);
         midi.udp_port = MIDI_UDP_PORT;
     }
+}
+
+// ============================================================================
+// Serialization / Deserialization — Power budget + Safety limits
+// ============================================================================
+
+void ConfigManager::serializePower(const PowerBudget& p, JsonObject& obj) {
+    obj["global_max_ma"]   = p.global_max_ma;
+    obj["servo_max_ma"]    = p.servo_bus_max_ma;
+    obj["sol_max_ma"]      = p.solenoid_bus_max_ma;
+    obj["max_polyphony"]   = p.global_max_polyphony;
+    obj["smart_rejection"] = p.smart_rejection;
+    JsonArray poly = obj["inst_polyphony"].to<JsonArray>();
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) poly.add(p.instrument_max_polyphony[i]);
+}
+
+void ConfigManager::deserializePower(PowerBudget& p, const JsonObject& obj) {
+    p.global_max_ma        = obj["global_max_ma"]   | (uint32_t)POWER_GLOBAL_MAX_MA;
+    p.servo_bus_max_ma     = obj["servo_max_ma"]    | (uint32_t)POWER_SERVO_BUS_MAX_MA;
+    p.solenoid_bus_max_ma  = obj["sol_max_ma"]      | (uint32_t)POWER_SOLENOID_BUS_MAX_MA;
+    p.global_max_polyphony = obj["max_polyphony"]   | (uint8_t)POWER_MAX_POLYPHONY;
+    p.smart_rejection      = obj["smart_rejection"] | true;
+    JsonArray poly = obj["inst_polyphony"].as<JsonArray>();
+    uint8_t i = 0;
+    for (JsonVariant v : poly) {
+        if (i >= MAX_INSTRUMENTS) break;
+        p.instrument_max_polyphony[i++] = v.as<uint8_t>();
+    }
+    for (; i < MAX_INSTRUMENTS; i++) p.instrument_max_polyphony[i] = 4;
+}
+
+void ConfigManager::serializeSafety(const SafetyLimits& s, JsonObject& obj) {
+    obj["max_duty_pct"]   = s.max_duty_pct;
+    obj["max_freq_hz"]    = s.max_freq_hz;
+    obj["watchdog_ms"]    = s.watchdog_ms;
+    obj["max_polyphony"]  = s.max_polyphony;
+    obj["max_current_ma"] = s.max_current_ma;
+}
+
+void ConfigManager::deserializeSafety(SafetyLimits& s, const JsonObject& obj) {
+    s.max_duty_pct   = obj["max_duty_pct"]   | (uint8_t)SAFETY_MAX_DUTY_CYCLE;
+    s.max_freq_hz    = obj["max_freq_hz"]    | (uint16_t)SAFETY_MAX_FREQ_HZ;
+    s.watchdog_ms    = obj["watchdog_ms"]    | (uint16_t)SAFETY_WATCHDOG_MS;
+    s.max_polyphony  = obj["max_polyphony"]  | (uint8_t)SAFETY_MAX_POLYPHONY;
+    s.max_current_ma = obj["max_current_ma"] | (uint16_t)SAFETY_MAX_TOTAL_CURRENT_MA;
 }
 
 // ============================================================================

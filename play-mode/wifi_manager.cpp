@@ -140,20 +140,26 @@ bool WiFiManager::startAP() {
 
     WiFi.mode(WIFI_AP);
 
-    // AUDIT FIX (P0.9/P1.9): protect the SoftAP with WPA2 using a PER-DEVICE
-    // password. Use the configured one if set (>= 8 chars); otherwise derive a
-    // unique password from the chip MAC so boards do not share a single key.
+    // AUDIT FIX (P0.9/P1.9/UX): per-device WPA2. The SSID carries the same MAC
+    // suffix as the default password, so a phone user can identify the board
+    // and know its password without a serial console:
+    //   SSID: play-mode-A1B2C3   password: pm-A1B2C3
+    uint8_t mac[6];
+    WiFi.softAPmacAddress(mac);
+    char suffix[7];
+    snprintf(suffix, sizeof(suffix), "%02X%02X%02X", mac[3], mac[4], mac[5]);
+
+    char ap_ssid[40];
+    snprintf(ap_ssid, sizeof(ap_ssid), "%s-%s", _config.hostname, suffix);
+
     char ap_pass[65];
     if (strlen(_config.ap_password) >= 8) {
         strlcpy(ap_pass, _config.ap_password, sizeof(ap_pass));
     } else {
-        uint8_t mac[6];
-        WiFi.softAPmacAddress(mac);
-        snprintf(ap_pass, sizeof(ap_pass), "pm-%02X%02X%02X",
-                 mac[3], mac[4], mac[5]);   // e.g. "pm-A1B2C3" (9 chars)
+        snprintf(ap_pass, sizeof(ap_pass), "pm-%s", suffix);   // e.g. "pm-A1B2C3"
     }
 
-    bool result = WiFi.softAP(_config.hostname, ap_pass);
+    bool result = WiFi.softAP(ap_ssid, ap_pass);
 
     if (result) {
         _ap_mode = true;
@@ -166,7 +172,7 @@ bool WiFiManager::startAP() {
         Serial.printf("[WIFI] AP started — IP: %s  (WPA2, DNS captive portal active)\n",
                       WiFi.softAPIP().toString().c_str());
         Serial.printf("[WIFI] AP SSID: %s  password: %s\n",
-                      _config.hostname, ap_pass);
+                      ap_ssid, ap_pass);
     } else {
         Serial.println("[WIFI] AP start failed");
     }

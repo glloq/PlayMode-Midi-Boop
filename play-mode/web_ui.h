@@ -487,7 +487,8 @@ tr:hover td{background:var(--bg2)}
     </div>
     <div class="form-group">
       <label>Password</label>
-      <input type="password" id="set-pass" maxlength="64">
+      <input type="password" id="set-pass" maxlength="64" placeholder="leave empty to keep current">
+      <div class="help">Leave empty to keep the stored WiFi password.</div>
     </div>
   </div>
   <div class="form-row">
@@ -507,8 +508,8 @@ tr:hover td{background:var(--bg2)}
   <div class="form-row">
     <div class="form-group">
       <label>Access Point password (WPA2)</label>
-      <input type="password" id="set-ap-pass" maxlength="64" placeholder="leave empty for per-device default">
-      <div class="help">Protects the device's own hotspot. Min 8 characters. Empty = unique password derived from this board (shown on the serial console).</div>
+      <input type="password" id="set-ap-pass" maxlength="64" placeholder="leave empty to keep current">
+      <div class="help">Protects the device's own hotspot (min 8 characters). Leave empty to keep the current password. New devices use a unique password shown in the SSID hint below.</div>
     </div>
   </div>
   <button class="btn primary" onclick="saveWiFiConfig()">Save WiFi</button>
@@ -648,8 +649,8 @@ tr:hover td{background:var(--bg2)}
     <div class="form-row">
       <div class="form-group">
         <label>Actuator ID</label>
-        <input type="number" id="ma-id" min="0" max="31" value="0">
-        <div class="help">Unique identifier (0-31), automatically assigned</div>
+        <input type="number" id="ma-id" min="0" max="127" value="0" readonly>
+        <div class="help">Unique identifier (0-127), assigned automatically to the first free slot</div>
       </div>
       <div class="form-group">
         <label>Actuator type</label>
@@ -1142,8 +1143,11 @@ function connectWS() {
 
 function updateDashboard(d) {
   // MIDI Transport
+  // AUDIT FIX (UI-P1): do NOT sum incompatible units (serial bytes + UDP
+  // packets + RTP messages). Show each source separately with its unit.
   if (d.midi) {
-    el('d-midi-recv', (d.midi.serial_bytes || 0) + (d.midi.udp_packets || 0) + (d.midi.rtp_packets || 0));
+    el('d-midi-recv', 'cable ' + (d.midi.serial_bytes || 0) + ' B / UDP '
+        + (d.midi.udp_packets || 0) + ' pkt / RTP ' + (d.midi.rtp_packets || 0) + ' msg');
     el('d-midi-routed', d.dispatcher ? d.dispatcher.dispatched : 0);
     el('d-midi-unmapped', d.dispatcher ? d.dispatcher.dropped : 0);
   }
@@ -1277,14 +1281,37 @@ async function fetchAuthToken() {
   }
 }
 
+// AUDIT FIX (UI-P0): robust helper. Checks res.ok, guards against non-JSON
+// bodies, and enforces a timeout. On any failure it surfaces the error (toast)
+// and returns null, so callers that test the result treat it as a failure
+// instead of silently proceeding as if it succeeded.
 async function api(url, method='GET', body=null) {
-  const opts = { method, headers: {'Content-Type':'application/json'} };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  const opts = { method, headers: {'Content-Type':'application/json'}, signal: controller.signal };
   if (authToken && method !== 'GET') {
     opts.headers['X-PlayMode-Token'] = authToken;
   }
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  return res.json();
+  try {
+    const res = await fetch(url, opts);
+    const text = await res.text();
+    let data = {};
+    if (text) { try { data = JSON.parse(text); } catch (e) { data = {}; } }
+    if (!res.ok) {
+      const msg = (data && data.error) ? data.error : ('HTTP ' + res.status);
+      if (typeof toast === 'function') toast('Error: ' + msg, 'error');
+      return null;
+    }
+    return data;
+  } catch (e) {
+    if (typeof toast === 'function') {
+      toast(e.name === 'AbortError' ? 'Request timed out' : 'Network error', 'error');
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function el(id, val) {
@@ -1440,7 +1467,8 @@ async function saveInstrument() {
     enabled: true
   };
   if (editingInstrumentIdx >= 0) data.index = editingInstrumentIdx;
-  await api('/api/instrument', 'POST', data);
+  const resp = await api('/api/instrument', 'POST', data);
+  if (!resp || !resp.ok) return;   // error already surfaced by api()
   closeModal('modal-instrument');
   editingInstrumentIdx = -1;
   instruments = [];  // Force refresh
@@ -1622,9 +1650,11 @@ function toggleServoDirection() {
 
 function openActuatorModal() {
   editingActuatorId = -1;
-  // Auto-increment actuator ID
-  const nextId = (actuators && actuators.length > 0)
-    ? Math.max(...actuators.map(a => a.id)) + 1 : 0;
+  // AUDIT FIX (UI-P1): assign the first FREE id in 0..127 (not max+1, which
+  // could exceed 127 or collide after deletions).
+  const usedIds = new Set((actuators || []).map(a => a.id));
+  let nextId = 0;
+  while (nextId < 128 && usedIds.has(nextId)) nextId++;
   document.getElementById('ma-id').value = nextId;
   document.getElementById('ma-type').value = '0';
   // Auto-increment PCA channel based on existing actuators
@@ -1729,7 +1759,8 @@ async function saveActuator() {
     data.ramp_ms = parseInt(document.getElementById('ma-ramp').value);
   }
 
-  await api('/api/actuator', 'POST', data);
+  const resp = await api('/api/actuator', 'POST', data);
+  if (!resp || !resp.ok) return;   // error already surfaced by api()
   closeModal('modal-actuator');
   editingActuatorId = -1;
   loadActuatorsWithNotes();
@@ -2272,8 +2303,9 @@ function pianoNoteOn(instIdx, note) {
   // Visual feedback only on this instrument's piano
   const piano = document.getElementById('piano-' + instIdx);
   if (piano) piano.querySelectorAll('[data-note="' + note + '"]').forEach(k => k.classList.add('active'));
+  // AUDIT FIX (UI-P1): use the SAME WebSocket for ON and OFF.
   if (ws && wsConnected) {
-    ws.send(JSON.stringify({cmd:'test', id:actId, vel:100, token:authToken || undefined}));
+    ws.send(JSON.stringify({cmd:'test', id:actId, on:true, vel:100, token:authToken || undefined}));
   }
 }
 
@@ -2285,7 +2317,11 @@ function pianoNoteOff(instIdx, note) {
   if (!instMap) return;
   const actId = instMap[note];
   if (actId === undefined) return;
-  api('/api/test/actuator', 'POST', {id: actId, velocity: 0, note_on: false});
+  // AUDIT FIX (UI-P1): NOTE_OFF over the same WebSocket as NOTE_ON (not REST),
+  // so a drop between them cannot strand a Key / Hit-and-Hold output.
+  if (ws && wsConnected) {
+    ws.send(JSON.stringify({cmd:'test', id:actId, on:false, vel:0, token:authToken || undefined}));
+  }
 }
 
 function updatePianoActive(activeActuators) {
@@ -2898,7 +2934,7 @@ async function wizNext() {
     if (isNaN(count) || count < 1 || count > 64) { toast('Invalid actuator count (1–64)', 'error'); return; }
   }
   if (wizStep < 4) { wizStep++; wizShowStep(); return; }
-  // Step 4 → Create everything
+  // Step 4 → Create everything in ONE transactional request.
   const name = document.getElementById('wiz-name').value.trim() || 'Instrument';
   const channel = parseInt(document.getElementById('wiz-channel').value);
   const type = parseInt(document.getElementById('wiz-type').value);
@@ -2909,64 +2945,32 @@ async function wizNext() {
   let pcaCh = parseInt(document.getElementById('wiz-start-ch').value);
   const busId = type === 0 ? 0 : 1;
 
-  // AUDIT FIX (P2): validate every step. On any failure, stop and roll back the
-  // instrument just created so a half-built config (mappings pointing at
-  // missing actuators) is never left behind.
-  const okResp = (r) => r && r.ok === true;
-
-  // 1. Create instrument
-  const instData = {name, channel, bus_id: busId, latency_ms: 10, auto_cal: false, enabled: true};
-  const instResp = await api('/api/instrument', 'POST', instData);
-  if (!okResp(instResp)) {
-    await appAlert('Wizard failed', 'Could not create the instrument: ' + ((instResp && instResp.error) || 'unknown error'));
-    return;
-  }
-  // Resolve the new instrument's index now so rollback can target it.
-  instruments = await api('/api/instruments') || [];
-  const instIdx = instruments.length > 0 ? instruments[instruments.length - 1].index : 0;
-
-  const rollback = async (msg) => {
-    await api('/api/instrument?index=' + instIdx, 'DELETE');
-    await appAlert('Wizard failed', msg + ' — the partial instrument was removed.');
-    instruments = await api('/api/instruments') || [];
-    routing = await api('/api/routing') || [];
-    loadHomeInstruments(); loadInstrumentSelects(); buildAllPianos();
-  };
-
-  // 2. Create actuators — baseId = max(existing IDs) + 1 to ensure uniqueness
-  const baseId = (actuators && actuators.length > 0)
-    ? Math.max(...actuators.map(a => a.id)) + 1
-    : 0;
+  // AUDIT FIX (UI-P0): build the whole request and let the backend validate and
+  // create everything atomically (IDs auto-assigned). No client-side partial
+  // state, no orphaned actuators on failure.
+  const acts = [];
   for (let i = 0; i < count; i++) {
-    const actData = {
-      id: baseId + i, type, bus_id: busId, pca_addr: pcaAddr, pca_ch: pcaCh,
-      latency_ms: 10, behavior, enabled: true
-    };
-    if (type === 0) {
-      actData.angle_init = 90; actData.amplitude = 45; actData.speed_ms = 150; actData.angle_b = 120;
-    } else {
-      actData.pulse_min_ms = 5; actData.pulse_max_ms = 30; actData.pulse_ms = 30; actData.pwm_initial = 4095; actData.pwm_hold = 2048; actData.ramp_ms = 50;
-    }
-    const actResp = await api('/api/actuator', 'POST', actData);
-    if (!okResp(actResp)) {
-      await rollback('Could not create actuator ' + (baseId + i));
-      return;
-    }
+    const noteInput = document.getElementById('wiz-note-' + i);
+    const note = noteInput ? parseInt(noteInput.value) : (startNote + i);
+    const a = { type, bus_id: busId, pca_addr: pcaAddr, pca_ch: pcaCh,
+                latency_ms: 10, behavior, enabled: true,
+                note: (isNaN(note) ? -1 : note) };
+    if (type === 0) { a.angle_init = 90; a.amplitude = 45; a.speed_ms = 150; a.angle_b = 120; }
+    else { a.pulse_min_ms = 5; a.pulse_ms = 30; a.pwm_initial = 4095; a.pwm_hold = 2048; a.ramp_ms = 50; }
+    acts.push(a);
     pcaCh++;
     if (pcaCh > 15) { pcaCh = 0; pcaAddr = Math.min(pcaAddr + 1, 67); }
   }
 
-  // 3. Create note mappings (read from editable table)
-  const notes = [];
-  for (let i = 0; i < count; i++) {
-    const noteInput = document.getElementById('wiz-note-' + i);
-    const note = noteInput ? parseInt(noteInput.value) : (startNote + i);
-    if (isNaN(note) || note < 0 || note > 127) continue;
-    notes.push({note, actuator: baseId + i, enabled: true});
-  }
-  const routeResp = await api('/api/routing', 'POST', {instrument: instIdx, notes});
-  if (!okResp(routeResp)) {
-    await rollback('Could not create the note mappings');
+  const wizBtn = document.getElementById('wiz-next');
+  if (wizBtn) wizBtn.disabled = true;
+  const resp = await api('/api/setup/instrument', 'POST',
+    { name, channel, bus_id: busId, latency_ms: 10, auto_cal: false, enabled: true, actuators: acts });
+  if (wizBtn) wizBtn.disabled = false;
+
+  if (!resp || !resp.ok) {
+    // api() already toasted the backend error message.
+    await appAlert('Wizard failed', 'The instrument could not be created — nothing was changed.');
     return;
   }
 

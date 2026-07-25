@@ -287,24 +287,27 @@ void setup() {
     }
 
     // 9. Initialize the Power Manager (Phase 5)
+    // AUDIT FIX (UI-P1): use the PERSISTED budget/limits instead of the
+    // compile-time constants, so the user's saved Power/Safety settings survive
+    // a reboot.
     Serial.println("\n[INIT] Power Manager...");
-    {
-        PowerBudget budget = {};
-        budget.global_max_ma         = POWER_GLOBAL_MAX_MA;
-        budget.servo_bus_max_ma      = POWER_SERVO_BUS_MAX_MA;
-        budget.solenoid_bus_max_ma   = POWER_SOLENOID_BUS_MAX_MA;
-        budget.global_max_polyphony  = POWER_MAX_POLYPHONY;
-        budget.smart_rejection       = true;
-        for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
-            budget.instrument_max_polyphony[i] = 4;
-        }
-        powerManager.begin(budget);
-        logger.log(LOG_INFO, CAT_POWER, "Power Manager: max %dmA poly=%d",
-                   POWER_GLOBAL_MAX_MA, POWER_MAX_POLYPHONY);
-    }
+    powerManager.begin(*configManager.getPowerBudget());
+    logger.log(LOG_INFO, CAT_POWER, "Power Manager: max %umA poly=%d",
+               configManager.getPowerBudget()->global_max_ma,
+               configManager.getPowerBudget()->global_max_polyphony);
     // AUDIT FIX (P1.3): the scheduler bills the PowerManager after real
     // execution (see Scheduler::processReadyEvents).
     scheduler.setPowerManager(&powerManager);
+
+    // Apply persisted Safety limits.
+    {
+        SafetyLimits* sl = configManager.getSafetyLimits();
+        safetyManager.setMaxDutyCycle(sl->max_duty_pct);
+        safetyManager.setMaxFrequency(sl->max_freq_hz);
+        safetyManager.setWatchdogTimeout(sl->watchdog_ms);
+        safetyManager.setMaxPolyphony(sl->max_polyphony);
+        safetyManager.setMaxTotalCurrent(sl->max_current_ma);
+    }
 
     // 10. Initialize the MIDI Dispatcher (note/CC mapping)
     Serial.println("\n[INIT] MIDI Dispatcher...");

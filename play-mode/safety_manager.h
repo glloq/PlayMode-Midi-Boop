@@ -87,6 +87,14 @@ public:
     void setMaxPolyphony(uint8_t max);
     void setMaxTotalCurrent(uint16_t ma);
 
+    // AUDIT FIX (UI-P1): runtime getters so the API returns the values actually
+    // in effect, not the compile-time constants.
+    uint8_t  getMaxDutyCycle() const     { return _max_duty_cycle; }
+    uint16_t getMaxFrequency() const     { return _max_freq_hz; }
+    uint16_t getWatchdogTimeout() const  { return _watchdog_ms; }
+    uint8_t  getMaxPolyphony() const     { return _max_polyphony; }
+    uint16_t getMaxTotalCurrent() const  { return _max_total_current_ma; }
+
 private:
     PCADriver& _pca;
     Scheduler* _scheduler;  // Optional — used to flush queues on kill switch

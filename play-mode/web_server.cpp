@@ -343,6 +343,16 @@ void WebServer::setupAPIRoutes() {
     instrHandler->setMethod(HTTP_POST | HTTP_PUT);
     _server.addHandler(instrHandler);
 
+    // Transactional wizard endpoint (validate-all-then-apply)
+    auto* setupHandler = new AsyncCallbackJsonWebHandler("/api/setup/instrument",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            String body;
+            serializeJson(json, body);
+            handlePostSetupInstrument(req, (uint8_t*)body.c_str(), body.length());
+        });
+    setupHandler->setMethod(HTTP_POST);
+    _server.addHandler(setupHandler);
+
     _server.on("/api/instrument", HTTP_DELETE, [this](AsyncWebServerRequest* req) {
         handleDeleteInstrument(req);
     });
@@ -774,13 +784,14 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     doc["degradation"]       = state.degradation_active;
     doc["over_current"]      = state.over_current;
 
-    // Current config
+    // AUDIT FIX (UI-P1): report the RUNTIME limits actually in effect (not the
+    // compile-time constants), so the form reflects what the user set.
     JsonObject cfg = doc["config"].to<JsonObject>();
-    cfg["max_duty_pct"]    = SAFETY_MAX_DUTY_CYCLE;
-    cfg["max_freq_hz"]     = SAFETY_MAX_FREQ_HZ;
-    cfg["watchdog_ms"]     = SAFETY_WATCHDOG_MS;
-    cfg["max_polyphony"]   = SAFETY_MAX_POLYPHONY;
-    cfg["max_current_ma"]  = SAFETY_MAX_TOTAL_CURRENT_MA;
+    cfg["max_duty_pct"]    = _safety->getMaxDutyCycle();
+    cfg["max_freq_hz"]     = _safety->getMaxFrequency();
+    cfg["watchdog_ms"]     = _safety->getWatchdogTimeout();
+    cfg["max_polyphony"]   = _safety->getMaxPolyphony();
+    cfg["max_current_ma"]  = _safety->getMaxTotalCurrent();
 
     String output;
     serializeJson(doc, output);
@@ -856,6 +867,184 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
         request->send(400, "application/json",
                       "{\"error\":\"max instruments reached\"}");
     }
+}
+
+// ============================================================================
+// AUDIT FIX (UI-P0): transactional wizard — validate the WHOLE request first
+// (no mutation), then create the instrument + actuators + routing atomically,
+// save, and roll back everything if the save fails. IDs are auto-assigned to
+// the first free slots.
+// ============================================================================
+void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
+                                          uint8_t* data, size_t len) {
+    if (!requireAuth(request)) return;
+    if (!_config) { request->send(500); return; }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+        request->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    JsonArray acts = doc["actuators"].as<JsonArray>();
+    size_t nsz = acts.isNull() ? 0 : acts.size();
+
+    // ---- Phase 1: validate everything, mutating nothing ----
+    if (_config->getInstrumentCount() >= MAX_INSTRUMENTS) {
+        request->send(400, "application/json", "{\"error\":\"max instruments reached\"}");
+        return;
+    }
+    // Bound-check the count BEFORE truncating to uint8_t (avoids a wrap that
+    // could pass validation yet iterate past the fixed staging arrays).
+    if (nsz == 0 || nsz > MAX_ACTUATORS_PER_INSTRUMENT) {
+        request->send(400, "application/json", "{\"error\":\"1.." "64" " actuators required\"}");
+        return;
+    }
+    uint8_t n = (uint8_t)nsz;
+    ActuatorConfig* existing = _config->getActuators();
+    uint8_t ecount = _config->getActuatorCount();
+    if ((uint16_t)(ecount + n) > MAX_ACTUATORS) {
+        request->send(400, "application/json", "{\"error\":\"not enough free actuator slots\"}");
+        return;
+    }
+
+    // Collect free IDs.
+    bool used_id[MAX_ACTUATORS] = {false};
+    for (uint8_t i = 0; i < ecount; i++)
+        if (existing[i].id < MAX_ACTUATORS) used_id[existing[i].id] = true;
+    uint8_t free_ids[MAX_ACTUATORS_PER_INSTRUMENT];
+    uint8_t nid = 0;
+    for (uint16_t id = 0; id < MAX_ACTUATORS && nid < n; id++)
+        if (!used_id[id]) free_ids[nid++] = (uint8_t)id;
+    if (nid < n) {
+        request->send(400, "application/json", "{\"error\":\"not enough free actuator IDs\"}");
+        return;
+    }
+
+    // Validate each actuator + reject duplicate output targets (new set and existing).
+    struct Target { uint8_t bus, addr, ch; };
+    Target targets[MAX_ACTUATORS_PER_INSTRUMENT];
+    uint8_t k = 0;
+    for (JsonObject a : acts) {
+        int type = a["type"] | -1;
+        if (type != ACT_SERVO && type != ACT_SOLENOID) {
+            request->send(400, "application/json", "{\"error\":\"invalid actuator type\"}");
+            return;
+        }
+        uint8_t bus  = a["bus_id"]  | 0;
+        uint8_t addr = a["pca_addr"] | PCA_BASE_ADDRESS;
+        uint8_t ch   = a["pca_ch"]  | 0;
+        if (bus > 1 || addr < PCA_BASE_ADDRESS ||
+            addr >= PCA_BASE_ADDRESS + PCA_MAX_PER_BUS || ch >= PCA_CHANNELS) {
+            request->send(400, "application/json", "{\"error\":\"invalid bus/address/channel\"}");
+            return;
+        }
+        // duplicate within the new set
+        for (uint8_t j = 0; j < k; j++)
+            if (targets[j].bus == bus && targets[j].addr == addr && targets[j].ch == ch) {
+                request->send(400, "application/json", "{\"error\":\"duplicate output in request\"}");
+                return;
+            }
+        // duplicate vs existing
+        for (uint8_t j = 0; j < ecount; j++)
+            if (existing[j].bus_id == bus && existing[j].pca_address == addr &&
+                existing[j].pca_channel == ch) {
+                request->send(400, "application/json", "{\"error\":\"output already in use\"}");
+                return;
+            }
+        targets[k++] = { bus, addr, ch };
+    }
+
+    // ---- Phase 2: apply atomically under the actuator lock ----
+    ActuatorLockGuard guard(*_config);
+    if (!guard.locked()) {
+        request->send(503, "application/json", "{\"error\":\"configuration busy\"}");
+        return;
+    }
+
+    // Build the instrument.
+    InstrumentConfig inst = {};
+    strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
+    inst.midi_channel       = uiChannelToInternal(doc["channel"] | 0);
+    inst.bus_id             = doc["bus_id"] | 0;
+    inst.default_latency_ms = doc["latency_ms"] | 10;
+    inst.auto_calibration   = doc["auto_cal"] | false;
+    inst.enabled            = doc["enabled"] | true;
+    inst.actuator_count     = 0;
+
+    if (!_config->addInstrument(inst)) {
+        request->send(500, "application/json", "{\"error\":\"instrument add failed\"}");
+        return;
+    }
+    uint8_t inst_idx = _config->getInstrumentCount() - 1;
+
+    // Create actuators with the assigned free IDs.
+    k = 0;
+    MidiRoutingConfig routing = {};
+    routing.instrument_index = inst_idx;
+    for (JsonObject a : acts) {
+        ActuatorConfig act = {};
+        act.id          = free_ids[k];
+        act.type        = (ActuatorType)(uint8_t)(a["type"] | 0);
+        act.bus_id      = targets[k].bus;
+        act.pca_address = targets[k].addr;
+        act.pca_channel = targets[k].ch;
+        act.behavior    = a["behavior"] | 0;
+        act.enabled     = a["enabled"] | true;
+        act.latency_ms  = a["latency_ms"] | 10;
+        act.angle_initial = a["angle_init"] | 90;
+        act.amplitude     = a["amplitude"]  | 45;
+        act.speed_ms      = a["speed_ms"]   | 150;
+        act.angle_b       = a["angle_b"]    | 120;
+        act.hit_reverse   = a["hit_reverse"] | false;
+        act.pulse_min_ms  = a["pulse_min_ms"] | SOLENOID_MIN_PULSE_MS;
+        act.pulse_ms      = a["pulse_ms"]     | 20;
+        act.pwm_initial   = a["pwm_initial"]  | 4095;
+        act.pwm_hold      = a["pwm_hold"]     | 2048;
+        act.ramp_ms       = a["ramp_ms"]      | 50;
+        if (act.speed_ms == 0) act.speed_ms = 1;
+        _config->addActuator(act);
+        ActuatorConfig* stored = _config->getActuators();
+        for (uint8_t i = 0; i < _config->getActuatorCount(); i++) {
+            if (stored[i].id == act.id) { if (_engine) _engine->initActuator(stored[i]); break; }
+        }
+        // Note mapping for this actuator.
+        int note = a["note"] | -1;
+        if (note >= 0 && note <= 127 && routing.note_map_count < MAX_NOTE_MAPPINGS) {
+            NoteMapping& m = routing.note_map[routing.note_map_count++];
+            m.midi_note = (uint8_t)note;
+            m.actuator_id = act.id;
+            m.behavior_override = 0xFF;
+            m.enabled = true;
+        }
+        k++;
+    }
+
+    _config->addRoutingConfig(routing);
+    _config->rebuildInstrumentFromRouting(inst_idx);
+    if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
+                                              _config->getActuatorCount());
+    if (_dispatcher) _dispatcher->refreshConfig();
+
+    // Atomic save. On failure, roll back the whole thing.
+    if (!_config->save()) {
+        // Remove the created actuators and instrument.
+        for (uint8_t i = 0; i < n; i++) _config->removeActuator(free_ids[i]);
+        _config->removeInstrument(inst_idx);
+        if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
+                                                  _config->getActuatorCount());
+        if (_dispatcher) _dispatcher->refreshConfig();
+        request->send(500, "application/json", "{\"error\":\"save failed, rolled back\"}");
+        return;
+    }
+
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["instrument"] = inst_idx;
+    JsonArray ids = resp["actuator_ids"].to<JsonArray>();
+    for (uint8_t i = 0; i < n; i++) ids.add(free_ids[i]);
+    String out; serializeJson(resp, out);
+    request->send(200, "application/json", out);
 }
 
 void WebServer::handlePostActuator(AsyncWebServerRequest* request,
@@ -1004,22 +1193,45 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
         return;
     }
 
-    WiFiConfig wifi = {};
-    strlcpy(wifi.ssid, doc["ssid"] | "", sizeof(wifi.ssid));
-    strlcpy(wifi.password, doc["password"] | "", sizeof(wifi.password));
-    // AUDIT FIX (P1.9): configurable per-device AP password. Empty keeps the
-    // MAC-derived default; a non-empty value must be a valid WPA2 key (>= 8).
-    const char* ap_pw = doc["ap_password"] | "";
-    if (ap_pw[0] != '\0' && strlen(ap_pw) < 8) {
-        request->send(400, "application/json",
-                      "{\"error\":\"AP password must be >= 8 characters\"}");
-        return;
+    // AUDIT FIX (UI-P1): start from the EXISTING config and only overlay the
+    // fields present, so a save with blank password fields does not wipe the
+    // stored passwords. Password semantics:
+    //   - field absent            -> keep the current password;
+    //   - non-empty string        -> replace;
+    //   - "clear_password":true    -> explicitly clear (STA);
+    //   - "clear_ap_password":true -> explicitly clear (AP, -> MAC default).
+    WiFiConfig wifi = *_config->getWiFiConfig();
+
+    if (!doc["ssid"].isNull())
+        strlcpy(wifi.ssid, doc["ssid"] | "", sizeof(wifi.ssid));
+    if (!doc["hostname"].isNull())
+        strlcpy(wifi.hostname, doc["hostname"] | WIFI_DEFAULT_HOSTNAME, sizeof(wifi.hostname));
+    if (!doc["enabled"].isNull())
+        wifi.enabled = doc["enabled"];
+    if (!doc["ap_fallback"].isNull())
+        wifi.ap_fallback = doc["ap_fallback"];
+
+    // STA password
+    if (doc["clear_password"] | false) {
+        wifi.password[0] = '\0';
+    } else if (doc["password"].is<const char*>() &&
+               (doc["password"].as<const char*>())[0] != '\0') {
+        strlcpy(wifi.password, doc["password"], sizeof(wifi.password));
     }
-    strlcpy(wifi.ap_password, ap_pw, sizeof(wifi.ap_password));
-    strlcpy(wifi.hostname, doc["hostname"] | WIFI_DEFAULT_HOSTNAME,
-            sizeof(wifi.hostname));
-    wifi.enabled     = doc["enabled"] | true;
-    wifi.ap_fallback = doc["ap_fallback"] | true;
+
+    // AP password (must be >= 8 chars when set)
+    if (doc["clear_ap_password"] | false) {
+        wifi.ap_password[0] = '\0';
+    } else if (doc["ap_password"].is<const char*>() &&
+               (doc["ap_password"].as<const char*>())[0] != '\0') {
+        const char* ap_pw = doc["ap_password"];
+        if (strlen(ap_pw) < 8) {
+            request->send(400, "application/json",
+                          "{\"error\":\"AP password must be >= 8 characters\"}");
+            return;
+        }
+        strlcpy(wifi.ap_password, ap_pw, sizeof(wifi.ap_password));
+    }
 
     _config->setWiFiConfig(wifi);
     request->send(200, "application/json",
@@ -1172,6 +1384,10 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
     if (!doc["max_polyphony"].isNull())
         _power->setGlobalMaxPolyphony(doc["max_polyphony"]);
 
+    // AUDIT FIX (UI-P1): mirror the change into the persisted config so a
+    // subsequent "Save to flash" keeps it across reboots.
+    if (_config) _config->setPowerBudget(_power->getBudget());
+
     request->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -1207,6 +1423,18 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
         _safety->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
     if (!doc["max_current_ma"].isNull())
         _safety->setMaxTotalCurrent((uint16_t)clampU(doc["max_current_ma"] | 0, 100, 60000));
+
+    // AUDIT FIX (UI-P1): mirror the runtime limits into the persisted config so
+    // a subsequent "Save to flash" keeps them across reboots.
+    if (_config) {
+        SafetyLimits sl;
+        sl.max_duty_pct   = _safety->getMaxDutyCycle();
+        sl.max_freq_hz    = _safety->getMaxFrequency();
+        sl.watchdog_ms    = _safety->getWatchdogTimeout();
+        sl.max_polyphony  = _safety->getMaxPolyphony();
+        sl.max_current_ma = _safety->getMaxTotalCurrent();
+        _config->setSafetyLimits(sl);
+    }
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1474,15 +1702,18 @@ void WebServer::onWebSocketEvent(AsyncWebSocket* server,
                     // REST write endpoints.
                     if (cmd && strcmp(cmd, "test") == 0 &&
                         wsCommandAuthorized(String(doc["token"] | ""))) {
-                        // Quick actuator test via WS
+                        // AUDIT FIX (UI-P1): both NOTE_ON and NOTE_OFF travel
+                        // over the SAME WebSocket, so a network drop between
+                        // press and release can no longer strand a held note.
                         uint8_t act_id   = doc["id"] | 0;
                         uint8_t velocity = doc["vel"] | 100;
+                        bool on          = doc["on"] | true;
                         if (_scheduler) {
                             SchedulerEvent evt = {};
                             evt.trigger_time_us = (uint32_t)esp_timer_get_time();
                             evt.actuator_id = act_id;
-                            evt.action = ACTION_NOTE_ON;
-                            evt.velocity = velocity;
+                            evt.action = on ? ACTION_NOTE_ON : ACTION_NOTE_OFF;
+                            evt.velocity = on ? velocity : 0;
                             evt.priority = 0;
                             evt.behavior_override = 0xFF;
                             evt.instrument_index  = 0xFF;

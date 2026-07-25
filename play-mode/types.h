@@ -232,6 +232,17 @@ struct SafetyState {
 // Phase 5 — Power Manager
 // ============================================================================
 
+// --- Safety limits (persisted configuration) ---
+// AUDIT FIX (UI-P1): the safety limits are persisted so they survive a reboot
+// instead of always reverting to the compile-time constants.
+struct SafetyLimits {
+    uint8_t  max_duty_pct;
+    uint16_t max_freq_hz;
+    uint16_t watchdog_ms;
+    uint8_t  max_polyphony;
+    uint16_t max_current_ma;
+};
+
 // --- Power budget (configuration) ---
 struct PowerBudget {
     uint32_t global_max_ma;                              // Total global budget (mA)

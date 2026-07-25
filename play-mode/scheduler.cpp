@@ -143,7 +143,14 @@ void Scheduler::syncActuators(ActuatorConfig* base, uint8_t count) {
 }
 
 uint16_t Scheduler::getQueuedEventCount() const {
-    return _event_count;
+    // AUDIT FIX (UI-P1): include the FreeRTOS input queue (pending commands not
+    // yet drained into the heap), not just the heap, so the reported backlog is
+    // truthful.
+    uint16_t pending_input = 0;
+    if (_input_queue != NULL) {
+        pending_input = (uint16_t)uxQueueMessagesWaiting(_input_queue);
+    }
+    return _event_count + pending_input;
 }
 
 uint32_t Scheduler::getProcessedCount() const {

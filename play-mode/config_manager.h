@@ -89,6 +89,12 @@ public:
     MidiInputConfig* getMidiInputConfig();
     void setMidiInputConfig(const MidiInputConfig& config);
 
+    // --- Power budget + Safety limits (persisted) ---
+    PowerBudget*  getPowerBudget();
+    void setPowerBudget(const PowerBudget& budget);
+    SafetyLimits* getSafetyLimits();
+    void setSafetyLimits(const SafetyLimits& limits);
+
     // --- MIDI Routing ---
 
     MidiRoutingConfig* getRoutingConfigs();
@@ -109,6 +115,8 @@ public:
 private:
     WiFiConfig _wifi_config;
     MidiInputConfig _midi_input_config;
+    PowerBudget _power_budget;
+    SafetyLimits _safety_limits;
     BusConfig _buses[2];
     ActuatorConfig _actuators[MAX_ACTUATORS];
     uint8_t _actuator_count;
@@ -147,6 +155,12 @@ private:
 
     // Deserializes the MIDI Input config from JSON
     void deserializeMidiInput(MidiInputConfig& midi, const JsonObject& obj);
+
+    // Power budget + Safety limits (de)serialization
+    void serializePower(const PowerBudget& p, JsonObject& obj);
+    void deserializePower(PowerBudget& p, const JsonObject& obj);
+    void serializeSafety(const SafetyLimits& s, JsonObject& obj);
+    void deserializeSafety(SafetyLimits& s, const JsonObject& obj);
 
     // Serializes a MIDI routing to JSON
     void serializeRouting(const MidiRoutingConfig& routing, JsonObject& obj);

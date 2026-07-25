@@ -174,25 +174,26 @@ void PCADriver::setFrequency(uint8_t bus_id, uint16_t freq_hz) {
     Serial.printf("[PCA] Bus %d: PWM frequency = %d Hz\n", bus_id, freq_hz);
 }
 
-void PCADriver::setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uint16_t value) {
-    if (bus_id > 1 || channel >= PCA_CHANNELS) return;
+bool PCADriver::setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uint16_t value) {
+    if (bus_id > 1 || channel >= PCA_CHANNELS) return false;
 
     Adafruit_PWMServoDriver* driver = getDriver(bus_id, pca_address);
-    if (driver) {
-        if (value == 0) {
-            // AUDIT FIX: use bit 12 "full OFF" of PCA9685 (datasheet §7.3.3)
-            // instead of on=0,off=0 which can produce a glitch per PWM cycle.
-            driver->setPWM(channel, 0, 4096);
-        } else if (value >= 4095) {
-            driver->setPWM(channel, 4096, 0);
-        } else {
-            driver->setPWM(channel, 0, value);
-        }
+    if (!driver) return false;   // PCA absent / not detected — write failed
+
+    if (value == 0) {
+        // AUDIT FIX: use bit 12 "full OFF" of PCA9685 (datasheet §7.3.3)
+        // instead of on=0,off=0 which can produce a glitch per PWM cycle.
+        driver->setPWM(channel, 0, 4096);
+    } else if (value >= 4095) {
+        driver->setPWM(channel, 4096, 0);
+    } else {
+        driver->setPWM(channel, 0, value);
     }
+    return true;
 }
 
-void PCADriver::setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value) {
-    setPWM(actuator.bus_id, actuator.pca_address, actuator.pca_channel, pwm_value);
+bool PCADriver::setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value) {
+    return setPWM(actuator.bus_id, actuator.pca_address, actuator.pca_channel, pwm_value);
 }
 
 uint16_t PCADriver::angleToPWM(uint16_t angle_degrees, uint8_t bus_id) {

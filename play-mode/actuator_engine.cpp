@@ -113,17 +113,16 @@ void ActuatorEngine::servoFrappe(ActuatorConfig& act, const SchedulerEvent& even
             if (target_angle > SERVO_MAX_ANGLE) target_angle = SERVO_MAX_ANGLE;
         }
 
-        // Move to strike position
-        setServoAngle(act, target_angle);
-        act.state.active = true;
+        // Move to strike position — only mark active if the write reached HW.
+        if (setServoAngle(act, target_angle)) act.state.active = true;
 
         // Schedule return to initial position
         scheduleReturn(act, act.speed_ms, act.angle_initial);
 
     } else if (event.action == ACTION_POSITION_SET) {
-        // Return to specified position (initial position)
-        setServoAngle(act, event.value);
-        act.state.active = false;
+        // Return to specified position (initial position). Clear active only if
+        // the write succeeded; otherwise leave it so the safety layer follows up.
+        if (setServoAngle(act, event.value)) act.state.active = false;
     }
 }
 
@@ -140,8 +139,7 @@ void ActuatorEngine::servoAlterne(ActuatorConfig& act, const SchedulerEvent& eve
         }
         act.state.alternate_state = !act.state.alternate_state;
 
-        setServoAngle(act, target);
-        act.state.active = true;
+        if (setServoAngle(act, target)) act.state.active = true;
 
         // AUDIT FIX (P2): ALTERNE holds its new A/B position — there is no
         // NOTE_OFF, so leaving state.active=true forever would trip the safety
@@ -152,8 +150,7 @@ void ActuatorEngine::servoAlterne(ActuatorConfig& act, const SchedulerEvent& eve
 
     } else if (event.action == ACTION_POSITION_SET) {
         // Movement-complete marker: reaffirm the position and clear active.
-        setServoAngle(act, event.value);
-        act.state.active = false;
+        if (setServoAngle(act, event.value)) act.state.active = false;
     }
 }
 
@@ -174,15 +171,13 @@ void ActuatorEngine::servoGratter(ActuatorConfig& act, const SchedulerEvent& eve
         }
         act.state.scratch_direction = !act.state.scratch_direction;
 
-        setServoAngle(act, target);
-        act.state.active = true;
+        if (setServoAngle(act, target)) act.state.active = true;
 
         // Return to initial position
         scheduleReturn(act, act.speed_ms, act.angle_initial);
 
     } else if (event.action == ACTION_POSITION_SET) {
-        setServoAngle(act, event.value);
-        act.state.active = false;
+        if (setServoAngle(act, event.value)) act.state.active = false;
     }
 }
 
@@ -201,13 +196,11 @@ void ActuatorEngine::servoTouche(ActuatorConfig& act, const SchedulerEvent& even
             if (target > SERVO_MAX_ANGLE) target = SERVO_MAX_ANGLE;
         }
 
-        setServoAngle(act, target);
-        act.state.active = true;
+        if (setServoAngle(act, target)) act.state.active = true;
 
     } else if (event.action == ACTION_NOTE_OFF) {
         // Return to initial position
-        setServoAngle(act, act.angle_initial);
-        act.state.active = false;
+        if (setServoAngle(act, act.angle_initial)) act.state.active = false;
     }
 }
 
@@ -217,8 +210,7 @@ void ActuatorEngine::servoTouche(ActuatorConfig& act, const SchedulerEvent& even
 void ActuatorEngine::solenoidFrappe(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
         // Activate the solenoid at full power
-        setSolenoidPWM(act, SOLENOID_PWM_MAX);
-        act.state.active = true;
+        if (setSolenoidPWM(act, SOLENOID_PWM_MAX)) act.state.active = true;
 
         // AUDIT FIX: use act.pulse_min_ms / act.pulse_ms (configurable per
         // actuator) instead of global constants SOLENOID_MIN/MAX_PULSE_MS.
@@ -231,9 +223,10 @@ void ActuatorEngine::solenoidFrappe(ActuatorConfig& act, const SchedulerEvent& e
         scheduleReturn(act, pulse, 0);
 
     } else if (event.action == ACTION_PWM_SET) {
-        // Deactivation (scheduled return)
-        setSolenoidPWM(act, event.value);
-        act.state.active = false;
+        // Deactivation (scheduled return). Clear active only on a successful
+        // write; if it failed the coil may still be driven, so leave it active
+        // for the safety watchdog.
+        if (setSolenoidPWM(act, event.value)) act.state.active = (event.value != 0);
     }
 }
 
@@ -243,20 +236,18 @@ void ActuatorEngine::solenoidFrappe(ActuatorConfig& act, const SchedulerEvent& e
 void ActuatorEngine::solenoidHitAndHold(ActuatorConfig& act, const SchedulerEvent& event) {
     if (event.action == ACTION_NOTE_ON) {
         // Phase 1: initial PWM activation (full power)
-        setSolenoidPWM(act, act.pwm_initial);
-        act.state.active = true;
+        if (setSolenoidPWM(act, act.pwm_initial)) act.state.active = true;
 
         // Schedule transition to hold PWM after ramp
         scheduleReturn(act, act.ramp_ms, act.pwm_hold);
 
     } else if (event.action == ACTION_PWM_SET) {
-        // Phase 2: switch to hold PWM
+        // Phase 2: switch to hold PWM (stays active)
         setSolenoidPWM(act, event.value);
 
     } else if (event.action == ACTION_NOTE_OFF) {
-        // Release: turn off the solenoid
-        setSolenoidPWM(act, 0);
-        act.state.active = false;
+        // Release: turn off the solenoid. Clear active only on success.
+        if (setSolenoidPWM(act, 0)) act.state.active = false;
     }
 }
 
@@ -264,15 +255,18 @@ void ActuatorEngine::solenoidHitAndHold(ActuatorConfig& act, const SchedulerEven
 // Utilities
 // ============================================================================
 
-void ActuatorEngine::setServoAngle(ActuatorConfig& act, uint16_t angle) {
+bool ActuatorEngine::setServoAngle(ActuatorConfig& act, uint16_t angle) {
     uint16_t pwm = _pca.angleToPWM(angle, act.bus_id);
-    _pca.setActuatorPWM(act, pwm);
+    // AUDIT FIX: only record the new position if the hardware write succeeded.
+    if (!_pca.setActuatorPWM(act, pwm)) return false;
     act.state.current_position = pwm;
+    return true;
 }
 
-void ActuatorEngine::setSolenoidPWM(ActuatorConfig& act, uint16_t pwm) {
-    _pca.setActuatorPWM(act, pwm);
+bool ActuatorEngine::setSolenoidPWM(ActuatorConfig& act, uint16_t pwm) {
+    if (!_pca.setActuatorPWM(act, pwm)) return false;
     act.state.current_position = pwm;
+    return true;
 }
 
 uint16_t ActuatorEngine::velocityToAmplitude(const ActuatorConfig& act, uint8_t velocity) {
