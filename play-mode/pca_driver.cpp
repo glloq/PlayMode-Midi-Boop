@@ -146,7 +146,12 @@ void PCADriver::setBusConfig(uint8_t bus_id, const BusConfig& cfg) {
     // leave the servo bus at an unusable frequency.
     if (cfg.sda_pin != 0)  b.sda_pin = cfg.sda_pin;
     if (cfg.scl_pin != 0)  b.scl_pin = cfg.scl_pin;
-    b.oe_pin = cfg.oe_pin;
+    // AUDIT FIX (P1-C): guard oe_pin like every other field. A zeroed/garbage
+    // config (failed load, pre-migration file) with oe_pin==0 would otherwise
+    // make begin() drive GPIO0 (a strapping pin) as OE and leave the REAL OE
+    // line (25/26) floating — silently disabling the hardware kill switch /
+    // enableBus(false). Keep the existing default OE pin in that case.
+    if (cfg.oe_pin != 0)  b.oe_pin = cfg.oe_pin;
     if (cfg.i2c_frequency != 0) b.i2c_frequency = cfg.i2c_frequency;
     if (cfg.pwm_frequency >= 24) b.pwm_frequency = cfg.pwm_frequency;  // PCA9685 min ~24 Hz
     b.enabled = cfg.enabled;
@@ -180,16 +185,26 @@ bool PCADriver::setPWM(uint8_t bus_id, uint8_t pca_address, uint8_t channel, uin
     Adafruit_PWMServoDriver* driver = getDriver(bus_id, pca_address);
     if (!driver) return false;   // PCA absent / not detected — write failed
 
+    // AUDIT FIX (P0-A): propagate the actual I2C transaction result. Adafruit's
+    // setPWM() (library >= 2.4.0) returns the Wire.endTransmission() status
+    // (0 = ACK/success, non-zero = NACK/timeout/bus error). Previously this
+    // returned true whenever a driver object existed, so a PCA that went away
+    // after boot (loose wire, brown-out, hung bus) reported every write as
+    // successful — which silently defeated the watchdog safe-off fault-latch and
+    // every "clear active only if the write reached HW" stop path. Reporting the
+    // real status lets those paths latch a hardware fault instead of lying about
+    // an output being off.
+    uint8_t rc;
     if (value == 0) {
-        // AUDIT FIX: use bit 12 "full OFF" of PCA9685 (datasheet §7.3.3)
-        // instead of on=0,off=0 which can produce a glitch per PWM cycle.
-        driver->setPWM(channel, 0, 4096);
+        // Use bit 12 "full OFF" of PCA9685 (datasheet §7.3.3) instead of
+        // on=0,off=0 which can produce a glitch per PWM cycle.
+        rc = driver->setPWM(channel, 0, 4096);
     } else if (value >= 4095) {
-        driver->setPWM(channel, 4096, 0);
+        rc = driver->setPWM(channel, 4096, 0);
     } else {
-        driver->setPWM(channel, 0, value);
+        rc = driver->setPWM(channel, 0, value);
     }
-    return true;
+    return (rc == 0);
 }
 
 bool PCADriver::setActuatorPWM(const ActuatorConfig& actuator, uint16_t pwm_value) {

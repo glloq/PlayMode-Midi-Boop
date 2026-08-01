@@ -121,7 +121,7 @@ private:
     void    flushI2S();
     bool    readChunk();               // Reads up to CAL_READ_CHUNK samples, returns true if >=1 sample read
     int32_t detectOnset() const;       // Returns index in _i2s_buf or -1
-    void    triggerActuator();
+    bool    triggerActuator();   // returns false (and leaves _state=CAL_ERROR) on failure
     void    finishCurrent();           // Finalizes measurements and moves to next
     bool    advanceToNext();           // Returns true if a next actuator is available
     void    enterState(CalibrationState s);

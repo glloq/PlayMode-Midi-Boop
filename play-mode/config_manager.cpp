@@ -40,6 +40,16 @@ bool ConfigManager::begin() {
     // edits and real-time processing are serialised from the first tick.
     if (g_actuator_mutex == nullptr) {
         g_actuator_mutex = xSemaphoreCreateMutex();
+        // AUDIT FIX (P2-1): if the mutex cannot be created (heap exhaustion),
+        // do NOT continue — lockActuators() would then report every lock as
+        // "acquired" and there would be no mutual exclusion at all between the
+        // web task and the real-time Core 1 actuator task. Fail begin() so the
+        // caller enters safe mode (outputs stay latched off) instead of running
+        // an actuator machine with no synchronization.
+        if (g_actuator_mutex == nullptr) {
+            Serial.println("[CONFIG] FATAL: actuator mutex creation failed — safe mode");
+            return false;
+        }
     }
 
     // AUDIT FIX: never eagerly format on a mount failure — that silently wipes
@@ -76,8 +86,14 @@ bool ConfigManager::begin() {
                 LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH) && load()) {
                 Serial.println("[CONFIG] Recovered configuration from backup");
             } else {
+                // AUDIT FIX (P2-4): persist the defaults here too. Without the
+                // save(), defaults live only in RAM and every subsequent boot
+                // re-hits the same corrupt primary and repeats the recovery
+                // dance. Writing them once (atomic save rotates the corrupt file
+                // out) makes the recovery stick.
                 Serial.println("[CONFIG] Load error, using defaults");
                 loadDefaults();
+                save();
             }
         }
     } else if (LittleFS.exists(CONFIG_BAK_PATH) &&
@@ -300,21 +316,31 @@ bool ConfigManager::save() {
         return false;
     }
 
+    // AUDIT FIX (P1-1): compute the exact expected length so we can detect a
+    // TRUNCATED write (e.g. LittleFS full → file.write() returns short and
+    // ArduinoJson stops early with written > 0). Previously only written==0 and
+    // on_disk==0 were caught, so a truncated-but-nonzero temp file passed both
+    // guards and was rotated over the live config; a second failed save then
+    // overwrote the .bak too — losing BOTH copies permanently. Requiring an
+    // exact byte-complete match before committing prevents that.
+    size_t expected = measureJsonPretty(doc);
     size_t written = serializeJsonPretty(doc, file);
     file.close();
 
-    if (written == 0) {
-        Serial.println("[CONFIG] Serialization produced 0 bytes — aborting save");
+    if (written == 0 || written != expected) {
+        Serial.printf("[CONFIG] Short/failed serialize (%u/%u bytes) — aborting save\n",
+                      (unsigned)written, (unsigned)expected);
         LittleFS.remove(CONFIG_TMP_PATH);
         return false;
     }
 
-    // Verify the temp file is non-empty on disk before committing.
+    // Verify the temp file is byte-complete on disk before committing.
     File verify = LittleFS.open(CONFIG_TMP_PATH, "r");
     size_t on_disk = verify ? verify.size() : 0;
     if (verify) verify.close();
-    if (on_disk == 0) {
-        Serial.println("[CONFIG] Temp file empty on disk — aborting save");
+    if (on_disk != expected) {
+        Serial.printf("[CONFIG] Temp file incomplete on disk (%u/%u bytes) — aborting save\n",
+                      (unsigned)on_disk, (unsigned)expected);
         LittleFS.remove(CONFIG_TMP_PATH);
         return false;
     }
@@ -445,6 +471,16 @@ bool ConfigManager::validateConfigDoc(JsonDocument& doc, String& errors) {
 }
 
 bool ConfigManager::importJson(const uint8_t* data, size_t len, String* errors) {
+    // AUDIT FIX (P2-3): bound the input before parsing. deserializeJson builds an
+    // elastic document proportional to input size; an oversized (or empty)
+    // upload could exhaust the heap and reset the device before validation runs.
+    if (len == 0 || len > CONFIG_MAX_IMPORT_BYTES) {
+        Serial.printf("[CONFIG] Import rejected — size %u out of range (max %u)\n",
+                      (unsigned)len, (unsigned)CONFIG_MAX_IMPORT_BYTES);
+        if (errors) *errors += "Fichier de configuration vide ou trop volumineux.\n";
+        return false;
+    }
+
     // Validate that it parses and looks like a PlayMode config before touching
     // the live file.
     JsonDocument doc;
@@ -702,15 +738,23 @@ bool ConfigManager::removeInstrument(uint8_t index) {
     _instruments[_instrument_count - 1] = {};
     _instrument_count--;
 
-    // Shift corresponding routings and update instrument_index values
-    if (index < _routing_count) {
-        for (uint8_t i = index; i < _routing_count - 1; i++) {
-            _routing_configs[i] = _routing_configs[i + 1];
-            _routing_configs[i].instrument_index = i;
-        }
-        _routing_configs[_routing_count - 1] = {};
-        _routing_count--;
+    // AUDIT FIX (P1-3): routings are matched to instruments by their
+    // `instrument_index` FIELD (getRoutingForInstrument searches by field), not
+    // by array position — the two arrays are not guaranteed parallel. The old
+    // code renumbered positionally, which deleted/mislabelled the wrong
+    // routing whenever they had diverged. Instead: drop the routing(s) whose
+    // instrument_index == the removed index, compact the array, and decrement
+    // instrument_index on every surviving routing that referenced an instrument
+    // AFTER the removed one (those instruments just shifted down by one).
+    uint8_t w = 0;
+    for (uint8_t r = 0; r < _routing_count; r++) {
+        if (_routing_configs[r].instrument_index == index) continue;  // drop
+        MidiRoutingConfig kept = _routing_configs[r];
+        if (kept.instrument_index > index) kept.instrument_index--;
+        _routing_configs[w++] = kept;
     }
+    for (uint8_t r = w; r < _routing_count; r++) _routing_configs[r] = {};
+    _routing_count = w;
 
     return true;
 }

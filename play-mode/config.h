@@ -156,6 +156,8 @@
 #define CAL_ONSET_MIN_THRESHOLD 500     // Minimum absolute threshold (LSB on 24 bits)
 #define CAL_INTER_RETRY_MS      600     // Delay between retries (ms)
 #define CAL_TRIGGER_VELOCITY    110     // MIDI velocity for calibration strikes
+#define CAL_AMBIENT_TIMEOUT_MS  2000    // Max time to collect ambient samples before
+                                        // declaring the mic/I²S dead (CAL_ERROR)
 
 // --- Test Manager (Phase 8) ---
 #define TEST_DEFAULT_VELOCITY       100     // Default velocity for tests
@@ -180,5 +182,11 @@
 // (0..15, or MIDI_CHANNEL_OMNI_INTERNAL). Also adds WiFiConfig::ap_password.
 #define CONFIG_VERSION          8
 #define CONFIG_VERSION_CHANNELS_INTERNAL 8   // first version with internal channels
+
+// AUDIT FIX (P2-3): hard upper bound on an imported config blob. deserializeJson
+// builds an elastic document proportional to input size, so an oversized upload
+// could exhaust the heap before validation runs. A full config (128 actuators +
+// 8 instruments + routing) serializes well under this.
+#define CONFIG_MAX_IMPORT_BYTES 32768
 
 #endif // CONFIG_H

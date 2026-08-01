@@ -194,8 +194,21 @@ bool MidiDispatcher::dispatchNoteOffToInstrument(uint8_t inst_idx, const MidiMes
     const NoteMapping* mapping = findNoteMapping(routing, msg.data1);
     if (mapping == nullptr) return false;
 
+    // AUDIT FIX (P0.2): apply the SAME latency compensation the matching Note On
+    // received. Without it, a Note On is deferred by `compensation_us` while its
+    // Note Off fires immediately — so a short note whose Off arrives before the
+    // On has executed would leave the actuator latched (TOUCHE servo / hit-and-
+    // hold solenoid) until the watchdog trips. Compensating both preserves the
+    // note's duration and ordering. The value is computed identically to
+    // dispatchNoteOnToInstrument().
+    InstrumentConfig& inst = _config.getInstruments()[inst_idx];
+    ActuatorConfig* act_config = findActuatorConfig(mapping->actuator_id);
+    uint16_t actuator_latency = act_config ? act_config->latency_ms : inst.default_latency_ms;
+    int32_t compensation_signed = ((int32_t)_max_latency_ms[inst_idx] - (int32_t)actuator_latency) * 1000;
+    uint32_t compensation_us = (compensation_signed > 0) ? (uint32_t)compensation_signed : 0;
+
     SchedulerEvent evt = {};
-    evt.trigger_time_us = (uint32_t)esp_timer_get_time();
+    evt.trigger_time_us = (uint32_t)esp_timer_get_time() + compensation_us;
     evt.actuator_id = mapping->actuator_id;
     evt.action = ACTION_NOTE_OFF;
     evt.velocity = 0;
@@ -249,6 +262,11 @@ bool MidiDispatcher::dispatchCCToInstrument(uint8_t inst_idx, const MidiMessage&
 
         switch (cc.target) {
             case CC_TARGET_POSITION: {
+                // AUDIT FIX (P1.6): direct positioning is servo-only. A
+                // CC_TARGET_POSITION pointing at a solenoid is a config error —
+                // ignore it rather than issuing an ACTION_POSITION_SET the
+                // solenoid path cannot honour.
+                if (act->type != ACT_SERVO) break;
                 // Direct servo positioning via scheduler
                 SchedulerEvent evt = {};
                 evt.trigger_time_us = (uint32_t)esp_timer_get_time();

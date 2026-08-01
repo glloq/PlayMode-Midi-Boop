@@ -244,13 +244,23 @@ void MidiTransport::pollUDP() {
     if (packetSize > 0) {
         _udpPackets++;
         uint8_t buf[256];
-        int len = _udp.read(buf, min(packetSize, (int)sizeof(buf)));
-
-        for (int i = 0; i < len; i++) {
-            if (_udpParser.feed(buf[i])) {
-                MidiMessage msg = _udpParser.getMessage();
-                deliverMessage(msg, MIDI_SOURCE_UDP);
+        // AUDIT FIX: drain the WHOLE datagram in chunks. Previously any bytes
+        // past 256 were discarded; because _udpParser persists across packets, a
+        // truncation landing mid-message desynced the stream (the next
+        // datagram's first byte was consumed as the tail of the dropped message,
+        // fabricating a spurious note event). Looping until the datagram is
+        // empty feeds every byte to the parser in order.
+        int remaining = packetSize;
+        while (remaining > 0) {
+            int len = _udp.read(buf, min(remaining, (int)sizeof(buf)));
+            if (len <= 0) break;
+            for (int i = 0; i < len; i++) {
+                if (_udpParser.feed(buf[i])) {
+                    MidiMessage msg = _udpParser.getMessage();
+                    deliverMessage(msg, MIDI_SOURCE_UDP);
+                }
             }
+            remaining -= len;
         }
     }
 }
