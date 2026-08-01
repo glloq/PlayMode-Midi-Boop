@@ -524,7 +524,18 @@ bool Calibrator::triggerActuator() {
                                   + 50000UL;  // +50ms margin
         scheduled = _scheduler.pushPulse(on_evt, off_evt);
     } else {
-        scheduled = _scheduler.pushEvent(on_evt);
+        // AUDIT FIX (F5): pair a NOTE_OFF for servos too. A SERVO_TOUCHE holds
+        // its offset until note-off, so a lone NOTE_ON would leave it displaced
+        // after calibration. Release after the full measurement window so the
+        // strike is captured first. Harmless for FRAPPE/ALTERNE/GRATTER — their
+        // handlers have no NOTE_OFF branch and auto-return on their own.
+        SchedulerEvent off_evt = on_evt;
+        off_evt.action          = ACTION_NOTE_OFF;
+        off_evt.velocity        = 0;
+        off_evt.trigger_time_us = _trigger_time_us
+                                  + (uint32_t)CAL_MEASURE_WINDOW_MS * 1000UL
+                                  + 50000UL;  // +50ms margin
+        scheduled = _scheduler.pushPulse(on_evt, off_evt);
     }
 
     // AUDIT FIX: if the strike could not be scheduled, abort — otherwise the

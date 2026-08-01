@@ -40,6 +40,16 @@ bool ConfigManager::begin() {
     // edits and real-time processing are serialised from the first tick.
     if (g_actuator_mutex == nullptr) {
         g_actuator_mutex = xSemaphoreCreateMutex();
+        // AUDIT FIX (P2-1): if the mutex cannot be created (heap exhaustion),
+        // do NOT continue — lockActuators() would then report every lock as
+        // "acquired" and there would be no mutual exclusion at all between the
+        // web task and the real-time Core 1 actuator task. Fail begin() so the
+        // caller enters safe mode (outputs stay latched off) instead of running
+        // an actuator machine with no synchronization.
+        if (g_actuator_mutex == nullptr) {
+            Serial.println("[CONFIG] FATAL: actuator mutex creation failed — safe mode");
+            return false;
+        }
     }
 
     // AUDIT FIX: never eagerly format on a mount failure — that silently wipes
@@ -76,8 +86,14 @@ bool ConfigManager::begin() {
                 LittleFS.rename(CONFIG_BAK_PATH, CONFIG_FILE_PATH) && load()) {
                 Serial.println("[CONFIG] Recovered configuration from backup");
             } else {
+                // AUDIT FIX (P2-4): persist the defaults here too. Without the
+                // save(), defaults live only in RAM and every subsequent boot
+                // re-hits the same corrupt primary and repeats the recovery
+                // dance. Writing them once (atomic save rotates the corrupt file
+                // out) makes the recovery stick.
                 Serial.println("[CONFIG] Load error, using defaults");
                 loadDefaults();
+                save();
             }
         }
     } else if (LittleFS.exists(CONFIG_BAK_PATH) &&
@@ -455,6 +471,16 @@ bool ConfigManager::validateConfigDoc(JsonDocument& doc, String& errors) {
 }
 
 bool ConfigManager::importJson(const uint8_t* data, size_t len, String* errors) {
+    // AUDIT FIX (P2-3): bound the input before parsing. deserializeJson builds an
+    // elastic document proportional to input size; an oversized (or empty)
+    // upload could exhaust the heap and reset the device before validation runs.
+    if (len == 0 || len > CONFIG_MAX_IMPORT_BYTES) {
+        Serial.printf("[CONFIG] Import rejected — size %u out of range (max %u)\n",
+                      (unsigned)len, (unsigned)CONFIG_MAX_IMPORT_BYTES);
+        if (errors) *errors += "Fichier de configuration vide ou trop volumineux.\n";
+        return false;
+    }
+
     // Validate that it parses and looks like a PlayMode config before touching
     // the live file.
     JsonDocument doc;

@@ -76,12 +76,22 @@ uint8_t LogManager::getCount() const {
     return _count;
 }
 
-const LogEntry& LogManager::getEntry(uint8_t idx) const {
-    if (idx >= _count) return _empty;
-    // idx 0 = most recent entry (_head - 1)
-    int16_t pos = (int16_t)_head - 1 - (int16_t)idx;
-    if (pos < 0) pos += LOG_BUFFER_SIZE;
-    return _buf[(uint8_t)(pos % LOG_BUFFER_SIZE)];
+LogEntry LogManager::getEntry(uint8_t idx) const {
+    // AUDIT FIX (P1): copy under the mutex and return by value, so the caller can
+    // never dereference a ring-buffer slot while log() overwrites it on the
+    // other core.
+    LogEntry out = _empty;
+    if (!_mutex) return out;
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (idx < _count) {
+            // idx 0 = most recent entry (_head - 1)
+            int16_t pos = (int16_t)_head - 1 - (int16_t)idx;
+            if (pos < 0) pos += LOG_BUFFER_SIZE;
+            out = _buf[(uint8_t)(pos % LOG_BUFFER_SIZE)];
+        }
+        xSemaphoreGive(_mutex);
+    }
+    return out;
 }
 
 void LogManager::getAllEntries(LogEntry* out_buf, uint8_t& count_out) const {

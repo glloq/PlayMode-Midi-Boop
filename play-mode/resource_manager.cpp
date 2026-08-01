@@ -95,11 +95,26 @@ void ResourceManager::setScheduler(Scheduler* scheduler) { _scheduler = schedule
 uint16_t ResourceManager::estimateCurrent(const ActuatorConfig& actuator,
                                           uint8_t behavior, uint8_t velocity,
                                           bool assume_active) const {
+    if (actuator.type == ACT_SERVO) {
+        // AUDIT FIX (P1-B): a servo is NEVER driven to 0. On release it is parked
+        // at angle_initial and keeps holding that position, drawing holding
+        // current for as long as the bus OE is enabled. Counting a parked servo
+        // (state.active==false, e.g. after ALTERNE, or any note-off) as 0 mA
+        // systematically under-counted the dominant steady-state load — dangerous
+        // because there is NO real current sensing, the estimate is the only
+        // power guard. Bill an active/moving servo at the full estimate and a
+        // parked one at the idle holding estimate.
+        if (assume_active || actuator.state.active) return POWER_SERVO_ACTIVE_MA;
+        // A parked servo draws idle current only while the outputs are armed;
+        // when killed (OE off) it draws nothing. Reporting phantom idle current
+        // during a kill would keep over_current latched and block acknowledge/
+        // recovery, so return 0 in that state.
+        return _global_state.kill_switch_active ? 0 : POWER_SERVO_IDLE_MA;
+    }
+
+    // Solenoids: inactive really means de-energized (PWM 0) → 0 mA.
     if (!assume_active && !actuator.state.active) return 0;
 
-    if (actuator.type == ACT_SERVO) {
-        return POWER_SERVO_ACTIVE_MA;
-    }
     if (actuator.type == ACT_SOLENOID) {
         if (assume_active) {
             // AUDIT FIX (P1.1): use the EFFECTIVE behaviour (per-note override),
@@ -262,11 +277,16 @@ void ResourceManager::update(ActuatorConfig* actuators[], uint8_t count) {
         uint16_t ma = estimateCurrent(*act, act->behavior, 0, false);
         _actuator_safety[id].estimated_current_ma = ma;
         total_ma += ma;
+        // AUDIT FIX (P1-B): account per-bus draw for EVERY actuator, not only
+        // active ones — otherwise a parked servo's holding current is in the
+        // global total but missing from its bus total, so the per-bus caps
+        // under-count. (`ma` is 0 for an idle solenoid, so this is a no-op for
+        // those.)
+        if (act->bus_id == 0) bus0 += ma; else if (act->bus_id == 1) bus1 += ma;
 
         if (act->state.active) {
             active_count++;
             _actuator_safety[id].active_time_us += SAFETY_CHECK_INTERVAL_MS * 1000;
-            if (act->bus_id == 0) bus0 += ma; else if (act->bus_id == 1) bus1 += ma;
             uint8_t in = _alloc_inst[id];
             if (in < MAX_INSTRUMENTS) inst_active[in]++;
             _tracked[id]   = true;
@@ -378,6 +398,7 @@ void ResourceManager::requestBusFrequency(uint8_t bus_id, uint16_t hz) {
 
 void ResourceManager::latchHardwareFault(const char* reason) {
     _global_state.fault_latched = true;
+    _hw_fault_latched = true;   // AUDIT FIX (P2-F): remember the cause is hardware
     Serial.printf("[RESOURCE] HARDWARE FAULT LATCHED: %s — KILL SWITCH\n",
                   reason ? reason : "(unknown)");
     activateKillSwitch();
@@ -405,6 +426,11 @@ void ResourceManager::processPendingRequests(ActuatorConfig* actuators[], uint8_
             // It does NOT re-arm — a separate arm action is required.
             if (_global_state.over_current) {
                 Serial.println("[RESOURCE] Acknowledge refused — over-current still present");
+            } else if (_hw_fault_latched) {
+                // AUDIT FIX (P2-F): a hardware fault cannot be waved away by ack;
+                // the operator must rescan I2C (which clears the cause if the bus
+                // recovered) before the latch can be acknowledged.
+                Serial.println("[RESOURCE] Acknowledge refused — hardware fault; rescan I2C first");
             } else {
                 _global_state.fault_latched = false;
                 Serial.println("[RESOURCE] Fault acknowledged (still disarmed — arm to resume)");
@@ -427,6 +453,10 @@ void ResourceManager::processPendingRequests(ActuatorConfig* actuators[], uint8_
 void ResourceManager::doRescan() {
     activateKillSwitch();
     _pca.rescanAll();
+    // AUDIT FIX (P2-F): the operator has explicitly rescanned the bus; clear the
+    // hardware-fault cause so the latch can now be acknowledged. If the bus is
+    // still broken the next failed safe-off write re-latches it immediately.
+    _hw_fault_latched = false;
     Serial.println("[RESOURCE] I2C rescan complete (Core 1) — outputs remain disabled");
 }
 
@@ -569,11 +599,11 @@ void ResourceManager::resetWindow(uint8_t actuator_id) {
 }
 
 void ResourceManager::resetActuatorStates() {
-    if (_cached_actuators == nullptr) return;
-    for (uint8_t i = 0; i < _cached_actuator_count; i++) {
-        if (_cached_actuators[i] != nullptr) _cached_actuators[i]->state.active = false;
-    }
-    // The outputs are physically off; drop all running allocations too.
+    // AUDIT FIX (P2-I): drop all running allocations FIRST, before the
+    // null-cache guard. The outputs are physically off by the time this runs, so
+    // the budget must be zeroed even if no actuator cache was ever registered —
+    // otherwise a kill before the first cache registration would leave stale
+    // allocations inflating the budget after the outputs were cut.
     _global_state.total_estimated_current_ma = 0;
     _global_state.active_actuator_count = 0;
     _bus_ma[0] = _bus_ma[1] = 0;
@@ -582,4 +612,9 @@ void ResourceManager::resetActuatorStates() {
     memset(_tracked, false, sizeof(_tracked));
     memset(_stats.instrument_active_count, 0, sizeof(_stats.instrument_active_count));
     syncDerivedStats();
+
+    if (_cached_actuators == nullptr) return;
+    for (uint8_t i = 0; i < _cached_actuator_count; i++) {
+        if (_cached_actuators[i] != nullptr) _cached_actuators[i]->state.active = false;
+    }
 }

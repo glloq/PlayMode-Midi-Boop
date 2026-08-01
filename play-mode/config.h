@@ -183,4 +183,10 @@
 #define CONFIG_VERSION          8
 #define CONFIG_VERSION_CHANNELS_INTERNAL 8   // first version with internal channels
 
+// AUDIT FIX (P2-3): hard upper bound on an imported config blob. deserializeJson
+// builds an elastic document proportional to input size, so an oversized upload
+// could exhaust the heap before validation runs. A full config (128 actuators +
+// 8 instruments + routing) serializes well under this.
+#define CONFIG_MAX_IMPORT_BYTES 32768
+
 #endif // CONFIG_H

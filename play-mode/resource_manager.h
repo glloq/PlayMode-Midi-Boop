@@ -127,6 +127,14 @@ private:
     uint16_t _max_freq_hz;
     uint16_t _watchdog_ms;
 
+    // AUDIT FIX (P2-F): remember WHY the fault latched. An over-current fault
+    // clears once the current drops; a hardware fault (I2C write failed, PCA
+    // missing) must NOT be acknowledged merely because the estimated current is
+    // low — it requires an explicit I2C rescan first, so the system cannot
+    // re-arm into a still-broken bus. Set by latchHardwareFault(), cleared by
+    // doRescan().
+    bool _hw_fault_latched = false;
+
     // Live aggregates.
     SafetyState _global_state;                     // current/active/kill/degrade
     PowerStats  _stats;                            // web-facing stats mirror

@@ -59,8 +59,11 @@ public:
     // Returns the number of valid entries (0 ... LOG_BUFFER_SIZE)
     uint8_t getCount() const;
 
-    // Returns the entry at index idx (0 = most recent)
-    const LogEntry& getEntry(uint8_t idx) const;
+    // Returns a COPY of the entry at index idx (0 = most recent).
+    // AUDIT FIX (P1): returns by value under the mutex — the old
+    // const-reference-into-the-ring-buffer let a reader observe an entry being
+    // half-overwritten by log() on the other core (torn timestamp/message).
+    LogEntry getEntry(uint8_t idx) const;
 
     // Thread-safe copy of the entire buffer into out_buf (size LOG_BUFFER_SIZE).
     // count_out receives the number of valid entries copied (order: idx 0 = most recent).
