@@ -148,8 +148,16 @@ void Calibrator::update() {
         // Flush DMA, then trigger the actuator
         flushI2S();
         _samples_after_trigger = 0;
-        triggerActuator();
-        enterState(CAL_RECORDING);
+        // AUDIT FIX (P1.7): triggerActuator() sets _state = CAL_ERROR when the
+        // actuator is missing or the scheduler queue is full. Only advance to
+        // CAL_RECORDING if the trigger actually succeeded — otherwise the
+        // unconditional enterState() would clobber the error and the calibrator
+        // would record ambient noise as if the actuator had fired.
+        if (triggerActuator()) {
+            enterState(CAL_RECORDING);
+        } else {
+            enterState(CAL_ERROR);
+        }
         break;
     }
 
@@ -459,7 +467,7 @@ int32_t Calibrator::detectOnset() const {
     return -1;
 }
 
-void Calibrator::triggerActuator() {
+bool Calibrator::triggerActuator() {
     ActuatorConfig* acts  = _config.getActuators();
     uint8_t         count = _config.getActuatorCount();
 
@@ -470,7 +478,7 @@ void Calibrator::triggerActuator() {
     if (!act_cfg) {
         Serial.printf("[CAL] Actuator %d not found!\n", _cur_act_id);
         _state = CAL_ERROR;
-        return;
+        return false;
     }
 
     _trigger_time_us = (uint32_t)esp_timer_get_time();
@@ -509,12 +517,13 @@ void Calibrator::triggerActuator() {
         Serial.printf("[CAL] Scheduler queue full — cannot trigger act %d, aborting\n",
                       _cur_act_id);
         _state = CAL_ERROR;
-        return;
+        return false;
     }
 
     Serial.printf("[CAL] Trigger act %d (attempt %d/%d) @ %lu us\n",
                   _cur_act_id, _cur_try + 1, CAL_RETRIES,
                   (unsigned long)_trigger_time_us);
+    return true;
 }
 
 // ============================================================================

@@ -47,6 +47,19 @@ void ActuatorEngine::processEvent(ActuatorConfig& actuator, const SchedulerEvent
         return;
     }
 
+    // AUDIT FIX (P1.6): direct servo positioning is behaviour-independent. Handle
+    // ACTION_POSITION_SET here, before the behaviour switch, so it works for ALL
+    // servo behaviours — including SERVO_TOUCHE, whose handler has no
+    // position-set branch and would otherwise silently drop a CC position
+    // command. This also covers the deferred auto-return events (which every
+    // servo behaviour emits as ACTION_POSITION_SET), whose per-behaviour
+    // branches all did exactly this. Solenoids fall through to their handlers.
+    if (event.action == ACTION_POSITION_SET && actuator.type == ACT_SERVO) {
+        if (setServoAngle(actuator, event.value)) actuator.state.active = false;
+        actuator.state.last_trigger_us = (uint32_t)esp_timer_get_time();
+        return;
+    }
+
     // AUDIT FIX (P1.5): behaviour override in effect for this activation.
     _current_behavior_override = event.behavior_override;
     uint8_t effective_behavior = (event.behavior_override != 0xFF)

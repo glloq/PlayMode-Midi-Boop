@@ -152,9 +152,10 @@ void WebServer::setTestManager(TestManager* testManager) {
 bool WebServer::begin() {
     if (_running) return true;
 
-    // AUDIT FIX: ESPAsyncWebServer drops unknown request headers by
-    // default — register the auth header so requireAuth() can read it.
-    _server.collectHeader(WEB_AUTH_HEADER);
+    // Note: me-no-dev/ESPAsyncWebServer@1.2.3 captures all request headers by
+    // default, so requireAuth() can read WEB_AUTH_HEADER without any explicit
+    // header registration. (The collectHeader() API only exists in the newer
+    // ESP32Async fork, which this project does not use.)
 
     setupStaticRoutes();
     setupAPIRoutes();
@@ -980,6 +981,9 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
     // release it BEFORE the flash write (AUDIT FIX P1.7: never hold the
     // real-time mutex across a LittleFS write). Web callbacks are serialised on
     // the async task, so no other web edit can interleave here.
+    // `inst_idx` is declared here (outside the lock block) so it stays in scope
+    // for the post-save rollback and the JSON response.
+    uint8_t inst_idx = 0xFF;
     {
     ActuatorLockGuard guard(*_config);
     if (!guard.locked()) {
@@ -1001,7 +1005,7 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
         request->send(500, "application/json", "{\"error\":\"instrument add failed\"}");
         return;
     }
-    uint8_t inst_idx = _config->getInstrumentCount() - 1;
+    inst_idx = _config->getInstrumentCount() - 1;
 
     // Create actuators with the assigned free IDs.
     k = 0;
@@ -1055,6 +1059,13 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
     // Atomic save (outside the RT mutex). On failure, roll back under the lock.
     if (!_config->save()) {
         ActuatorLockGuard rb(*_config);
+        if (!rb.locked()) {
+            // Cannot take the RT mutex to roll back safely — report the failure
+            // rather than mutating the actuator tables underneath Core 1.
+            request->send(500, "application/json",
+                          "{\"error\":\"save failed and rollback lock failed\"}");
+            return;
+        }
         for (uint8_t i = 0; i < n; i++) _config->removeActuator(free_ids[i]);
         _config->removeInstrument(inst_idx);
         if (_scheduler) _scheduler->syncActuators(_config->getActuators(),

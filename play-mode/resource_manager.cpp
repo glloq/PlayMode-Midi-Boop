@@ -505,11 +505,15 @@ bool ResourceManager::checkFrequency(uint8_t actuator_id) {
     if (actuator_id >= MAX_ACTUATORS) return false;
     ActuatorSafetyState& state = _actuator_safety[actuator_id];
     uint32_t now_us = (uint32_t)esp_timer_get_time();
-    uint32_t elapsed_us = now_us - state.window_start_us;
-    if (elapsed_us == 0) elapsed_us = 1;
-    if (elapsed_us < 1000000) {
-        if (state.trigger_count_window >= _max_freq_hz) return false;
-    }
+    // AUDIT FIX (P1.4): roll an expired window synchronously, HERE, before the
+    // count check — do not wait for ResourceManager::update(). The scheduler
+    // drains every ready event before update() runs, so a burst of notes with
+    // the same timestamp, arriving just after the 1 s window expired, would all
+    // pass the (skipped) count check and bypass the rate limiter entirely.
+    // Resetting here means the fresh window's counter gates the very next events
+    // in the same batch.
+    if ((now_us - state.window_start_us) >= 1000000) resetWindow(actuator_id);
+    if (state.trigger_count_window >= _max_freq_hz) return false;
     return true;
 }
 
@@ -517,10 +521,11 @@ bool ResourceManager::checkDutyCycle(uint8_t actuator_id, const ActuatorConfig& 
     if (actuator_id >= MAX_ACTUATORS) return false;
     ActuatorSafetyState& state = _actuator_safety[actuator_id];
     uint32_t now_us = (uint32_t)esp_timer_get_time();
+    // AUDIT FIX (P1.4): roll an expired window here as well (see checkFrequency).
+    if ((now_us - state.window_start_us) >= 1000000) resetWindow(actuator_id);
     uint32_t elapsed_us = now_us - state.window_start_us;
     if (elapsed_us == 0) elapsed_us = 1;
-    uint8_t duty = 0;
-    if (elapsed_us < 1000000) duty = (uint8_t)((state.active_time_us * 100UL) / elapsed_us);
+    uint8_t duty = (uint8_t)((state.active_time_us * 100UL) / elapsed_us);
     return duty < _max_duty_cycle;
 }
 
