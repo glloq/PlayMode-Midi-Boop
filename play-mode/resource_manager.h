@@ -109,11 +109,15 @@ public:
     void setMaxDutyCycle(uint8_t percent);
     void setMaxFrequency(uint16_t hz);
     void setWatchdogTimeout(uint16_t ms);
+    void setSolenoidHoldTimeout(uint16_t ms);
+    void setServoHoldTimeout(uint16_t ms);
     void setSmartRejection(bool on);
 
-    uint8_t  getMaxDutyCycle() const     { return _max_duty_cycle; }
-    uint16_t getMaxFrequency() const     { return _max_freq_hz; }
-    uint16_t getWatchdogTimeout() const  { return _watchdog_ms; }
+    uint8_t  getMaxDutyCycle() const        { return _max_duty_cycle; }
+    uint16_t getMaxFrequency() const        { return _max_freq_hz; }
+    uint16_t getWatchdogTimeout() const     { return _watchdog_ms; }
+    uint16_t getSolenoidHoldTimeout() const { return _solenoid_hold_ms; }
+    uint16_t getServoHoldTimeout() const    { return _servo_hold_ms; }
     uint8_t  getMaxPolyphony() const     { return _budget.global_max_polyphony; }
     uint32_t getMaxTotalCurrent() const  { return _budget.global_max_ma; }
 
@@ -125,7 +129,9 @@ private:
     PowerBudget _budget;         // current cap, per-bus caps, polyphony
     uint8_t  _max_duty_cycle;
     uint16_t _max_freq_hz;
-    uint16_t _watchdog_ms;
+    uint16_t _watchdog_ms;          // impulse backstop
+    uint16_t _solenoid_hold_ms;     // HIT_AND_HOLD max coil energise time
+    uint16_t _servo_hold_ms;        // SERVO_TOUCHE max hold; 0 = unlimited
 
     // AUDIT FIX (P2-F): remember WHY the fault latched. An over-current fault
     // clears once the current drops; a hardware fault (I2C write failed, PCA
@@ -172,6 +178,8 @@ private:
     bool checkFrequency(uint8_t actuator_id);
     bool checkDutyCycle(uint8_t actuator_id, const ActuatorConfig& actuator);
     void checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuator);
+    // Per-behaviour watchdog limit (ms); 0 = disabled/unlimited for that behaviour.
+    uint32_t effectiveWatchdogMs(const ActuatorConfig& actuator) const;
     void resetWindow(uint8_t actuator_id);
     void resetActuatorStates();
     void syncDerivedStats();

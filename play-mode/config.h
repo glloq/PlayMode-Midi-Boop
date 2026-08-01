@@ -53,7 +53,16 @@
 // --- Safety ---
 #define SAFETY_MAX_DUTY_CYCLE   80      // % max duty cycle per actuator
 #define SAFETY_MAX_FREQ_HZ      50      // Max trigger frequency
-#define SAFETY_WATCHDOG_MS      5000    // Actuator watchdog timeout
+#define SAFETY_WATCHDOG_MS      5000    // Impulse watchdog backstop (frappe/gratter/
+                                        // alterne) — these auto-return in ms; this
+                                        // only catches a lost return event.
+// AUDIT FIX (differentiated watchdog): held behaviours get their own limits so a
+// sustained note is not cut at the impulse backstop.
+#define SAFETY_SOLENOID_HOLD_MS 5000    // Max HIT_AND_HOLD coil energise time (ms)
+                                        // — thermal protection; must stay bounded.
+#define SAFETY_SERVO_HOLD_MS    0       // Max SERVO_TOUCHE hold time (ms); 0 = no
+                                        // limit (organ/accordion/drone: a servo
+                                        // holds position mechanically, no coil burn).
 #define SAFETY_CHECK_INTERVAL_MS    10      // Safety check frequency (ms)
 #define SAFETY_MAX_TOTAL_CURRENT_MA 5000    // Max estimated total current (mA)
 #define SAFETY_SERVO_CURRENT_MA     250     // Estimated current per active servo (mA)
