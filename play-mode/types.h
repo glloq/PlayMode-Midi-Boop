@@ -247,9 +247,12 @@ struct SafetyState {
 struct SafetyLimits {
     uint8_t  max_duty_pct;
     uint16_t max_freq_hz;
-    uint16_t watchdog_ms;
+    uint16_t watchdog_ms;         // impulse backstop (frappe/gratter/alterne)
     uint8_t  max_polyphony;
     uint16_t max_current_ma;
+    // Differentiated watchdog (per held behaviour).
+    uint16_t solenoid_hold_ms;    // max HIT_AND_HOLD coil energise time (thermal)
+    uint16_t servo_hold_ms;       // max SERVO_TOUCHE hold time; 0 = unlimited
 };
 
 // --- Power budget (configuration) ---

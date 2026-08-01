@@ -586,11 +586,13 @@ void ConfigManager::loadDefaults() {
     }
 
     // Safety limit defaults
-    _safety_limits.max_duty_pct   = SAFETY_MAX_DUTY_CYCLE;
-    _safety_limits.max_freq_hz    = SAFETY_MAX_FREQ_HZ;
-    _safety_limits.watchdog_ms    = SAFETY_WATCHDOG_MS;
-    _safety_limits.max_polyphony  = SAFETY_MAX_POLYPHONY;
-    _safety_limits.max_current_ma = SAFETY_MAX_TOTAL_CURRENT_MA;
+    _safety_limits.max_duty_pct     = SAFETY_MAX_DUTY_CYCLE;
+    _safety_limits.max_freq_hz      = SAFETY_MAX_FREQ_HZ;
+    _safety_limits.watchdog_ms      = SAFETY_WATCHDOG_MS;
+    _safety_limits.max_polyphony    = SAFETY_MAX_POLYPHONY;
+    _safety_limits.max_current_ma   = SAFETY_MAX_TOTAL_CURRENT_MA;
+    _safety_limits.solenoid_hold_ms = SAFETY_SOLENOID_HOLD_MS;
+    _safety_limits.servo_hold_ms    = SAFETY_SERVO_HOLD_MS;
 
     // MIDI Input defaults
     _midi_input_config.serial_enabled = true;
@@ -1072,19 +1074,24 @@ void ConfigManager::deserializePower(PowerBudget& p, const JsonObject& obj) {
 }
 
 void ConfigManager::serializeSafety(const SafetyLimits& s, JsonObject& obj) {
-    obj["max_duty_pct"]   = s.max_duty_pct;
-    obj["max_freq_hz"]    = s.max_freq_hz;
-    obj["watchdog_ms"]    = s.watchdog_ms;
-    obj["max_polyphony"]  = s.max_polyphony;
-    obj["max_current_ma"] = s.max_current_ma;
+    obj["max_duty_pct"]     = s.max_duty_pct;
+    obj["max_freq_hz"]      = s.max_freq_hz;
+    obj["watchdog_ms"]      = s.watchdog_ms;
+    obj["max_polyphony"]    = s.max_polyphony;
+    obj["max_current_ma"]   = s.max_current_ma;
+    obj["solenoid_hold_ms"] = s.solenoid_hold_ms;
+    obj["servo_hold_ms"]    = s.servo_hold_ms;
 }
 
 void ConfigManager::deserializeSafety(SafetyLimits& s, const JsonObject& obj) {
-    s.max_duty_pct   = obj["max_duty_pct"]   | (uint8_t)SAFETY_MAX_DUTY_CYCLE;
-    s.max_freq_hz    = obj["max_freq_hz"]    | (uint16_t)SAFETY_MAX_FREQ_HZ;
-    s.watchdog_ms    = obj["watchdog_ms"]    | (uint16_t)SAFETY_WATCHDOG_MS;
-    s.max_polyphony  = obj["max_polyphony"]  | (uint8_t)SAFETY_MAX_POLYPHONY;
-    s.max_current_ma = obj["max_current_ma"] | (uint16_t)SAFETY_MAX_TOTAL_CURRENT_MA;
+    s.max_duty_pct     = obj["max_duty_pct"]     | (uint8_t)SAFETY_MAX_DUTY_CYCLE;
+    s.max_freq_hz      = obj["max_freq_hz"]      | (uint16_t)SAFETY_MAX_FREQ_HZ;
+    s.watchdog_ms      = obj["watchdog_ms"]      | (uint16_t)SAFETY_WATCHDOG_MS;
+    s.max_polyphony    = obj["max_polyphony"]    | (uint8_t)SAFETY_MAX_POLYPHONY;
+    s.max_current_ma   = obj["max_current_ma"]   | (uint16_t)SAFETY_MAX_TOTAL_CURRENT_MA;
+    s.solenoid_hold_ms = obj["solenoid_hold_ms"] | (uint16_t)SAFETY_SOLENOID_HOLD_MS;
+    // servo_hold_ms: 0 is a valid "unlimited". Default only applies when absent.
+    s.servo_hold_ms    = obj["servo_hold_ms"]    | (uint16_t)SAFETY_SERVO_HOLD_MS;
 }
 
 // ============================================================================

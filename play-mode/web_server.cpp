@@ -815,9 +815,11 @@ void WebServer::handleGetSafety(AsyncWebServerRequest* request) {
     JsonObject cfg = doc["config"].to<JsonObject>();
     cfg["max_duty_pct"]    = _resources->getMaxDutyCycle();
     cfg["max_freq_hz"]     = _resources->getMaxFrequency();
-    cfg["watchdog_ms"]     = _resources->getWatchdogTimeout();
-    cfg["max_polyphony"]   = _resources->getMaxPolyphony();
-    cfg["max_current_ma"]  = _resources->getMaxTotalCurrent();
+    cfg["watchdog_ms"]      = _resources->getWatchdogTimeout();
+    cfg["solenoid_hold_ms"] = _resources->getSolenoidHoldTimeout();
+    cfg["servo_hold_ms"]    = _resources->getServoHoldTimeout();  // 0 = unlimited
+    cfg["max_polyphony"]    = _resources->getMaxPolyphony();
+    cfg["max_current_ma"]   = _resources->getMaxTotalCurrent();
 
     String output;
     serializeJson(doc, output);
@@ -1648,6 +1650,12 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
         _resources->setMaxFrequency((uint16_t)clampU(doc["max_freq_hz"] | 0, 1, 1000));
     if (!doc["watchdog_ms"].isNull())
         _resources->setWatchdogTimeout((uint16_t)clampU(doc["watchdog_ms"] | 0, 100, 60000));
+    // Differentiated watchdog. solenoid_hold stays bounded (never 0 — that would
+    // remove coil thermal protection). servo_hold accepts 0 = unlimited hold.
+    if (!doc["solenoid_hold_ms"].isNull())
+        _resources->setSolenoidHoldTimeout((uint16_t)clampU(doc["solenoid_hold_ms"] | 0, 100, 60000));
+    if (!doc["servo_hold_ms"].isNull())
+        _resources->setServoHoldTimeout((uint16_t)clampU(doc["servo_hold_ms"] | 0, 0, 65535));
     if (!doc["max_polyphony"].isNull())
         _resources->setMaxPolyphony((uint8_t)clampU(doc["max_polyphony"] | 0, 1, MAX_ACTUATORS));
     if (!doc["max_current_ma"].isNull())
@@ -1659,9 +1667,11 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
         SafetyLimits sl;
         sl.max_duty_pct   = _resources->getMaxDutyCycle();
         sl.max_freq_hz    = _resources->getMaxFrequency();
-        sl.watchdog_ms    = _resources->getWatchdogTimeout();
-        sl.max_polyphony  = _resources->getMaxPolyphony();
-        sl.max_current_ma = _resources->getMaxTotalCurrent();
+        sl.watchdog_ms      = _resources->getWatchdogTimeout();
+        sl.max_polyphony    = _resources->getMaxPolyphony();
+        sl.max_current_ma   = _resources->getMaxTotalCurrent();
+        sl.solenoid_hold_ms = _resources->getSolenoidHoldTimeout();
+        sl.servo_hold_ms    = _resources->getServoHoldTimeout();
         _config->setSafetyLimits(sl);
     }
 

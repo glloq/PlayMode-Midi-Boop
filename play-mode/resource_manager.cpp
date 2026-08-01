@@ -13,6 +13,8 @@ ResourceManager::ResourceManager(PCADriver& pca)
       _max_duty_cycle(SAFETY_MAX_DUTY_CYCLE),
       _max_freq_hz(SAFETY_MAX_FREQ_HZ),
       _watchdog_ms(SAFETY_WATCHDOG_MS),
+      _solenoid_hold_ms(SAFETY_SOLENOID_HOLD_MS),
+      _servo_hold_ms(SAFETY_SERVO_HOLD_MS),
       _last_check_us(0),
       _kill_requested(false),
       _rearm_requested(false),
@@ -62,6 +64,13 @@ void ResourceManager::begin(const PowerBudget& budget, const SafetyLimits& limit
     _max_duty_cycle = limits.max_duty_pct ? limits.max_duty_pct : SAFETY_MAX_DUTY_CYCLE;
     _max_freq_hz    = limits.max_freq_hz  ? limits.max_freq_hz  : SAFETY_MAX_FREQ_HZ;
     _watchdog_ms    = limits.watchdog_ms  ? limits.watchdog_ms  : SAFETY_WATCHDOG_MS;
+    // Differentiated watchdog. solenoid_hold defaults to a bounded value; a 0
+    // there would DISABLE coil thermal protection, so fall back to the default.
+    // servo_hold==0 is a legitimate "unlimited hold" (sustained notes), so it is
+    // taken verbatim.
+    _solenoid_hold_ms = limits.solenoid_hold_ms ? limits.solenoid_hold_ms
+                                                : SAFETY_SOLENOID_HOLD_MS;
+    _servo_hold_ms    = limits.servo_hold_ms;
 
     uint32_t now_us = (uint32_t)esp_timer_get_time();
     for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
@@ -81,10 +90,13 @@ void ResourceManager::begin(const PowerBudget& budget, const SafetyLimits& limit
     _ack_requested = false;
 
     Serial.println("[RESOURCE] Resource Manager initialized (unified safety+power)");
-    Serial.printf("[RESOURCE] Cap: %umA, buses %u/%umA, polyphony %d | duty=%d%% freq=%dHz wd=%dms\n",
+    Serial.printf("[RESOURCE] Cap: %umA, buses %u/%umA, polyphony %d | duty=%d%% freq=%dHz "
+                  "wd(impulse)=%dms wd(sol-hold)=%dms wd(servo-hold)=%dms%s\n",
                   _budget.global_max_ma, _budget.servo_bus_max_ma,
                   _budget.solenoid_bus_max_ma, _budget.global_max_polyphony,
-                  _max_duty_cycle, _max_freq_hz, _watchdog_ms);
+                  _max_duty_cycle, _max_freq_hz, _watchdog_ms,
+                  _solenoid_hold_ms, _servo_hold_ms,
+                  _servo_hold_ms == 0 ? " (servo hold unlimited)" : "");
 }
 
 void ResourceManager::setScheduler(Scheduler* scheduler) { _scheduler = scheduler; }
@@ -526,6 +538,8 @@ void ResourceManager::setInstrumentMaxPolyphony(uint8_t i, uint8_t max) {
 void ResourceManager::setMaxDutyCycle(uint8_t percent) { _max_duty_cycle = percent; }
 void ResourceManager::setMaxFrequency(uint16_t hz)     { _max_freq_hz = hz; }
 void ResourceManager::setWatchdogTimeout(uint16_t ms)  { _watchdog_ms = ms; }
+void ResourceManager::setSolenoidHoldTimeout(uint16_t ms) { _solenoid_hold_ms = ms; }
+void ResourceManager::setServoHoldTimeout(uint16_t ms)    { _servo_hold_ms = ms; }
 void ResourceManager::setSmartRejection(bool on)       { _budget.smart_rejection = on; }
 
 // ============================================================================
@@ -559,13 +573,36 @@ bool ResourceManager::checkDutyCycle(uint8_t actuator_id, const ActuatorConfig& 
     return duty < _max_duty_cycle;
 }
 
+uint32_t ResourceManager::effectiveWatchdogMs(const ActuatorConfig& a) const {
+    // Differentiated watchdog: the legitimate max on-time depends on the
+    // actuator's behaviour. NOTE: this uses the CONFIGURED behaviour, not a
+    // per-note override — the reconciliation loop has no event context. For the
+    // intended use (an organ configured with SERVO_TOUCHE, drums with FRAPPE,
+    // etc.) that is exactly right; a note that overrides a FRAPPE actuator to
+    // hold would be cut at the impulse backstop, which is the safe direction.
+    if (a.type == ACT_SERVO) {
+        // SERVO_TOUCHE sustains a note (key held). A servo holds position
+        // mechanically and does not overheat like a coil, so its limit is
+        // separate and may be 0 = unlimited (organ/accordion/drone). The impulse
+        // servo behaviours auto-return in ms, so they use the short backstop.
+        if (a.behavior == SERVO_TOUCHE) return _servo_hold_ms;
+        return _watchdog_ms;
+    }
+    // SOL_HIT_AND_HOLD energises a coil until note-off — it needs a bounded
+    // max-hold for thermal protection, distinct from the FRAPPE impulse backstop.
+    if (a.behavior == SOL_HIT_AND_HOLD) return _solenoid_hold_ms;
+    return _watchdog_ms;
+}
+
 void ResourceManager::checkWatchdog(uint8_t actuator_id, ActuatorConfig& actuator) {
     if (actuator_id >= MAX_ACTUATORS) return;
     if (!actuator.state.active) return;
+    uint32_t limit_ms = effectiveWatchdogMs(actuator);
+    if (limit_ms == 0) return;   // watchdog disabled for this behaviour (unlimited hold)
     ActuatorSafetyState& state = _actuator_safety[actuator_id];
     uint32_t now_us = (uint32_t)esp_timer_get_time();
     uint32_t elapsed_ms = (now_us - state.last_activity_us) / 1000;
-    if (elapsed_ms >= _watchdog_ms) {
+    if (elapsed_ms >= limit_ms) {
         state.watchdog_triggered = true;
         // AUDIT FIX (P0.2): only declare the actuator inactive if the hardware
         // stop actually reached the PCA. If it failed (driver missing / I²C
