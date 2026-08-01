@@ -32,8 +32,19 @@ uint16_t JitterBuffer::getDepth() const {
 
 bool JitterBuffer::insert(const MidiMessage& msg) {
     if (_count >= JITTER_BUFFER_SIZE) {
-        // Buffer full -- the most recent message is lost
-        return false;
+        // AUDIT FIX (safety): never silently drop a note release. Losing a Note
+        // Off leaves a TOUCHE servo / hit-and-hold solenoid energized until the
+        // watchdog trips. When the buffer is full and the incoming message is a
+        // release (Note Off, or Note On with velocity 0 = Note Off per MIDI
+        // convention), evict the OLDEST queued message to make room so the
+        // release is always admitted. Non-release messages are still dropped
+        // when full (a lost Note On only means a missed strike, not a stuck
+        // output).
+        bool is_release = (msg.type == MIDI_NOTE_OFF) ||
+                          (msg.type == MIDI_NOTE_ON && msg.data2 == 0);
+        if (!is_release) return false;
+        _tail = (_tail + 1) % JITTER_BUFFER_SIZE;   // drop oldest
+        _count--;
     }
 
     _buffer[_head] = msg;

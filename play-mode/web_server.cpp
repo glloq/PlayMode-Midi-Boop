@@ -42,10 +42,14 @@ namespace {
         s_ap_token = String(buf);
     }
 
-    // True when auth is not required (STA / non-AP) — the local LAN is the
-    // trust boundary. In pure AP mode the token is required.
+    // True when auth is not required (non-AP) — the local LAN is the trust
+    // boundary. Whenever the AP interface is up the token IS required.
+    // AUDIT FIX: the old `|| (WIFI_STA)` term exempted auth as soon as the STA
+    // bit was set, which in a combined WIFI_AP_STA mode would serve kill switch
+    // / factory reset / config writes over the open AP with no token. Gate
+    // solely on the AP bit so a future AP+STA/provisioning mode stays locked.
     bool authExempt() {
-        return !(WiFi.getMode() & WIFI_AP) || (WiFi.getMode() & WIFI_STA);
+        return !(WiFi.getMode() & WIFI_AP);
     }
 
     // AUDIT FIX (P0.9): validate a token string carried by a WebSocket command
@@ -841,6 +845,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
     strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
     inst.midi_channel       = uiChannelToInternal(doc["channel"] | 0);
     inst.bus_id             = doc["bus_id"] | 0;
+    if (inst.bus_id > 1) inst.bus_id = 0;   // AUDIT FIX: clamp to a valid bus
     inst.default_latency_ms = doc["latency_ms"] | 10;
     inst.auto_calibration   = doc["auto_cal"] | false;
     inst.enabled            = doc["enabled"] | true;
@@ -857,37 +862,62 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
         }
     }
 
-    // If an index is provided → update existing instrument
+    // If an index is provided → update existing instrument.
+    // AUDIT FIX (P1): validate the index as a SIGNED int before narrowing to
+    // uint8_t. The old cast `(uint8_t)doc["index"].as<int>()` wrapped a value
+    // like 256 to 0 or 300 to 44, then passed `idx < count` and silently
+    // overwrote an unrelated instrument with the caller's payload.
     if (!doc["index"].isNull()) {
-        uint8_t idx = (uint8_t)(doc["index"].as<int>());
-        InstrumentConfig* instruments = _config->getInstruments();
+        int req_idx = doc["index"].as<int>();
         uint8_t count = _config->getInstrumentCount();
-        if (idx < count) {
-            // Preserve actuator/note associations if not provided
-            if (acts.isNull()) {
-                inst.actuator_count = instruments[idx].actuator_count;
-                memcpy(inst.actuator_ids, instruments[idx].actuator_ids, sizeof(inst.actuator_ids));
-                memcpy(inst.midi_notes, instruments[idx].midi_notes, sizeof(inst.midi_notes));
-            }
-            instruments[idx] = inst;
-            if (_dispatcher) _dispatcher->refreshConfig();
-            request->send(200, "application/json", "{\"ok\":true}");
+        if (req_idx < 0 || req_idx >= (int)count) {
+            request->send(400, "application/json",
+                          "{\"error\":\"invalid instrument index\"}");
             return;
         }
-    }
-
-    if (_config->addInstrument(inst)) {
-        // Automatically create an empty routing entry for this new instrument
-        // (routing_count must always remain == instrument_count)
-        uint8_t newIdx = _config->getInstrumentCount() - 1;
-        MidiRoutingConfig emptyRouting = {};
-        emptyRouting.instrument_index = newIdx;
-        _config->addRoutingConfig(emptyRouting);
+        uint8_t idx = (uint8_t)req_idx;
+        // AUDIT FIX: serialise the struct copy with the actuator lock (matches
+        // the peer config-write handlers) so it does not interleave with a
+        // Core-1 config edit / scheduler resync.
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json",
+                          "{\"error\":\"configuration busy\"}");
+            return;
+        }
+        InstrumentConfig* instruments = _config->getInstruments();
+        // Preserve actuator/note associations if not provided
+        if (acts.isNull()) {
+            inst.actuator_count = instruments[idx].actuator_count;
+            memcpy(inst.actuator_ids, instruments[idx].actuator_ids, sizeof(inst.actuator_ids));
+            memcpy(inst.midi_notes, instruments[idx].midi_notes, sizeof(inst.midi_notes));
+        }
+        instruments[idx] = inst;
         if (_dispatcher) _dispatcher->refreshConfig();
         request->send(200, "application/json", "{\"ok\":true}");
-    } else {
-        request->send(400, "application/json",
-                      "{\"error\":\"max instruments reached\"}");
+        return;
+    }
+
+    {
+        ActuatorLockGuard guard(*_config);
+        if (!guard.locked()) {
+            request->send(503, "application/json",
+                          "{\"error\":\"configuration busy\"}");
+            return;
+        }
+        if (_config->addInstrument(inst)) {
+            // Automatically create an empty routing entry for this new instrument
+            // (routing_count must always remain == instrument_count)
+            uint8_t newIdx = _config->getInstrumentCount() - 1;
+            MidiRoutingConfig emptyRouting = {};
+            emptyRouting.instrument_index = newIdx;
+            _config->addRoutingConfig(emptyRouting);
+            if (_dispatcher) _dispatcher->refreshConfig();
+            request->send(200, "application/json", "{\"ok\":true}");
+        } else {
+            request->send(400, "application/json",
+                          "{\"error\":\"max instruments reached\"}");
+        }
     }
 }
 

@@ -156,6 +156,8 @@
 #define CAL_ONSET_MIN_THRESHOLD 500     // Minimum absolute threshold (LSB on 24 bits)
 #define CAL_INTER_RETRY_MS      600     // Delay between retries (ms)
 #define CAL_TRIGGER_VELOCITY    110     // MIDI velocity for calibration strikes
+#define CAL_AMBIENT_TIMEOUT_MS  2000    // Max time to collect ambient samples before
+                                        // declaring the mic/I²S dead (CAL_ERROR)
 
 // --- Test Manager (Phase 8) ---
 #define TEST_DEFAULT_VELOCITY       100     // Default velocity for tests

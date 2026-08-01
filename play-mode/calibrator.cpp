@@ -118,6 +118,15 @@ void Calibrator::update() {
 
     // -------------------------------------------------------------------------
     case CAL_AMBIENT: {
+        // AUDIT FIX (F2): bound this state. If the mic disconnects or I²S errors
+        // persistently, readChunk() returns false forever, _ambient_sample_count
+        // never reaches `needed`, and the calibrator hangs in CAL_AMBIENT with
+        // isRunning()==true — permanently blocking all future calibration.
+        if ((now_us - _state_enter_us) > (uint32_t)CAL_AMBIENT_TIMEOUT_MS * 1000UL) {
+            Serial.println("[CAL] Ambient measurement timed out — mic/I2S fault");
+            enterState(CAL_ERROR);
+            break;
+        }
         // Read samples to measure ambient noise (mean |sample|)
         if (!readChunk() || _chunk_samples == 0) break;
 
@@ -163,16 +172,25 @@ void Calibrator::update() {
 
     // -------------------------------------------------------------------------
     case CAL_RECORDING: {
-        if (!readChunk()) break;
+        // AUDIT FIX (F3): do NOT early-break on a failed read — the timeout
+        // check below must run every update() so a persistent I²S read error
+        // cannot hang the state machine in CAL_RECORDING. Just skip onset
+        // detection for this tick when no chunk was read.
+        bool got_chunk = readChunk();
 
-        if (_chunk_samples > 0) {
+        if (got_chunk && _chunk_samples > 0) {
             int32_t onset_idx = detectOnset();
             if (onset_idx >= 0) {
                 // Onset detected — calculate latency in samples since trigger
                 uint32_t onset_sample = _samples_after_trigger
                                         - _chunk_samples
                                         + (uint32_t)onset_idx;
-                uint32_t latency_us   = onset_sample * 1000000UL / CAL_SAMPLE_RATE;
+                // AUDIT FIX (F4): 64-bit intermediate. onset_sample can reach
+                // ~5600 (350 ms window @ 16 kHz); onset_sample * 1000000 in
+                // 32-bit overflows for onset_sample > 4294 (~268 ms), yielding a
+                // garbage latency that corrupts the average and the stored
+                // ActuatorConfig::latency_ms.
+                uint32_t latency_us   = (uint32_t)((uint64_t)onset_sample * 1000000ULL / CAL_SAMPLE_RATE);
 
                 Serial.printf("[CAL] Act %d attempt %d/%d: onset sample=%lu -> %lu us (%lu ms)\n",
                               _cur_act_id, _cur_try + 1, CAL_RETRIES,

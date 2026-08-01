@@ -300,21 +300,31 @@ bool ConfigManager::save() {
         return false;
     }
 
+    // AUDIT FIX (P1-1): compute the exact expected length so we can detect a
+    // TRUNCATED write (e.g. LittleFS full → file.write() returns short and
+    // ArduinoJson stops early with written > 0). Previously only written==0 and
+    // on_disk==0 were caught, so a truncated-but-nonzero temp file passed both
+    // guards and was rotated over the live config; a second failed save then
+    // overwrote the .bak too — losing BOTH copies permanently. Requiring an
+    // exact byte-complete match before committing prevents that.
+    size_t expected = measureJsonPretty(doc);
     size_t written = serializeJsonPretty(doc, file);
     file.close();
 
-    if (written == 0) {
-        Serial.println("[CONFIG] Serialization produced 0 bytes — aborting save");
+    if (written == 0 || written != expected) {
+        Serial.printf("[CONFIG] Short/failed serialize (%u/%u bytes) — aborting save\n",
+                      (unsigned)written, (unsigned)expected);
         LittleFS.remove(CONFIG_TMP_PATH);
         return false;
     }
 
-    // Verify the temp file is non-empty on disk before committing.
+    // Verify the temp file is byte-complete on disk before committing.
     File verify = LittleFS.open(CONFIG_TMP_PATH, "r");
     size_t on_disk = verify ? verify.size() : 0;
     if (verify) verify.close();
-    if (on_disk == 0) {
-        Serial.println("[CONFIG] Temp file empty on disk — aborting save");
+    if (on_disk != expected) {
+        Serial.printf("[CONFIG] Temp file incomplete on disk (%u/%u bytes) — aborting save\n",
+                      (unsigned)on_disk, (unsigned)expected);
         LittleFS.remove(CONFIG_TMP_PATH);
         return false;
     }
@@ -702,15 +712,23 @@ bool ConfigManager::removeInstrument(uint8_t index) {
     _instruments[_instrument_count - 1] = {};
     _instrument_count--;
 
-    // Shift corresponding routings and update instrument_index values
-    if (index < _routing_count) {
-        for (uint8_t i = index; i < _routing_count - 1; i++) {
-            _routing_configs[i] = _routing_configs[i + 1];
-            _routing_configs[i].instrument_index = i;
-        }
-        _routing_configs[_routing_count - 1] = {};
-        _routing_count--;
+    // AUDIT FIX (P1-3): routings are matched to instruments by their
+    // `instrument_index` FIELD (getRoutingForInstrument searches by field), not
+    // by array position — the two arrays are not guaranteed parallel. The old
+    // code renumbered positionally, which deleted/mislabelled the wrong
+    // routing whenever they had diverged. Instead: drop the routing(s) whose
+    // instrument_index == the removed index, compact the array, and decrement
+    // instrument_index on every surviving routing that referenced an instrument
+    // AFTER the removed one (those instruments just shifted down by one).
+    uint8_t w = 0;
+    for (uint8_t r = 0; r < _routing_count; r++) {
+        if (_routing_configs[r].instrument_index == index) continue;  // drop
+        MidiRoutingConfig kept = _routing_configs[r];
+        if (kept.instrument_index > index) kept.instrument_index--;
+        _routing_configs[w++] = kept;
     }
+    for (uint8_t r = w; r < _routing_count; r++) _routing_configs[r] = {};
+    _routing_count = w;
 
     return true;
 }
